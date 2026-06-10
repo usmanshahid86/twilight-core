@@ -1,0 +1,41 @@
+package types
+
+// Event types emitted by x/coreslot. Validator-affecting changes are only ever
+// applied in EndBlock, so the consensus-facing events
+// (coreslot_validator_update_emitted, coreslot_key_rotated) originate there.
+const (
+	EventTypeRegistered             = "coreslot_registered"
+	EventTypeActivated              = "coreslot_activated"
+	EventTypeInactivated            = "coreslot_inactivated"
+	EventTypeSuspended              = "coreslot_suspended"
+	EventTypeRemoved                = "coreslot_removed"
+	EventTypeKeyRotationRequested   = "coreslot_key_rotation_requested"
+	EventTypeKeyRotated             = "coreslot_key_rotated"
+	EventTypePayoutUpdated          = "coreslot_payout_updated"
+	EventTypeMetadataUpdated        = "coreslot_metadata_updated"
+	EventTypeParamsUpdated          = "coreslot_params_updated"
+	EventTypeValidatorUpdateEmitted = "coreslot_validator_update_emitted"
+	EventTypeRotationCancelled      = "coreslot_rotation_cancelled"
+)
+
+// Event attribute keys.
+const (
+	AttributeKeySlotID              = "slot_id"
+	AttributeKeyOperatorAddress     = "operator_address"
+	AttributeKeyOldStatus           = "old_status"
+	AttributeKeyNewStatus           = "new_status"
+	AttributeKeyConsensusAddress    = "consensus_address"
+	AttributeKeyOldConsensusAddress = "old_consensus_address"
+	AttributeKeyNewConsensusAddress = "new_consensus_address"
+	AttributeKeyPower               = "power"
+	AttributeKeyHeight              = "height"
+	AttributeKeyEffectiveHeight     = "effective_height"
+	AttributeKeyReason              = "reason"
+	AttributeKeyAuthority           = "authority"
+)
+
+// Reason values used on coreslot_rotation_cancelled.
+const (
+	RotationCancelReasonLifecycle = "lifecycle_change"
+	RotationCancelReasonStale     = "stale_rotation"
+)

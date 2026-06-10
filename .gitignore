@@ -1,0 +1,79 @@
+# Include this in the root of your Go project
+
+# Binaries and Executables
+# ------------------------
+# Compiled applications
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Common Go binary outputs (add your specific binary name if preferred)
+bin/
+out/
+dist/
+
+# Test and Coverage Reports
+# -------------------------
+*.test
+*.out
+*.prof
+*.pprof
+coverage.txt
+
+# Dependency Directories
+# ----------------------
+# Un-comment the line below if you vendor your dependencies 
+# and do not want to commit the vendor folder.
+# vendor/
+
+# Go workspaces
+go.work
+go.work.sum
+
+# Development Tools & IDEs
+# ------------------------
+# JetBrains / GoLand
+.idea/
+*.iml
+*.iws
+
+# Visual Studio Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Delve debugger temporary binaries
+__debug_bin
+
+# Local Environment Variables
+# ---------------------------
+# Never commit credentials or secrets
+.env
+.env.local
+.env.*.local
+
+# macOS Specific
+# --------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.VolumeIcon.icns
+.com.apple.timemachine.donotbackup
+
+# Directories potentially created on macOS
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+/build
+/docs/research
+

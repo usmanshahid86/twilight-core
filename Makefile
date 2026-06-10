@@ -1,0 +1,42 @@
+.PHONY: build test fmt proto localnet-init localnet-smoke localnet-agree \
+	drill-lifecycle drill-restart-rotation drill-quorum drills
+
+build:
+	go build ./cmd/nyksd
+
+test:
+	go test ./...
+
+fmt:
+	gofmt -w $$(find . -name '*.go' -not -path './vendor/*')
+
+proto:
+	PATH="$${PATH}:$$(go env GOPATH)/bin" ./scripts/protocgen.sh
+
+localnet-init:
+	./scripts/localnet/init.sh
+
+localnet-smoke:
+	./scripts/localnet/smoke.sh
+
+# Cross-node app/validators/next-validators hash agreement against an already
+# running localnet (use after `make localnet-init` + scripts/localnet/start.sh).
+localnet-agree:
+	./scripts/localnet/agree.sh
+
+# Operational drills (each spins up its own four-node localnet and tears it down).
+drill-lifecycle:
+	./scripts/localnet/lifecycle-e2e.sh
+
+drill-restart-rotation:
+	./scripts/localnet/restart-rotation.sh
+
+drill-quorum:
+	./scripts/localnet/quorum-drill.sh
+
+drills:
+	@RUN_ID="$${RUN_ID:-$$(date -u +%Y%m%d-%H%M%S)-$$$$}"; \
+	export RUN_ID; \
+	./scripts/localnet/lifecycle-e2e.sh; \
+	./scripts/localnet/restart-rotation.sh; \
+	./scripts/localnet/quorum-drill.sh

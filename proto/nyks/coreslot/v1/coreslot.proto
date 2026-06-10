@@ -1,0 +1,86 @@
+syntax = "proto3";
+package nyks.coreslot.v1;
+
+import "google/protobuf/any.proto";
+import "cosmos_proto/cosmos.proto";
+
+option go_package = "github.com/nyks/nyks-core/x/coreslot/types";
+
+enum SlotStatus {
+  SLOT_STATUS_UNSPECIFIED = 0;
+  SLOT_STATUS_PENDING = 1;
+  SLOT_STATUS_ACTIVE = 2;
+  SLOT_STATUS_INACTIVE = 3;
+  SLOT_STATUS_SUSPENDED = 4;
+  SLOT_STATUS_REMOVED = 5;
+}
+
+message OperatorMetadata {
+  string moniker = 1;
+  string identity = 2;
+  string website = 3;
+  string security_contact = 4;
+  string details = 5;
+}
+
+message CoreSlot {
+  uint64 slot_id = 1;
+  string operator_address = 2;
+  google.protobuf.Any consensus_pubkey = 3 [(cosmos_proto.accepts_interface) = "cosmos.crypto.PubKey"];
+  string payout_address = 4;
+  SlotStatus status = 5;
+  int64 consensus_power = 6;
+  string reward_weight = 7;
+  int64 created_height = 8;
+  int64 activated_height = 9;
+  int64 updated_height = 10;
+  int64 suspended_height = 11;
+  int64 removed_height = 12;
+  OperatorMetadata metadata = 13;
+}
+
+message Params {
+  string authority = 1;
+  string emergency_authority = 2;
+  int64 slot_voting_power = 3;
+  uint64 min_active_slots = 4;
+  uint64 max_active_slots = 5;
+  uint64 activation_delay_blocks = 6;
+  uint64 key_rotation_delay_blocks = 7;
+  uint64 removal_delay_blocks = 8;
+  uint64 consensus_key_reuse_lockout = 9;
+  bool allow_self_registration = 10;
+  bool allow_emergency_below_min_active = 11;
+}
+
+message PendingKeyRotation {
+  uint64 slot_id = 1;
+  google.protobuf.Any old_pubkey = 2 [(cosmos_proto.accepts_interface) = "cosmos.crypto.PubKey"];
+  google.protobuf.Any new_pubkey = 3 [(cosmos_proto.accepts_interface) = "cosmos.crypto.PubKey"];
+  int64 requested_height = 4;
+  int64 effective_height = 5;
+}
+
+message LastAppliedValidator {
+  uint64 slot_id = 1;
+  google.protobuf.Any consensus_pubkey = 2 [(cosmos_proto.accepts_interface) = "cosmos.crypto.PubKey"];
+  int64 power = 3;
+}
+
+message ReservedConsensusAddress {
+  bytes cons_address = 1;
+  uint64 slot_id = 2;
+  int64 reserved_until = 3;
+  string reason = 4;
+}
+
+message OperatorRewardWeight {
+  uint64 slot_id = 1;
+  string base_weight = 2;
+  string uptime_weight = 3;
+  string performance_weight = 4;
+  string stake_weight = 5;
+  string external_weight = 6;
+  string final_weight = 7;
+  int64 updated_height = 8;
+}

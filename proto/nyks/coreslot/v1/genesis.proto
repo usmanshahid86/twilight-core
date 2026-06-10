@@ -1,0 +1,16 @@
+syntax = "proto3";
+package nyks.coreslot.v1;
+
+import "nyks/coreslot/v1/coreslot.proto";
+
+option go_package = "github.com/nyks/nyks-core/x/coreslot/types";
+
+message GenesisState {
+  Params params = 1;
+  repeated CoreSlot slots = 2;
+  repeated PendingKeyRotation pending_key_rotations = 3;
+  repeated ReservedConsensusAddress reserved_consensus_addresses = 4;
+  repeated OperatorRewardWeight reward_weights = 5;
+  repeated LastAppliedValidator last_applied_validators = 6;
+  uint64 next_slot_id = 7;
+}

@@ -1,0 +1,57 @@
+syntax = "proto3";
+package nyks.coreslot.v1;
+
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "google/api/annotations.proto";
+import "nyks/coreslot/v1/coreslot.proto";
+
+option go_package = "github.com/nyks/nyks-core/x/coreslot/types";
+
+service Query {
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/nyks/coreslot/v1/params";
+  }
+  rpc CoreSlot(QueryCoreSlotRequest) returns (QueryCoreSlotResponse) {
+    option (google.api.http).get = "/nyks/coreslot/v1/slots/{slot_id}";
+  }
+  rpc CoreSlots(QueryCoreSlotsRequest) returns (QueryCoreSlotsResponse) {
+    option (google.api.http).get = "/nyks/coreslot/v1/slots";
+  }
+  rpc ActiveCoreSlots(QueryActiveCoreSlotsRequest) returns (QueryCoreSlotsResponse) {
+    option (google.api.http).get = "/nyks/coreslot/v1/slots/active";
+  }
+  rpc CoreSlotByOperator(QueryCoreSlotByOperatorRequest) returns (QueryCoreSlotResponse) {
+    option (google.api.http).get = "/nyks/coreslot/v1/operators/{operator_address}";
+  }
+  rpc CoreSlotByConsensusAddress(QueryCoreSlotByConsensusAddressRequest) returns (QueryCoreSlotResponse) {
+    option (google.api.http).get = "/nyks/coreslot/v1/consensus/{consensus_address}";
+  }
+  rpc PendingKeyRotations(QueryPendingKeyRotationsRequest) returns (QueryPendingKeyRotationsResponse);
+  rpc LastAppliedValidators(QueryLastAppliedValidatorsRequest) returns (QueryLastAppliedValidatorsResponse);
+  rpc ReservedConsensusAddress(QueryReservedConsensusAddressRequest) returns (QueryReservedConsensusAddressResponse);
+  rpc RewardWeight(QueryRewardWeightRequest) returns (QueryRewardWeightResponse);
+}
+
+message QueryParamsRequest {}
+message QueryParamsResponse { Params params = 1; }
+message QueryCoreSlotRequest { uint64 slot_id = 1; }
+message QueryCoreSlotByOperatorRequest { string operator_address = 1; }
+message QueryCoreSlotByConsensusAddressRequest { string consensus_address = 1; }
+message QueryCoreSlotResponse { CoreSlot slot = 1; }
+message QueryCoreSlotsRequest {
+  SlotStatus status = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message QueryCoreSlotsResponse {
+  repeated CoreSlot slots = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+message QueryActiveCoreSlotsRequest {}
+message QueryPendingKeyRotationsRequest {}
+message QueryPendingKeyRotationsResponse { repeated PendingKeyRotation rotations = 1; }
+message QueryLastAppliedValidatorsRequest {}
+message QueryLastAppliedValidatorsResponse { repeated LastAppliedValidator validators = 1; }
+message QueryReservedConsensusAddressRequest { string consensus_address = 1; }
+message QueryReservedConsensusAddressResponse { ReservedConsensusAddress reservation = 1; }
+message QueryRewardWeightRequest { uint64 slot_id = 1; }
+message QueryRewardWeightResponse { OperatorRewardWeight reward_weight = 1; }

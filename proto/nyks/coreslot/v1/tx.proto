@@ -1,0 +1,97 @@
+syntax = "proto3";
+package nyks.coreslot.v1;
+
+import "amino/amino.proto";
+import "cosmos/msg/v1/msg.proto";
+import "google/protobuf/any.proto";
+import "cosmos_proto/cosmos.proto";
+import "nyks/coreslot/v1/coreslot.proto";
+
+option go_package = "github.com/nyks/nyks-core/x/coreslot/types";
+
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+  rpc RegisterCoreSlot(MsgRegisterCoreSlot) returns (MsgRegisterCoreSlotResponse);
+  rpc ActivateCoreSlot(MsgActivateCoreSlot) returns (MsgActivateCoreSlotResponse);
+  rpc InactivateCoreSlot(MsgInactivateCoreSlot) returns (MsgInactivateCoreSlotResponse);
+  rpc SuspendCoreSlot(MsgSuspendCoreSlot) returns (MsgSuspendCoreSlotResponse);
+  rpc RemoveCoreSlot(MsgRemoveCoreSlot) returns (MsgRemoveCoreSlotResponse);
+  rpc RotateConsensusKey(MsgRotateConsensusKey) returns (MsgRotateConsensusKeyResponse);
+  rpc UpdatePayoutAddress(MsgUpdatePayoutAddress) returns (MsgUpdatePayoutAddressResponse);
+  rpc UpdateOperatorMetadata(MsgUpdateOperatorMetadata) returns (MsgUpdateOperatorMetadataResponse);
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+}
+
+message MsgRegisterCoreSlot {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "nyks/coreslot/MsgRegisterCoreSlot";
+  string authority = 1;
+  string operator_address = 2;
+  google.protobuf.Any consensus_pubkey = 3 [(cosmos_proto.accepts_interface) = "cosmos.crypto.PubKey"];
+  string payout_address = 4;
+  OperatorMetadata metadata = 5;
+}
+message MsgRegisterCoreSlotResponse { uint64 slot_id = 1; }
+
+message MsgActivateCoreSlot {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1;
+  uint64 slot_id = 2;
+}
+message MsgActivateCoreSlotResponse {}
+
+message MsgInactivateCoreSlot {
+  option (cosmos.msg.v1.signer) = "authority_or_operator";
+  string authority_or_operator = 1;
+  uint64 slot_id = 2;
+  string reason = 3;
+}
+message MsgInactivateCoreSlotResponse {}
+
+message MsgSuspendCoreSlot {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1;
+  uint64 slot_id = 2;
+  string reason = 3;
+  string evidence_reference = 4;
+}
+message MsgSuspendCoreSlotResponse {}
+
+message MsgRemoveCoreSlot {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1;
+  uint64 slot_id = 2;
+  string reason = 3;
+}
+message MsgRemoveCoreSlotResponse {}
+
+message MsgRotateConsensusKey {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1;
+  uint64 slot_id = 2;
+  google.protobuf.Any new_consensus_pubkey = 3 [(cosmos_proto.accepts_interface) = "cosmos.crypto.PubKey"];
+}
+message MsgRotateConsensusKeyResponse {}
+
+message MsgUpdatePayoutAddress {
+  option (cosmos.msg.v1.signer) = "operator";
+  string operator = 1;
+  uint64 slot_id = 2;
+  string new_payout_address = 3;
+}
+message MsgUpdatePayoutAddressResponse {}
+
+message MsgUpdateOperatorMetadata {
+  option (cosmos.msg.v1.signer) = "operator";
+  string operator = 1;
+  uint64 slot_id = 2;
+  OperatorMetadata metadata = 3;
+}
+message MsgUpdateOperatorMetadataResponse {}
+
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1;
+  Params params = 2;
+}
+message MsgUpdateParamsResponse {}
