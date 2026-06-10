@@ -5,7 +5,7 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
-	"github.com/nyks/nyks-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) ([]abci.ValidatorUpdate, error) {

@@ -1,9 +1,9 @@
 syntax = "proto3";
-package nyks.coreslot.v1;
+package twilight.coreslot.v1;
 
-import "nyks/coreslot/v1/coreslot.proto";
+import "twilight/coreslot/v1/coreslot.proto";
 
-option go_package = "github.com/nyks/nyks-core/x/coreslot/types";
+option go_package = "github.com/twilight-project/twilight-core/x/coreslot/types";
 
 message GenesisState {
   Params params = 1;

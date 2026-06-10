@@ -1,7 +1,7 @@
 # x/coreslot
 
 `x/coreslot` is the sole source of truth and sole CometBFT validator-update
-emitter in Nyks v1.
+emitter in Twilight v1.
 
 The keeper stores slots, unique operator and consensus-key indexes, key
 reservations, delayed key rotations, last-applied validators, and independent

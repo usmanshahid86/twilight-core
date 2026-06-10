@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Cross-node hash-agreement check for the nyks localnet.
+# Cross-node hash-agreement check for the twilight localnet.
 #
 # Ported and adapted from the Twilight experiment harness
 # (twilight-core-slot-experiments scripts/devnet.sh::cmd_status and
@@ -22,12 +22,12 @@ set -euo pipefail
 # every correctly configured node computes the identical value for that H, so a
 # mismatch is a real divergence, not the lag.
 #
-# Staking is omitted from nyks-core, so there is no staking_updates_count to
+# Staking is omitted from twilight-core, so there is no staking_updates_count to
 # scrape (it is structurally zero). We optionally show CometBFT's latest
 # num_val_updates from each node's log as non-fatal information.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-NET="${NYKS_LOCALNET_HOME:-/tmp/nyks-localnet}"
+NET="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-localnet}"
 NODE_COUNT="${NODE_COUNT:-4}"
 MIN_HEIGHT="${MIN_HEIGHT:-3}"
 DRILL="${DRILL:-localnet}"
@@ -49,7 +49,7 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1
 need curl
 need jq
 
-# nyks localnet RPC port scheme (see scripts/localnet/init.sh): 26657 + i*100.
+# twilight localnet RPC port scheme (see scripts/localnet/init.sh): 26657 + i*100.
 rpc_port() { echo $((26657 + $1 * 100)); }
 
 rpc_get() { curl -fsS "http://127.0.0.1:$(rpc_port "$1")$2"; }

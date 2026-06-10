@@ -1,30 +1,30 @@
 syntax = "proto3";
-package nyks.coreslot.v1;
+package twilight.coreslot.v1;
 
 import "cosmos/base/query/v1beta1/pagination.proto";
 import "google/api/annotations.proto";
-import "nyks/coreslot/v1/coreslot.proto";
+import "twilight/coreslot/v1/coreslot.proto";
 
-option go_package = "github.com/nyks/nyks-core/x/coreslot/types";
+option go_package = "github.com/twilight-project/twilight-core/x/coreslot/types";
 
 service Query {
   rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
-    option (google.api.http).get = "/nyks/coreslot/v1/params";
+    option (google.api.http).get = "/twilight/coreslot/v1/params";
   }
   rpc CoreSlot(QueryCoreSlotRequest) returns (QueryCoreSlotResponse) {
-    option (google.api.http).get = "/nyks/coreslot/v1/slots/{slot_id}";
+    option (google.api.http).get = "/twilight/coreslot/v1/slots/{slot_id}";
   }
   rpc CoreSlots(QueryCoreSlotsRequest) returns (QueryCoreSlotsResponse) {
-    option (google.api.http).get = "/nyks/coreslot/v1/slots";
+    option (google.api.http).get = "/twilight/coreslot/v1/slots";
   }
   rpc ActiveCoreSlots(QueryActiveCoreSlotsRequest) returns (QueryCoreSlotsResponse) {
-    option (google.api.http).get = "/nyks/coreslot/v1/slots/active";
+    option (google.api.http).get = "/twilight/coreslot/v1/slots/active";
   }
   rpc CoreSlotByOperator(QueryCoreSlotByOperatorRequest) returns (QueryCoreSlotResponse) {
-    option (google.api.http).get = "/nyks/coreslot/v1/operators/{operator_address}";
+    option (google.api.http).get = "/twilight/coreslot/v1/operators/{operator_address}";
   }
   rpc CoreSlotByConsensusAddress(QueryCoreSlotByConsensusAddressRequest) returns (QueryCoreSlotResponse) {
-    option (google.api.http).get = "/nyks/coreslot/v1/consensus/{consensus_address}";
+    option (google.api.http).get = "/twilight/coreslot/v1/consensus/{consensus_address}";
   }
   rpc PendingKeyRotations(QueryPendingKeyRotationsRequest) returns (QueryPendingKeyRotationsResponse);
   rpc LastAppliedValidators(QueryLastAppliedValidatorsRequest) returns (QueryLastAppliedValidatorsResponse);

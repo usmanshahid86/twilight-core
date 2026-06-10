@@ -4,7 +4,7 @@ set -euo pipefail
 # Generate a fresh CometBFT ed25519 consensus key for CoreSlot use.
 #
 # There is no bespoke key tool; CometBFT writes a brand-new priv_validator_key.json
-# whenever a node home is initialized. We `nyksd init` into a throwaway home and
+# whenever a node home is initialized. We `twilightd init` into a throwaway home and
 # harvest ONLY its priv_validator_key.json (the genesis/config it also writes are
 # discarded). This is the same approach used to add or rotate slot keys safely —
 # we never hand-edit private key material.
@@ -14,15 +14,15 @@ set -euo pipefail
 # Output (two tab-separated fields on stdout):
 #   <base64-ed25519-pubkey>\t<path-to-priv_validator_key.json>
 #
-# The base64 pubkey is the value `nyksd coreslot register/rotate-key` expects.
+# The base64 pubkey is the value `twilightd coreslot register/rotate-key` expects.
 # The priv_validator_key.json path is what you copy into a node's config/ dir to
 # make that node sign with the new key (used by the restart-after-rotation drill).
 
 NAME="${1:?usage: gen-consensus-key.sh <name>}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-BIN="${BIN:-$ROOT/build/nyksd}"
-NET="${NYKS_LOCALNET_HOME:-/tmp/nyks-localnet}"
-CHAIN_ID="${CHAIN_ID:-nyks-local-1}"
+BIN="${BIN:-$ROOT/build/twilightd}"
+NET="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-localnet}"
+CHAIN_ID="${CHAIN_ID:-twilight-localnet-1}"
 
 OUT_DIR="$NET/keys/$NAME"
 rm -rf "$OUT_DIR"

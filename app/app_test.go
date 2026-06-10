@@ -11,7 +11,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
-	"github.com/nyks/nyks-core/app"
+	"github.com/twilight-project/twilight-core/app"
 )
 
 func TestStakingRoutesAndModuleAreOmitted(t *testing.T) {

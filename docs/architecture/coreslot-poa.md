@@ -1,6 +1,6 @@
 # Core-Slot PoA Architecture
 
-Nyks v1 uses Cosmos SDK `v0.53.7` and CometBFT `v0.38.21`. The runtime app
+Twilight v1 uses Cosmos SDK `v0.53.7` and CometBFT `v0.38.21`. The runtime app
 includes auth, bank, consensus params, tx, and `x/coreslot`. It deliberately
 omits staking, distribution, slashing, mint, and governance.
 
@@ -25,8 +25,9 @@ address and metadata and may self-inactivate while preserving `MinActiveSlots`.
 
 ## Token And Rewards
 
-`unyks` is the native base denomination; `NYKS` is the six-decimal display
-denomination. There is no inflation or staking reward flow in v1.
+`utwlt` is the native base denomination (the only denom used for stateful
+accounting); `twlt` is the six-decimal display denomination and `TWLT` is the
+symbol. There is no inflation or staking reward flow in v1.
 `OperatorRewardWeight` is stored separately from consensus power so a later
 claim-based reward module can use it without changing consensus.
 

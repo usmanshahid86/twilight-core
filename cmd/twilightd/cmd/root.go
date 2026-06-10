@@ -31,9 +31,9 @@ import (
 	consensus "github.com/cosmos/cosmos-sdk/x/consensus"
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
 
-	"github.com/nyks/nyks-core/app"
-	"github.com/nyks/nyks-core/x/coreslot"
-	coreslotcli "github.com/nyks/nyks-core/x/coreslot/client/cli"
+	"github.com/twilight-project/twilight-core/app"
+	"github.com/twilight-project/twilight-core/x/coreslot"
+	coreslotcli "github.com/twilight-project/twilight-core/x/coreslot/client/cli"
 )
 
 func NewRootCmd() *cobra.Command {
@@ -56,7 +56,7 @@ func NewRootCmd() *cobra.Command {
 	)
 
 	root := &cobra.Command{
-		Use: app.Name + "d", Short: "Nyks Proof-of-Authority node", SilenceErrors: true,
+		Use: app.Name + "d", Short: "Twilight Proof-of-Authority node", SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SetOut(cmd.OutOrStdout())
 			cmd.SetErr(cmd.ErrOrStderr())

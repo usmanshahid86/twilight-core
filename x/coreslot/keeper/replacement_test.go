@@ -10,8 +10,8 @@ import (
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/nyks/nyks-core/x/coreslot/keeper"
-	"github.com/nyks/nyks-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/x/coreslot/keeper"
+	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 // makeOps returns n distinct bech32 operator addresses with the given leading

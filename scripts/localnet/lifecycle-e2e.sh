@@ -5,7 +5,7 @@ set -euo pipefail
 # script-level single-emitter / validator-update provenance guard.
 #
 # Inspired by twilight-core-slot-experiments scripts/scenario1.sh::collect_evidence,
-# but it drives the chain with REAL `nyksd coreslot ...` transactions (no in-app
+# but it drives the chain with REAL `twilightd coreslot ...` transactions (no in-app
 # CORESLOT_SCENARIO1_PLAN hook, no experiment chain code).
 #
 # After every action it asserts four-node app/validators/next-validators hash

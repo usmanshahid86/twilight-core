@@ -77,3 +77,7 @@ Temporary Items
 /build
 /docs/research
 
+
+# Root build binaries (build to build/ instead; never track at repo root)
+/nyksd
+/twilightd

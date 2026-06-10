@@ -10,7 +10,7 @@ import (
 	gogoproto "github.com/cosmos/gogoproto/proto"
 	anypb "github.com/cosmos/gogoproto/types/any"
 
-	"github.com/nyks/nyks-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 func testPubKey(t *testing.T, marker byte) *anypb.Any {

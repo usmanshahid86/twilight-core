@@ -2,7 +2,7 @@
 	drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
-	go build ./cmd/nyksd
+	go build ./cmd/twilightd
 
 test:
 	go test ./...
