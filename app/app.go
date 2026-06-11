@@ -21,15 +21,20 @@ import (
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	_ "github.com/cosmos/cosmos-sdk/x/auth"
+	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	_ "github.com/cosmos/cosmos-sdk/x/auth/tx/config"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	_ "github.com/cosmos/cosmos-sdk/x/bank"
+	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	_ "github.com/cosmos/cosmos-sdk/x/consensus"
 
 	"github.com/twilight-project/twilight-core/app/params"
 	"github.com/twilight-project/twilight-core/x/coreslot"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/x/rewards"
+	rewardskeeper "github.com/twilight-project/twilight-core/x/rewards/keeper"
+	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
 const (
@@ -57,6 +62,9 @@ var DefaultNodeHome = func() string {
 type App struct {
 	*runtime.App
 	CoreSlotKeeper coreslotkeeper.Keeper
+	RewardsKeeper  rewardskeeper.Keeper
+	AccountKeeper  authkeeper.AccountKeeper
+	BankKeeper     bankkeeper.BaseKeeper
 	appCodec       codec.Codec
 }
 
@@ -70,26 +78,53 @@ func EmergencyAuthorityAddress() string {
 
 func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ servertypes.AppOptions, baseAppOptions ...func(*baseapp.BaseApp)) *App {
 	var (
-		builder *runtime.AppBuilder
-		cdc     codec.Codec
+		builder       *runtime.AppBuilder
+		cdc           codec.Codec
+		accountKeeper authkeeper.AccountKeeper
+		bankKeeper    bankkeeper.BaseKeeper
 	)
-	if err := depinject.Inject(depinject.Configs(AppConfig, depinject.Supply(logger)), &builder, &cdc); err != nil {
+	if err := depinject.Inject(
+		depinject.Configs(AppConfig, depinject.Supply(logger)),
+		&builder, &cdc, &accountKeeper, &bankKeeper,
+	); err != nil {
 		panic(err)
 	}
 	runtimeApp := builder.Build(db, traceStore, baseAppOptions...)
-	key := storetypes.NewKVStoreKey(coreslottypes.StoreKey)
-	keeper := coreslotkeeper.NewKeeper(cdc, runtime.NewKVStoreService(key))
-	module := coreslot.NewAppModule(keeper, AuthorityAddress(), EmergencyAuthorityAddress())
-	if err := runtimeApp.RegisterStores(key); err != nil {
+
+	// CoreSlot keeper must be constructed before the rewards keeper: rewards
+	// depends on CoreSlot's read-only interface and must never depend on the
+	// reverse.
+	coreSlotKey := storetypes.NewKVStoreKey(coreslottypes.StoreKey)
+	coreSlotKeeper := coreslotkeeper.NewKeeper(cdc, runtime.NewKVStoreService(coreSlotKey))
+	coreSlotModule := coreslot.NewAppModule(coreSlotKeeper, AuthorityAddress(), EmergencyAuthorityAddress())
+
+	rewardsKey := storetypes.NewKVStoreKey(rewardstypes.StoreKey)
+	rewardsKeeper := rewardskeeper.NewKeeper(
+		cdc,
+		runtime.NewKVStoreService(rewardsKey),
+		accountKeeper,
+		bankKeeper,
+		coreSlotKeeper,
+	)
+	rewardsModule := rewards.NewAppModule(rewardsKeeper)
+
+	if err := runtimeApp.RegisterStores(coreSlotKey, rewardsKey); err != nil {
 		panic(err)
 	}
-	if err := runtimeApp.RegisterModules(module); err != nil {
+	if err := runtimeApp.RegisterModules(coreSlotModule, rewardsModule); err != nil {
 		panic(err)
 	}
 	if err := runtimeApp.Load(loadLatest); err != nil {
 		panic(err)
 	}
-	return &App{App: runtimeApp, CoreSlotKeeper: keeper, appCodec: cdc}
+	return &App{
+		App:            runtimeApp,
+		CoreSlotKeeper: coreSlotKeeper,
+		RewardsKeeper:  rewardsKeeper,
+		AccountKeeper:  accountKeeper,
+		BankKeeper:     bankKeeper,
+		appCodec:       cdc,
+	}
 }
 
 func (a *App) ExportAppStateAndValidators(_ bool, _ []string, modulesToExport []string) (servertypes.ExportedApp, error) {

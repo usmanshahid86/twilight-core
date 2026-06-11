@@ -18,9 +18,12 @@ func TestStakingRoutesAndModuleAreOmitted(t *testing.T) {
 	a := app.New(log.NewNopLogger(), dbm.NewMemDB(), nil, true, sims.EmptyAppOptions{})
 	require.Nil(t, a.MsgServiceRouter().HandlerByTypeURL("/cosmos.staking.v1beta1.MsgDelegate"))
 	require.Nil(t, a.MsgServiceRouter().HandlerByTypeURL("/cosmos.staking.v1beta1.MsgCreateValidator"))
-	_, exists := a.ModuleManager.Modules["staking"]
-	require.False(t, exists)
+	for _, omitted := range []string{"staking", "distribution", "slashing", "gov", "mint"} {
+		_, exists := a.ModuleManager.Modules[omitted]
+		require.Falsef(t, exists, "%s module must remain omitted", omitted)
+	}
 	require.Contains(t, a.ModuleManager.Modules, "coreslot")
+	require.Contains(t, a.ModuleManager.Modules, "rewards")
 
 	emitters := 0
 	for _, appModule := range a.ModuleManager.Modules {

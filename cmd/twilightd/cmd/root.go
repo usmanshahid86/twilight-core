@@ -34,6 +34,7 @@ import (
 	"github.com/twilight-project/twilight-core/app"
 	"github.com/twilight-project/twilight-core/x/coreslot"
 	coreslotcli "github.com/twilight-project/twilight-core/x/coreslot/client/cli"
+	"github.com/twilight-project/twilight-core/x/rewards"
 )
 
 func NewRootCmd() *cobra.Command {
@@ -53,6 +54,9 @@ func NewRootCmd() *cobra.Command {
 		bank.AppModuleBasic{},
 		consensus.AppModuleBasic{},
 		coreslot.NewAppModuleBasic(app.AuthorityAddress(), app.EmergencyAuthorityAddress()),
+		// rewards basic module: codec/genesis/interface registration for `init`.
+		// Tx/query CLI commands are deferred to Phase 9.
+		rewards.NewAppModuleBasic(),
 	)
 
 	root := &cobra.Command{
