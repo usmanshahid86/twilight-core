@@ -1,0 +1,79 @@
+syntax = "proto3";
+package twilight.rewards.v1;
+
+option go_package = "github.com/twilight-project/twilight-core/x/rewards/types";
+
+// Enum numeric values are permanent after release. Future upgrades may add
+// values but must not reuse, reorder, or change existing numeric values.
+enum HalvingMode {
+  HALVING_MODE_UNSPECIFIED = 0;
+  HALVING_MODE_SUPPLY_THRESHOLD = 1;
+}
+
+// Enum numeric values are permanent after release. Future upgrades may add
+// values but must not reuse, reorder, or change existing numeric values.
+enum DistributionMethod {
+  DISTRIBUTION_METHOD_UNSPECIFIED = 0;
+  DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS = 1;
+  DISTRIBUTION_METHOD_WEIGHTED_ACTIVE_BLOCKS = 2;
+  DISTRIBUTION_METHOD_SNAPSHOT_UNIFORM = 3;
+}
+
+// Enum numeric values are permanent after release. Future upgrades may add
+// values but must not reuse, reorder, or change existing numeric values.
+enum RemainderPolicy {
+  REMAINDER_POLICY_UNSPECIFIED = 0;
+  REMAINDER_POLICY_CARRY_FORWARD = 1;
+  REMAINDER_POLICY_BURN = 2;
+}
+
+// Enum numeric values are permanent after release. Future upgrades may add
+// values but must not reuse, reorder, or change existing numeric values.
+enum FeeDistributionMode {
+  FEE_DISTRIBUTION_MODE_UNSPECIFIED = 0;
+  FEE_DISTRIBUTION_MODE_NONE = 1;
+  FEE_DISTRIBUTION_MODE_ACTIVE_SET_POOL = 2;
+  FEE_DISTRIBUTION_MODE_TREASURY_ONLY = 3;
+  FEE_DISTRIBUTION_MODE_BURN = 4;
+}
+
+message Params {
+  reserved 1;
+  bool emissions_enabled = 2;
+  bool epoch_settlement_enabled = 3;
+  bool claims_enabled = 4;
+  string native_denom = 5;
+  string max_supply = 6;
+  string initial_block_subsidy = 7;
+  uint64 target_block_time_seconds = 8;
+  uint64 epoch_length_blocks = 9;
+  HalvingMode halving_mode = 10;
+  DistributionMethod distribution_method = 11;
+  RemainderPolicy remainder_policy = 12;
+  uint64 max_claim_epochs_per_tx = 13;
+  bool fee_collection_enabled = 14;
+  bool fee_distribution_enabled = 15;
+  string fee_denom = 16;
+  FeeDistributionMode fee_distribution_mode = 17;
+  string treasury_address = 18;
+  uint64 emission_treasury_share_bps = 19;
+  uint64 fee_treasury_share_bps = 20;
+  bool weighted_rewards_enabled = 21;
+}
+
+message EpochConfigSnapshot {
+  uint64 snapshot_version = 1;
+  uint64 epoch_length_blocks = 2;
+  DistributionMethod distribution_method = 3;
+  RemainderPolicy remainder_policy = 4;
+  string initial_block_subsidy = 5;
+  HalvingMode halving_mode = 6;
+  bool weighted_rewards_enabled = 7;
+  bool fee_collection_enabled = 8;
+  bool fee_distribution_enabled = 9;
+  string fee_denom = 10;
+  FeeDistributionMode fee_distribution_mode = 11;
+  string treasury_address = 12;
+  uint64 emission_treasury_share_bps = 13;
+  uint64 fee_treasury_share_bps = 14;
+}

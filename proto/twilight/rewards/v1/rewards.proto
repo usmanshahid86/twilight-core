@@ -1,0 +1,62 @@
+syntax = "proto3";
+package twilight.rewards.v1;
+
+import "twilight/rewards/v1/params.proto";
+
+option go_package = "github.com/twilight-project/twilight-core/x/rewards/types";
+
+message RewardsState {
+  uint64 current_epoch = 1;
+  uint64 current_epoch_start_height = 2;
+  string cumulative_emitted = 3;
+  string carry_forward_remainder = 4;
+}
+
+message SlotActiveBlocks {
+  uint64 slot_id = 1;
+  uint64 blocks_active = 2;
+}
+
+message EpochReward {
+  uint64 epoch_number = 1;
+  uint64 start_height = 2;
+  uint64 end_height = 3;
+  string minted_emission = 4;
+  string carry_in = 5;
+  string distributable_fees = 6;
+  string treasury_amount = 7;
+  string reward_pool = 8;
+  string allocated_amount = 9;
+  string carry_out = 10;
+  DistributionMethod distribution_method = 11;
+  RemainderPolicy remainder_policy = 12;
+  repeated EligibleSlotReward rewards = 13;
+  string cumulative_emitted_after_epoch = 14;
+  EpochConfigSnapshot config = 15;
+}
+
+message EligibleSlotReward {
+  uint64 slot_id = 1;
+  string operator_address = 2;
+  string payout_address = 3;
+  uint64 blocks_active = 4;
+  string reward_weight = 5;
+  string effective_weight = 6;
+  string amount = 7;
+  bool claimed = 8;
+  int64 claimed_at_height = 9;
+  // Field 10 was intentionally reserved for the removed claim_tx_hash. Tx
+  // hashes are indexer data and must never be stored in consensus state.
+  reserved 10;
+  uint64 epoch_number = 11;
+}
+
+message NextHalvingInfo {
+  uint64 current_tier = 1;
+  string current_block_subsidy = 2;
+  string next_threshold = 3;
+  string remaining_until_next_halving = 4;
+  string cumulative_emitted = 5;
+  string max_supply = 6;
+  bool has_next_halving = 7;
+}

@@ -1,0 +1,17 @@
+syntax = "proto3";
+package twilight.rewards.v1;
+
+import "twilight/rewards/v1/params.proto";
+import "twilight/rewards/v1/rewards.proto";
+
+option go_package = "github.com/twilight-project/twilight-core/x/rewards/types";
+
+message GenesisState {
+  Params params = 1;
+  RewardsState state = 2;
+  repeated EpochReward finalized_epochs = 3;
+  repeated EligibleSlotReward claim_records = 4;
+  EpochConfigSnapshot current_epoch_config = 5;
+  bool has_pending_params = 6;
+  Params pending_params = 7;
+}

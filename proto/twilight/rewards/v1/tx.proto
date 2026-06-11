@@ -1,0 +1,54 @@
+syntax = "proto3";
+package twilight.rewards.v1;
+
+import "amino/amino.proto";
+import "cosmos/msg/v1/msg.proto";
+import "twilight/rewards/v1/params.proto";
+
+option go_package = "github.com/twilight-project/twilight-core/x/rewards/types";
+
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+  rpc ClaimRewards(MsgClaimRewards) returns (MsgClaimRewardsResponse);
+  rpc UpdateRewardsParams(MsgUpdateRewardsParams) returns (MsgUpdateRewardsParamsResponse);
+  rpc PauseRewards(MsgPauseRewards) returns (MsgPauseRewardsResponse);
+  rpc ResumeRewards(MsgResumeRewards) returns (MsgResumeRewardsResponse);
+}
+
+message MsgClaimRewards {
+  option (cosmos.msg.v1.signer) = "signer";
+  option (amino.name) = "twilight/rewards/MsgClaimRewards";
+  string signer = 1;
+  uint64 slot_id = 2;
+  uint64 start_epoch = 3;
+  uint64 end_epoch = 4;
+}
+message MsgClaimRewardsResponse {}
+
+message MsgUpdateRewardsParams {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "twilight/rewards/MsgUpdateRewardsParams";
+  string authority = 1;
+  Params params = 2;
+}
+message MsgUpdateRewardsParamsResponse {}
+
+message MsgPauseRewards {
+  option (cosmos.msg.v1.signer) = "emergency_authority";
+  option (amino.name) = "twilight/rewards/MsgPauseRewards";
+  string emergency_authority = 1;
+  bool pause_emissions = 2;
+  bool pause_epoch_settlement = 3;
+  bool pause_claims = 4;
+}
+message MsgPauseRewardsResponse {}
+
+message MsgResumeRewards {
+  option (cosmos.msg.v1.signer) = "emergency_authority";
+  option (amino.name) = "twilight/rewards/MsgResumeRewards";
+  string emergency_authority = 1;
+  bool resume_emissions = 2;
+  bool resume_epoch_settlement = 3;
+  bool resume_claims = 4;
+}
+message MsgResumeRewardsResponse {}

@@ -1,0 +1,107 @@
+syntax = "proto3";
+package twilight.rewards.v1;
+
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "google/api/annotations.proto";
+import "twilight/rewards/v1/params.proto";
+import "twilight/rewards/v1/rewards.proto";
+
+option go_package = "github.com/twilight-project/twilight-core/x/rewards/types";
+
+service Query {
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/params";
+  }
+  rpc EpochInfo(QueryEpochInfoRequest) returns (QueryEpochInfoResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/epoch-info";
+  }
+  rpc NextHalving(QueryNextHalvingRequest) returns (QueryNextHalvingResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/next-halving";
+  }
+  rpc EpochReward(QueryEpochRewardRequest) returns (QueryEpochRewardResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/epochs/{epoch_number}";
+  }
+  rpc SlotRewards(QuerySlotRewardsRequest) returns (QuerySlotRewardsResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/slots/{slot_id}/rewards";
+  }
+  rpc ClaimableRewards(QueryClaimableRewardsRequest) returns (QueryClaimableRewardsResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/slots/{slot_id}/claimable";
+  }
+  rpc CumulativeEmitted(QueryCumulativeEmittedRequest) returns (QueryCumulativeEmittedResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/cumulative-emitted";
+  }
+  rpc SupplySchedule(QuerySupplyScheduleRequest) returns (QuerySupplyScheduleResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/supply-schedule";
+  }
+  rpc CurrentEpochActiveBlocks(QueryCurrentEpochActiveBlocksRequest) returns (QueryCurrentEpochActiveBlocksResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/current-epoch/active-blocks";
+  }
+  rpc ModuleBalances(QueryModuleBalancesRequest) returns (QueryModuleBalancesResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/module-balances";
+  }
+}
+
+message QueryParamsRequest {}
+message QueryParamsResponse { Params params = 1; }
+
+message QueryEpochInfoRequest {}
+message QueryEpochInfoResponse {
+  RewardsState state = 1;
+  EpochConfigSnapshot current_epoch_config = 2;
+  uint64 current_epoch_end_height = 3;
+  bool has_pending_params = 4;
+  Params pending_params = 5;
+}
+
+message QueryNextHalvingRequest {}
+message QueryNextHalvingResponse { NextHalvingInfo info = 1; }
+
+message QueryEpochRewardRequest { uint64 epoch_number = 1; }
+message QueryEpochRewardResponse { EpochReward epoch_reward = 1; }
+
+message QuerySlotRewardsRequest {
+  uint64 slot_id = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message QuerySlotRewardsResponse {
+  repeated EligibleSlotReward rewards = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryClaimableRewardsRequest {
+  uint64 slot_id = 1;
+  uint64 start_epoch = 2;
+  uint64 end_epoch = 3;
+}
+message QueryClaimableRewardsResponse {
+  repeated EligibleSlotReward rewards = 1;
+  string total_amount = 2;
+}
+
+message QueryCumulativeEmittedRequest {}
+message QueryCumulativeEmittedResponse {
+  string cumulative_emitted = 1;
+  string max_supply = 2;
+}
+
+message QuerySupplyScheduleRequest {}
+message QuerySupplyScheduleResponse {
+  Params params = 1;
+  NextHalvingInfo next_halving = 2;
+}
+
+message QueryCurrentEpochActiveBlocksRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+message QueryCurrentEpochActiveBlocksResponse {
+  uint64 epoch_number = 1;
+  repeated SlotActiveBlocks active_blocks = 2;
+  cosmos.base.query.v1beta1.PageResponse pagination = 3;
+}
+
+message QueryModuleBalancesRequest {}
+message QueryModuleBalancesResponse {
+  string denom = 1;
+  string rewards_balance = 2;
+  string fee_pool_balance = 3;
+}
