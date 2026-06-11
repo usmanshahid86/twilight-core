@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"encoding/hex"
+	"sort"
 
 	"cosmossdk.io/collections"
 	storetypes "cosmossdk.io/core/store"
@@ -106,6 +107,45 @@ func (k Keeper) getSlot(ctx context.Context, id uint64) (types.CoreSlot, error) 
 		return types.CoreSlot{}, types.ErrSlotNotFound.Wrapf("%d", id)
 	}
 	return slot, nil
+}
+
+// GetActiveSlots returns the active CoreSlot rows in ascending slot ID order.
+// It is a read-only module integration surface; validator-set ownership remains
+// entirely inside x/coreslot.
+func (k Keeper) GetActiveSlots(ctx context.Context) ([]types.CoreSlot, error) {
+	slots := make([]types.CoreSlot, 0)
+	err := k.Slots.Walk(ctx, nil, func(_ uint64, slot types.CoreSlot) (bool, error) {
+		if slot.Status == types.SlotStatus_SLOT_STATUS_ACTIVE {
+			slots = append(slots, slot)
+		}
+		return false, nil
+	})
+	sort.Slice(slots, func(i, j int) bool { return slots[i].SlotId < slots[j].SlotId })
+	return slots, err
+}
+
+// GetSlot returns a CoreSlot row without exposing collection internals.
+func (k Keeper) GetSlot(ctx context.Context, slotID uint64) (types.CoreSlot, error) {
+	return k.getSlot(ctx, slotID)
+}
+
+// GetRewardWeight returns the stored reward-weight row for a slot. Absence is
+// returned as an error rather than silently synthesizing economic state.
+func (k Keeper) GetRewardWeight(ctx context.Context, slotID uint64) (types.OperatorRewardWeight, error) {
+	return k.RewardWeights.Get(ctx, slotID)
+}
+
+// GetAuthority returns the current normal authority from CoreSlot params.
+func (k Keeper) GetAuthority(ctx context.Context) (string, error) {
+	params, err := k.Params.Get(ctx)
+	return params.Authority, err
+}
+
+// GetEmergencyAuthority returns the current emergency authority from CoreSlot
+// params.
+func (k Keeper) GetEmergencyAuthority(ctx context.Context) (string, error) {
+	params, err := k.Params.Get(ctx)
+	return params.EmergencyAuthority, err
 }
 
 func (k Keeper) ensureConsensusAvailable(ctx context.Context, any interface {

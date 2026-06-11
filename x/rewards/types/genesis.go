@@ -1,5 +1,7 @@
 package types
 
+import sdkmath "cosmossdk.io/math"
+
 func DefaultGenesis() *GenesisState {
 	params := DefaultParams()
 	snapshot := DefaultEpochConfigSnapshot(params)
@@ -8,6 +10,10 @@ func DefaultGenesis() *GenesisState {
 		State:              &RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig: &snapshot,
 	}
+}
+
+func ValidateGenesis(genesis GenesisState) error {
+	return genesis.Validate()
 }
 
 func (g GenesisState) Validate() error {
@@ -25,6 +31,11 @@ func (g GenesisState) Validate() error {
 	}
 	if err := validateStateAmount("carry forward remainder", g.State.CarryForwardRemainder); err != nil {
 		return err
+	}
+	cumulative, _ := sdkmath.NewIntFromString(g.State.CumulativeEmitted)
+	maxSupply, _ := sdkmath.NewIntFromString(g.Params.MaxSupply)
+	if cumulative.GT(maxSupply) {
+		return ErrInvalidGenesis.Wrap("cumulative emitted exceeds max supply")
 	}
 	if err := g.CurrentEpochConfig.Validate(); err != nil {
 		return err
@@ -59,6 +70,9 @@ func (g GenesisState) Validate() error {
 		key := claimKey(reward.SlotId, reward.EpochNumber)
 		if _, exists := claims[key]; exists {
 			return ErrInvalidGenesis.Wrapf("duplicate claim record %s", key)
+		}
+		if _, exists := epochs[reward.EpochNumber]; !exists {
+			return ErrInvalidGenesis.Wrapf("claim record %s references non-finalized epoch", key)
 		}
 		claims[key] = struct{}{}
 	}
