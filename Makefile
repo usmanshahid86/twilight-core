@@ -1,4 +1,4 @@
-.PHONY: build test fmt proto localnet-init localnet-smoke localnet-agree \
+.PHONY: build test fmt proto localnet-init localnet-smoke localnet-rewards-smoke localnet-agree \
 	drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -18,6 +18,9 @@ localnet-init:
 
 localnet-smoke:
 	./scripts/localnet/smoke.sh
+
+localnet-rewards-smoke:
+	./scripts/localnet/rewards-smoke.sh
 
 # Cross-node app/validators/next-validators hash agreement against an already
 # running localnet (use after `make localnet-init` + scripts/localnet/start.sh).
