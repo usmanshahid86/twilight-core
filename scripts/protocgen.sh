@@ -30,3 +30,4 @@ sed -i.bak 's#github.com/gogo/protobuf/grpc#github.com/cosmos/gogoproto/grpc#g' 
 sed -i.bak 's#github.com/gogo/protobuf/proto#github.com/cosmos/gogoproto/proto#g' x/coreslot/types/*.pb.go
 sed -i.bak 's#_ "google/api"#_ "google.golang.org/genproto/googleapis/api/annotations"#g' x/coreslot/types/*.pb.go
 rm -f x/coreslot/types/*.pb.go.bak
+gofmt -w x/coreslot/types/*.pb.go

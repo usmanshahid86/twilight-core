@@ -78,8 +78,8 @@ EMER="--from operator1 --keyring-backend test --home /tmp/twilight-localnet/node
 A new slot needs a unique operator address and a fresh consensus key:
 
 ```bash
-NEWOP=$(twilightd keys add newop --keyring-backend test --home /tmp/twilight-localnet/node0 -a --output json | jq -r .address || \
-        twilightd keys show newop -a --keyring-backend test --home /tmp/twilight-localnet/node0)
+twilightd keys add newop --keyring-backend test --home /tmp/twilight-localnet/node0
+NEWOP=$(twilightd keys show newop -a --keyring-backend test --home /tmp/twilight-localnet/node0)
 PUB=$(./scripts/localnet/gen-consensus-key.sh newslot | cut -f1)   # fresh ed25519 pubkey (base64)
 twilightd coreslot register "$NEWOP" "$NEWOP" "$PUB" "moniker" $AUTH
 ```
