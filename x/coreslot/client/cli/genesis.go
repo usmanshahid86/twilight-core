@@ -13,8 +13,9 @@ import (
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 
-	"github.com/nyks/nyks-core/x/coreslot/keeper"
-	"github.com/nyks/nyks-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/app/params"
+	"github.com/twilight-project/twilight-core/x/coreslot/keeper"
+	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 func GetGenesisCmd() *cobra.Command {
@@ -175,9 +176,15 @@ func ensureBankMetadata(state map[string]json.RawMessage) {
 		return
 	}
 	bank["denom_metadata"] = []map[string]interface{}{{
-		"description": "Native Nyks token",
-		"denom_units": []map[string]interface{}{{"denom": "unyks", "exponent": 0}, {"denom": "NYKS", "exponent": 6}},
-		"base":        "unyks", "display": "NYKS", "name": "Nyks", "symbol": "NYKS",
+		"description": "Native " + params.NativeName + " token",
+		"denom_units": []map[string]interface{}{
+			{"denom": params.NativeBaseDenom, "exponent": 0},
+			{"denom": params.NativeDisplayDenom, "exponent": params.NativeExponent},
+		},
+		"base":    params.NativeBaseDenom,
+		"display": params.NativeDisplayDenom,
+		"name":    params.NativeName,
+		"symbol":  params.NativeSymbol,
 	}}
 	bz, err := json.Marshal(bank)
 	if err == nil {

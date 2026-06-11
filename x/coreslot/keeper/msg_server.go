@@ -5,7 +5,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/nyks/nyks-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 type msgServer struct{ Keeper }

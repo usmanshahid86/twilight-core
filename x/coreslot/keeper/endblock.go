@@ -9,7 +9,7 @@ import (
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
-	"github.com/nyks/nyks-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 func (k Keeper) EndBlock(ctx context.Context) ([]abci.ValidatorUpdate, error) {

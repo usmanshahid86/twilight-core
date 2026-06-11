@@ -1,10 +1,10 @@
 syntax = "proto3";
-package nyks.coreslot.v1;
+package twilight.coreslot.v1;
 
 import "google/protobuf/any.proto";
 import "cosmos_proto/cosmos.proto";
 
-option go_package = "github.com/nyks/nyks-core/x/coreslot/types";
+option go_package = "github.com/twilight-project/twilight-core/x/coreslot/types";
 
 enum SlotStatus {
   SLOT_STATUS_UNSPECIFIED = 0;

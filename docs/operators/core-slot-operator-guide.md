@@ -9,7 +9,7 @@ omitted.** There is **no automatic slashing or jailing** — see
 
 ## Key facts before you start
 
-- **A bare `nyksd init` genesis is INVALID until active core slots are added.**
+- **A bare `twilightd init` genesis is INVALID until active core slots are added.**
   The default genesis has `MinActiveSlots = 1` and zero slots, so
   `ValidateGenesis` fails until you add slots with `coreslot-genesis add`.
 - **Authority actions are on-chain transactions.** Registration / activation /
@@ -34,12 +34,12 @@ make localnet-init               # builds, inits 4 nodes, derives the 4 active s
 ```
 
 Stop it with `./scripts/localnet/stop.sh`. Node homes are at
-`/tmp/nyks-localnet/node0` … `node3`; logs at `/tmp/nyks-localnet/logs/`.
+`/tmp/twilight-localnet/node0` … `node3`; logs at `/tmp/twilight-localnet/logs/`.
 
 `make localnet-init` derives each slot's consensus key from that node's generated
 `priv_validator_key.json`, sets `operator0` as the normal authority and
 `operator1` as the emergency authority, and funds both authority accounts so
-their transactions are signable (fees are zero — min-gas `0unyks`).
+their transactions are signable (fees are zero — min-gas `0utwlt`).
 
 Full smoke (init + start + cross-node hash agreement):
 
@@ -50,12 +50,12 @@ make localnet-smoke
 The manual genesis workflow (for a fresh chain) is:
 
 ```bash
-nyksd init node0 --chain-id nyks-1
-nyksd coreslot-genesis set-authorities <authority> <emergency-authority>
-nyksd add-genesis-account <authority> 1000000000000unyks
-nyksd coreslot-genesis add <operator> <payout> <ed25519-pubkey-base64> <moniker>
-nyksd coreslot-genesis validate
-nyksd start
+twilightd init node0 --chain-id twilight-1
+twilightd coreslot-genesis set-authorities <authority> <emergency-authority>
+twilightd add-genesis-account <authority> 1000000000000utwlt
+twilightd coreslot-genesis add <operator> <payout> <ed25519-pubkey-base64> <moniker>
+twilightd coreslot-genesis validate
+twilightd start
 ```
 
 ## 2. Common signing flags
@@ -66,11 +66,11 @@ Authority-gated messages are signed by the **normal authority** key
 
 ```bash
 # normal authority (operator0 lives in node0's keyring)
-AUTH="--from operator0 --keyring-backend test --home /tmp/nyks-localnet/node0 \
-      --chain-id nyks-local-1 --node tcp://127.0.0.1:26657 --fees 0unyks --gas 600000 -y"
+AUTH="--from operator0 --keyring-backend test --home /tmp/twilight-localnet/node0 \
+      --chain-id twilight-localnet-1 --node tcp://127.0.0.1:26657 --fees 0utwlt --gas 600000 -y"
 # emergency authority (operator1 lives in node1's keyring)
-EMER="--from operator1 --keyring-backend test --home /tmp/nyks-localnet/node1 \
-      --chain-id nyks-local-1 --node tcp://127.0.0.1:26657 --fees 0unyks --gas 600000 -y"
+EMER="--from operator1 --keyring-backend test --home /tmp/twilight-localnet/node1 \
+      --chain-id twilight-localnet-1 --node tcp://127.0.0.1:26657 --fees 0utwlt --gas 600000 -y"
 ```
 
 ## 3. Adding a new core-slot operator
@@ -78,10 +78,10 @@ EMER="--from operator1 --keyring-backend test --home /tmp/nyks-localnet/node1 \
 A new slot needs a unique operator address and a fresh consensus key:
 
 ```bash
-NEWOP=$(nyksd keys add newop --keyring-backend test --home /tmp/nyks-localnet/node0 -a --output json | jq -r .address || \
-        nyksd keys show newop -a --keyring-backend test --home /tmp/nyks-localnet/node0)
+twilightd keys add newop --keyring-backend test --home /tmp/twilight-localnet/node0
+NEWOP=$(twilightd keys show newop -a --keyring-backend test --home /tmp/twilight-localnet/node0)
 PUB=$(./scripts/localnet/gen-consensus-key.sh newslot | cut -f1)   # fresh ed25519 pubkey (base64)
-nyksd coreslot register "$NEWOP" "$NEWOP" "$PUB" "moniker" $AUTH
+twilightd coreslot register "$NEWOP" "$NEWOP" "$PUB" "moniker" $AUTH
 ```
 
 The slot is created in `SLOT_STATUS_PENDING` (power 0, not yet in the validator
@@ -92,7 +92,7 @@ actually sign — see [key rotation](#7-key-rotation)).
 ## 4. Activation
 
 ```bash
-nyksd coreslot activate <slot-id> $AUTH
+twilightd coreslot activate <slot-id> $AUTH
 ```
 
 The slot becomes `ACTIVE` at `SlotVotingPower`; one validator-update is emitted
@@ -101,7 +101,7 @@ in that block's EndBlock (`num_val_updates=1`). Bounded by `MaxActiveSlots`.
 ## 5. Inactivation
 
 ```bash
-nyksd coreslot inactivate <slot-id> "<reason>" $AUTH
+twilightd coreslot inactivate <slot-id> "<reason>" $AUTH
 ```
 
 Sets the slot `INACTIVE`, power 0, removed from the validator set
@@ -112,7 +112,7 @@ may self-inactivate its own slot subject to the same floor.
 ## 6. Emergency suspension
 
 ```bash
-nyksd coreslot suspend <slot-id> "<reason>" "<evidence-reference>" $EMER
+twilightd coreslot suspend <slot-id> "<reason>" "<evidence-reference>" $EMER
 ```
 
 Signed by the emergency authority. Sets the slot `SUSPENDED`, power 0. A hard
@@ -124,8 +124,8 @@ params. Always include an `evidence-reference` (see the evidence policy).
 
 ```bash
 # the slot must be NON-active first (inactivate or suspend it)
-nyksd coreslot inactivate <slot-id> "decommission" $AUTH
-nyksd coreslot remove <slot-id> "decommission" $AUTH
+twilightd coreslot inactivate <slot-id> "decommission" $AUTH
+twilightd coreslot remove <slot-id> "decommission" $AUTH
 ```
 
 Removing an already-non-active slot has **no validator-set effect**
@@ -138,7 +138,7 @@ blocks. Removing an `ACTIVE` slot is rejected.
 ```bash
 KEYOUT=$(./scripts/localnet/gen-consensus-key.sh rotated-slot)   # "<pubkey>\t<priv_validator_key.json path>"
 NEWPUB=$(cut -f1 <<<"$KEYOUT"); NEWKEYFILE=$(cut -f2 <<<"$KEYOUT")
-nyksd coreslot rotate-key <slot-id> "$NEWPUB" $AUTH
+twilightd coreslot rotate-key <slot-id> "$NEWPUB" $AUTH
 ```
 
 For an **active** slot the rotation is delayed by `key_rotation_delay_blocks`
@@ -157,9 +157,9 @@ When you rotate the key of a slot whose node is online, swap that node's key
 material and restart it so it signs with the new key:
 
 ```bash
-nyksd coreslot rotate-key <slot-id> "$NEWPUB" $AUTH   # wait until applied (pending-rotations empty)
+twilightd coreslot rotate-key <slot-id> "$NEWPUB" $AUTH   # wait until applied (pending-rotations empty)
 ./scripts/localnet/stop.sh                            # or stop just that node's process
-cp "$NEWKEYFILE" /tmp/nyks-localnet/node<N>/config/priv_validator_key.json
+cp "$NEWKEYFILE" /tmp/twilight-localnet/node<N>/config/priv_validator_key.json
 # restart that node (start.sh restarts all; or start the single node process)
 ```
 

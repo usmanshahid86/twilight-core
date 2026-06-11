@@ -26,16 +26,22 @@ import (
 	_ "github.com/cosmos/cosmos-sdk/x/bank"
 	_ "github.com/cosmos/cosmos-sdk/x/consensus"
 
-	"github.com/nyks/nyks-core/x/coreslot"
-	coreslotkeeper "github.com/nyks/nyks-core/x/coreslot/keeper"
-	coreslottypes "github.com/nyks/nyks-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/app/params"
+	"github.com/twilight-project/twilight-core/x/coreslot"
+	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
+	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 const (
-	Name                         = "nyks"
-	AccountPrefix                = "nyks"
-	BaseDenom                    = "unyks"
-	DisplayDenom                 = "NYKS"
+	Name          = "twilight"
+	AccountPrefix = "twilight"
+	// Denom identity is sourced from the canonical, dependency-neutral
+	// app/params package (see §8 of the migration plan). BaseDenom (utwlt) is the
+	// only denom used in stateful accounting; DisplayDenom (twlt) and Symbol
+	// (TWLT) are display metadata only.
+	BaseDenom                    = params.NativeBaseDenom
+	DisplayDenom                 = params.NativeDisplayDenom
+	Symbol                       = params.NativeSymbol
 	AuthorityModuleName          = "coreslot-authority"
 	EmergencyAuthorityModuleName = "coreslot-emergency"
 )
@@ -43,9 +49,9 @@ const (
 var DefaultNodeHome = func() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".nyks"
+		return ".twilightd"
 	}
-	return filepath.Join(home, ".nyks")
+	return filepath.Join(home, ".twilightd")
 }()
 
 type App struct {

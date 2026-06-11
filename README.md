@@ -1,6 +1,6 @@
-# Nyks Core
+# Twilight Core
 
-Nyks Core is a greenfield Cosmos SDK and CometBFT Proof-of-Authority chain.
+Twilight Core is a greenfield Cosmos SDK and CometBFT Proof-of-Authority chain.
 Validator admission and validator updates are owned exclusively by
 `x/coreslot`. Standard staking, distribution, and slashing modules are omitted.
 
@@ -10,10 +10,10 @@ make test
 make localnet-smoke
 ```
 
-The native base denomination is `unyks`; the display denomination is `NYKS`
-with six decimal places. The development genesis creates
-`1,000,000,000,000unyks` and assigns it to the local authority account. There
-is no inflation in v1.
+The native base denomination is `utwlt` (the only denom used for accounting);
+the display denomination is `twlt` (symbol `TWLT`, name Twilight) with six
+decimal places. The development genesis creates `1,000,000,000,000utwlt` and
+assigns it to the local authority account. There is no inflation in v1.
 
 See [docs/architecture/coreslot-poa.md](docs/architecture/coreslot-poa.md) and
 [docs/operators/core-slot-operator-guide.md](docs/operators/core-slot-operator-guide.md).

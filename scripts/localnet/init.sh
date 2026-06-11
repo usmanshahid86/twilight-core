@@ -2,12 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-BIN="${BIN:-$ROOT/build/nyksd}"
-NET="${NYKS_LOCALNET_HOME:-/tmp/nyks-localnet}"
-CHAIN_ID="${CHAIN_ID:-nyks-local-1}"
+BIN="${BIN:-$ROOT/build/twilightd}"
+NET="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-localnet}"
+CHAIN_ID="${CHAIN_ID:-twilight-localnet-1}"
 
 mkdir -p "$ROOT/build"
-GOCACHE="${GOCACHE:-/tmp/nyks-go-build}" go build -o "$BIN" "$ROOT/cmd/nyksd"
+GOCACHE="${GOCACHE:-/tmp/twilight-go-build}" go build -o "$BIN" "$ROOT/cmd/twilightd"
 rm -rf "$NET"
 mkdir -p "$NET"
 
@@ -21,11 +21,11 @@ genesis_home="$NET/node0"
 authority="$(sed -n 's/.*"address":"\([^"]*\)".*/\1/p' "$NET/operator0.json")"
 emergency="$(sed -n 's/.*"address":"\([^"]*\)".*/\1/p' "$NET/operator1.json")"
 "$BIN" coreslot-genesis set-authorities "$authority" "$emergency" --home "$genesis_home"
-"$BIN" add-genesis-account "$authority" 1000000000000unyks --home "$genesis_home"
+"$BIN" add-genesis-account "$authority" 1000000000000utwlt --home "$genesis_home"
 # Fund the emergency authority too so MsgSuspendCoreSlot (signed by the emergency
-# key) has an on-chain account to sign with. Fees are zero (min-gas 0unyks); the
+# key) has an on-chain account to sign with. Fees are zero (min-gas 0utwlt); the
 # balance only needs to exist for account-number/sequence resolution.
-"$BIN" add-genesis-account "$emergency" 1000000000000unyks --home "$genesis_home"
+"$BIN" add-genesis-account "$emergency" 1000000000000utwlt --home "$genesis_home"
 
 for i in 0 1 2 3; do
   operator="$(sed -n 's/.*"address":"\([^"]*\)".*/\1/p' "$NET/operator$i.json")"

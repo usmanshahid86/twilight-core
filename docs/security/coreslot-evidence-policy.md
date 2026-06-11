@@ -32,7 +32,7 @@ automatic reaction.
 Equivocation response is **authority / emergency-authority driven, out of band**:
 
 - The **emergency authority** may immediately remove a misbehaving validator from
-  the active set with `MsgSuspendCoreSlot` (`nyksd coreslot suspend <slot-id>
+  the active set with `MsgSuspendCoreSlot` (`twilightd coreslot suspend <slot-id>
   <reason> <evidence-reference>`). Suspension sets power to 0 in the next EndBlock.
 - The suspend message **should** carry an `evidence_reference` (e.g. a block
   height + the CometBFT evidence hash, or an incident ticket id) so the on-chain
@@ -62,7 +62,7 @@ When equivocation or serious misbehavior is suspected:
 2. **Preserve** — capture the offending node's logs, the evidence record (height,
    evidence hash), and the divergence artifacts. Do not discard state.
 3. **Emergency suspend if risk is immediate** — emergency authority submits
-   `nyksd coreslot suspend <slot-id> "<reason>" "<evidence-reference>"`. Confirm
+   `twilightd coreslot suspend <slot-id> "<reason>" "<evidence-reference>"`. Confirm
    the slot leaves the active set in the next block (`coreslot-query slot
    <slot-id>` shows `SLOT_STATUS_SUSPENDED`, power 0; one validator-update emitted).
 4. **Notify operators** — inform the other CoreSlot operators and stakeholders of
@@ -71,12 +71,12 @@ When equivocation or serious misbehavior is suspected:
    misconfiguration, or false positive.
 6. **Resolve through the authority path** —
    - *Reinstate*: if benign, the normal authority reactivates with
-     `nyksd coreslot activate <slot-id>` (optionally after a key rotation).
+     `twilightd coreslot activate <slot-id>` (optionally after a key rotation).
    - *Remove*: if malicious/compromised, the normal authority permanently removes
-     with `nyksd coreslot remove <slot-id> "<reason>"` (the slot must already be
+     with `twilightd coreslot remove <slot-id> "<reason>"` (the slot must already be
      non-active; its consensus key is then reserved for the lockout window).
    - *Rotate*: on suspected key compromise, rotate the consensus key
-     (`nyksd coreslot rotate-key`) and follow the restart-after-rotation runbook.
+     (`twilightd coreslot rotate-key`) and follow the restart-after-rotation runbook.
 7. **Record the incident** — keep the `evidence_reference`, the transactions, and
    a written incident summary for audit.
 

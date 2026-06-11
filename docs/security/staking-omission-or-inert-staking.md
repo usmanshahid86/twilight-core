@@ -1,6 +1,6 @@
 # Staking Omission
 
-Nyks v1 omits `x/staking`, `x/distribution`, and `x/slashing` entirely.
+Twilight v1 omits `x/staking`, `x/distribution`, and `x/slashing` entirely.
 
 This is structural enforcement, not an ante-handler blocklist:
 
