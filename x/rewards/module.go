@@ -64,10 +64,10 @@ func (AppModule) IsOnePerModuleType()      {}
 func (AppModule) Name() string             { return types.ModuleName }
 func (AppModule) ConsensusVersion() uint64 { return ConsensusVersion }
 
-// RegisterServices wires only the Msg service in Phase 8. The query service is
-// deferred to Phase 9; no query server is registered here.
+// RegisterServices wires the Msg service and the read-only Query service.
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServer(am.keeper))
+	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServer(am.keeper))
 }
 
 // RegisterInvariants exposes the rewards invariants to an invariant registry if

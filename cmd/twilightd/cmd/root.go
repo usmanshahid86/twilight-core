@@ -35,6 +35,7 @@ import (
 	"github.com/twilight-project/twilight-core/x/coreslot"
 	coreslotcli "github.com/twilight-project/twilight-core/x/coreslot/client/cli"
 	"github.com/twilight-project/twilight-core/x/rewards"
+	rewardscli "github.com/twilight-project/twilight-core/x/rewards/client/cli"
 )
 
 func NewRootCmd() *cobra.Command {
@@ -102,6 +103,8 @@ func NewRootCmd() *cobra.Command {
 		coreslotcli.GetTxCmd(),
 		coreslotcli.GetQueryCmd(),
 		coreslotcli.GetGenesisCmd(),
+		rewardscli.GetTxCmd(),
+		rewardscli.GetQueryCmd(),
 	)
 	server.AddCommandsWithStartCmdOptions(root, app.DefaultNodeHome, newApp, appExport, server.StartCmdOptions{})
 	return root

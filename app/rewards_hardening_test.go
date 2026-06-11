@@ -223,6 +223,19 @@ func TestRewardsAuthorityMsgRoutedThroughApp(t *testing.T) {
 	require.Error(t, err, "normal authority must not be able to pause; emergency authority is separate")
 }
 
+// TestRewardsQueryServiceRegistered proves the rewards gRPC query service is wired
+// into the app's query router (Phase 9), reachable by its fully-qualified method.
+func TestRewardsQueryServiceRegistered(t *testing.T) {
+	a := bootApp(t)
+	for _, method := range []string{
+		"/twilight.rewards.v1.Query/Params",
+		"/twilight.rewards.v1.Query/EpochInfo",
+		"/twilight.rewards.v1.Query/ModuleBalances",
+	} {
+		require.NotNil(t, a.GRPCQueryRouter().Route(method), "query route %s must be registered", method)
+	}
+}
+
 // TestRewardsAppGenesisExportImportRoundTrip proves rewards genesis round-trips
 // through the real app genesis path (the module wrapper's InitGenesis/ExportGenesis
 // invoked by the app ModuleManager), not just the keeper. It seeds a populated
