@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"cosmossdk.io/math"
@@ -40,6 +41,33 @@ func TestEmissionMathAlwaysRespectsThresholdAndSupplyCaps(t *testing.T) {
 		if found {
 			require.True(t, current.Add(subsidy).LTE(nextThreshold))
 		}
+	}
+}
+
+func TestFinalizeCapAssertionPrecedesMint(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+
+	source, err := os.ReadFile(filepath.Join(filepath.Dir(currentFile), "finalize.go"))
+	require.NoError(t, err)
+	text := string(source)
+	capAssertion := strings.Index(text, "cumulativeAfter.GT(maxSupply)")
+	mint := strings.Index(text, "MintCoins")
+	require.NotEqual(t, -1, capAssertion)
+	require.NotEqual(t, -1, mint)
+	require.Less(t, capAssertion, mint)
+	require.NotContains(t, text, "SupplyCapInvariant")
+}
+
+func TestEconomicsFilesRemainKeeperOnly(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	dir := filepath.Dir(currentFile)
+	for _, name := range []string{"endblock.go", "finalize.go", "distribution.go", "claims.go", "msg_server.go"} {
+		source, err := os.ReadFile(filepath.Join(dir, name))
+		require.NoError(t, err)
+		require.NotContains(t, string(source), "ValidatorUpdate")
+		require.NotContains(t, string(source), "ConsensusPower")
 	}
 }
 

@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -30,23 +31,48 @@ func (accountKeeperMock) GetModuleAddress(string) sdk.AccAddress {
 type bankKeeperMock struct {
 	mintCalls int
 	sendCalls int
+	mintErr   error
+	sendErr   error
+	minted    sdk.Coins
+	sends     []bankSend
+	supply    sdk.Coin
+	balances  map[string]sdk.Coin
 }
 
-func (m *bankKeeperMock) MintCoins(context.Context, string, sdk.Coins) error {
+type bankSend struct {
+	recipient sdk.AccAddress
+	amounts   sdk.Coins
+}
+
+func (m *bankKeeperMock) MintCoins(_ context.Context, _ string, amounts sdk.Coins) error {
 	m.mintCalls++
+	if m.mintErr != nil {
+		return m.mintErr
+	}
+	m.minted = m.minted.Add(amounts...)
 	return nil
 }
 
-func (m *bankKeeperMock) SendCoinsFromModuleToAccount(context.Context, string, sdk.AccAddress, sdk.Coins) error {
+func (m *bankKeeperMock) SendCoinsFromModuleToAccount(_ context.Context, _ string, recipient sdk.AccAddress, amounts sdk.Coins) error {
 	m.sendCalls++
+	if m.sendErr != nil {
+		return m.sendErr
+	}
+	m.sends = append(m.sends, bankSend{recipient: recipient, amounts: amounts})
 	return nil
 }
 
-func (*bankKeeperMock) GetSupply(_ context.Context, denom string) sdk.Coin {
+func (m *bankKeeperMock) GetSupply(_ context.Context, denom string) sdk.Coin {
+	if !m.supply.IsNil() {
+		return m.supply
+	}
 	return sdk.NewInt64Coin(denom, 0)
 }
 
-func (*bankKeeperMock) GetBalance(_ context.Context, _ sdk.AccAddress, denom string) sdk.Coin {
+func (m *bankKeeperMock) GetBalance(_ context.Context, address sdk.AccAddress, denom string) sdk.Coin {
+	if coin, ok := m.balances[address.String()]; ok {
+		return coin
+	}
 	return sdk.NewInt64Coin(denom, 0)
 }
 
@@ -99,10 +125,27 @@ func setupKeeper(t *testing.T, coreSlotKeeper keeper.CoreSlotKeeper) (keeper.Kee
 	return k, ctx, bank
 }
 
+func (m *bankKeeperMock) failMint() {
+	m.mintErr = errors.New("mint failed")
+}
+
+func (m *bankKeeperMock) failSend() {
+	m.sendErr = errors.New("send failed")
+}
+
 func addr(marker byte) string {
 	address := make([]byte, 20)
 	address[0] = marker
 	return sdk.AccAddress(address).String()
+}
+
+func hasEvent(ctx sdk.Context, eventType string) bool {
+	for _, event := range ctx.EventManager().Events() {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
 }
 
 func validEpoch(number uint64, params types.Params) types.EpochReward {

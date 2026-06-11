@@ -8,6 +8,8 @@ import (
 	"cosmossdk.io/collections"
 	"github.com/stretchr/testify/require"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
+
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	"github.com/twilight-project/twilight-core/x/rewards/keeper"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
@@ -144,7 +146,7 @@ func setupAccountingKeeper(
 	coreSlots keeper.CoreSlotKeeper,
 	epoch uint64,
 	params types.Params,
-) (keeper.Keeper, context.Context, *bankKeeperMock) {
+) (keeper.Keeper, sdk.Context, *bankKeeperMock) {
 	t.Helper()
 	k, ctx, bank := setupKeeper(t, coreSlots)
 	require.NoError(t, k.SetParams(ctx, params))

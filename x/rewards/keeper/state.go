@@ -106,6 +106,13 @@ func (k Keeper) SetFinalizedEpoch(ctx context.Context, epoch types.EpochReward) 
 	if epoch.EpochNumber == 0 {
 		return types.ErrInvalidState.Wrap("finalized epoch number must be nonzero")
 	}
+	exists, err := k.FinalizedEpochs.Has(ctx, epoch.EpochNumber)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return types.ErrInvalidState.Wrapf("finalized epoch %d is immutable", epoch.EpochNumber)
+	}
 	return k.FinalizedEpochs.Set(ctx, epoch.EpochNumber, epoch)
 }
 
