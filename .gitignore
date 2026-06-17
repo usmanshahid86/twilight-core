@@ -81,3 +81,11 @@ Temporary Items
 # Root build binaries (build to build/ instead; never track at repo root)
 /nyksd
 /twilightd
+
+# Docs site (Docusaurus) — Node artifacts stay isolated under website/ and are
+# never tracked; the docs site must not affect Go builds or release binaries.
+/website/node_modules
+/website/build
+/website/.docusaurus
+/website/.cache-loader
+/website/.yarn

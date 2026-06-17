@@ -1,0 +1,81 @@
+---
+title: Security & Failure Modes
+---
+
+# Security & Failure Modes
+
+:::note Current status
+This page reflects the **Phase 10 validated** implementation. Production
+zero-premine genesis and longer soak drills remain **Phase 11** items.
+:::
+
+## Invariants
+
+The module defines five callable invariants (`x/rewards/keeper/invariants.go`).
+They are callable backstops; the chain does not run the `crisis` module, so they
+are exercised in tests rather than auto-run on-chain.
+
+| Invariant | Checks | A failure implies |
+|---|---|---|
+| `SupplyCapInvariant` | bank `utwlt` supply ≤ `max_supply` | over-mint / cap breach |
+| `CumulativeEmittedInvariant` | `cumulative_emitted` ≤ `max_supply` | accounting drift past the cap |
+| `ModuleBalanceCoverageInvariant` | rewards balance ≥ unclaimed claim records + carry | the module cannot cover what it owes |
+| `DenomCorrectnessInvariant` | native/fee denom = `utwlt`; no display metadata in amounts | a display denom leaked into accounting |
+| `ClosedEpochImmutabilityInvariant` | finalized epoch aggregates carry no claim markers | a closed epoch was mutated |
+
+By construction, after each finalization and claim the module-balance coverage
+holds exactly (`balance ≥ unclaimed + carry`). The Phase 10 smoke verified all
+five against a real bank after finalize and after claim.
+
+## Fail-closed lifecycle
+
+Rewards `BeginBlock` and `EndBlock` are **fail-closed**. A CoreSlot contract
+violation, a missing reward snapshot, a cap breach, or any finalization fault
+returns an error rather than degrading silently. Under the runtime,
+`baseapp.FinalizeBlock` surfaces the error and **discards the block's state**, so
+the fault **halts the block rather than half-committing**.
+
+This is the intended safety posture for a monetary module: a halt is recoverable
+(the emergency authority can pause settlement; operators can patch), but a
+half-committed or silently-wrong mint is not. Phase 10 proved this end-to-end — a
+forced finalization fault made `FinalizeBlock` return an error and left the
+committed height unchanged with no finalized epoch written.
+
+:::warning Operator implication
+Because rewards is fail-closed, a genuine finalization fault stops block
+production until resolved. Keep the CoreSlot active-set contract and rewards
+lifecycle aligned (a removed/suspended slot that earned credit is safe — CoreSlot
+retains its data). Monitor for repeated EndBlock errors in node logs.
+:::
+
+## Determinism
+
+No rewards state transition reads wall-clock time, randomness, environment
+variables, or CometBFT-local config. Finalization and claims iterate sorted
+collections (never raw Go map order). Cross-node app-hash agreement after
+finalization and after claim (Phase 10) is the multi-node evidence.
+
+## Failure-mode reference
+
+| Symptom | Likely cause | Check |
+|---|---|---|
+| Epoch not finalizing | settlement paused, or boundary not reached | `epoch-info` (`current_epoch_end_height`, height); params `epoch_settlement_enabled` |
+| Mint is zero at finalization | emissions paused, or subsidy floored to 0 near cap | params `emissions_enabled`; `next-halving` |
+| Claim rejected | claims paused, not finalized, already claimed, range too large, or insufficient module balance | `params`; `epoch-reward`; `slot-rewards`; `module-balances` |
+| Double claim rejected | record already `claimed` | `slot-rewards <slot>` shows `claimed: true` |
+| Params update rejected | immutable field changed, unsupported feature, or wrong authority | see [Parameters](params.md#v1-feature-guards) |
+| `claimable` returns empty | nothing finalized for the range, or already claimed | `epoch-reward`, `slot-rewards` |
+| App-hash divergence across nodes | **critical** — a state fork | stop, investigate before continuing; see [Localnet](../chain/localnet.md) |
+| Pagination returns empty `next_key` | last page reached | normal; stop paging |
+
+## Threat-model notes
+
+- **Authority key compromise** (CoreSlot authority): could queue malicious params
+  at the next boundary, but **cannot** change `native_denom`/`max_supply`
+  (immutable) and cannot pause (that is emergency authority). Rotate via CoreSlot.
+- **Emergency key compromise:** could pause emissions/settlement/claims
+  (denial-of-service on rewards), but cannot mint, redirect payouts, or change
+  immutable fields. Rotate via CoreSlot.
+- **Arbitrary claim signer:** harmless — funds only ever go to the snapshotted
+  payout address; a malicious signer pays gas to deliver someone else's reward to
+  the correct destination.

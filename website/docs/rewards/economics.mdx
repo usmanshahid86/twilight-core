@@ -1,0 +1,116 @@
+---
+title: Economics
+---
+
+import { constants } from '@site/docs/_snippets/constants.mdx';
+
+# Rewards Economics
+
+## Production defaults
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `epoch_length_blocks` | {constants.epochLengthBlocks} | Blocks per epoch |
+| `initial_block_subsidy` | {constants.initialBlockSubsidy} | Tier-0 per-block subsidy |
+| `max_supply` | {constants.maxSupply} | Hard upper bound on total supply |
+| `native_denom` | `{constants.nativeDenom}` | Accounting denom |
+| `distribution_method` | `{constants.distributionMode}` | v1 allocation rule |
+| `remainder_policy` | `{constants.remainderPolicy}` | Unallocated remainder handling |
+
+Sourced from `x/rewards/types/defaults.go`. The halving and emission math is pure
+and deterministic (`x/rewards/keeper/emission.go`).
+
+## Epoch emission
+
+Each epoch mints a **per-block** subsidy summed over the epoch's blocks, clipped
+by the supply cap. The minted amount depends on the number of blocks and the
+current subsidy tier — **not** on the number of active slots.
+
+> Example (Phase 10 localnet, `epoch_length_blocks = 10`):
+> minted emission = `10 × 416,190 = 4,161,900{constants.nativeDenom}`.
+
+Distribution then allocates that minted pool among the active slots — see
+[Distribution](#distribution-uniform-active-blocks). Do not multiply the subsidy
+by the slot count.
+
+## Halving and the supply cap
+
+Halving is **supply-threshold based**, not height/time based. The per-block
+subsidy is `initial_block_subsidy / 2^tier`, where the tier is the number of
+supply thresholds already crossed. Thresholds are computed as
+`threshold(n) = max_supply − floor(max_supply / 2^n)`:
+
+| Tier | Reached at cumulative emitted | Per-block subsidy |
+|---|---|---|
+| 0 | 0 | `416,190` |
+| 1 | `10,500,000,000,000` | `208,095` |
+| 2 | `15,750,000,000,000` | `104,047` |
+| 3 | `18,375,000,000,000` | `52,023` |
+
+Each block's subsidy is additionally clipped so it never crosses the next
+threshold or exceeds the remaining cap within a single block.
+
+:::warning Terminal sub-cap dust
+`max_supply` is a hard upper bound, **not** a guarantee that every final unit is
+emitted. Integer halving floors the subsidy to `0` before cumulative emitted
+reaches `max_supply` exactly, leaving a small unmintable remainder below the cap.
+This is intended — there is **no** tail rule that force-mints the remainder, and
+no chain logic should assume cumulative emitted ever equals `max_supply`.
+:::
+
+The `rewards-query next-halving` and `rewards-query supply-schedule` commands
+expose the current tier, current subsidy, next threshold, and remaining-to-cap —
+see [Queries](queries.md).
+
+## Active-block accounting
+
+During **BeginBlock**, the module reads the active CoreSlot set and increments an
+`(epoch, slot)` active-block counter for each active slot. Eligibility for an
+epoch's reward is based on these accumulated counters — **not** on a slot's
+status at finalization. A slot that was active earlier in the epoch and earned
+credit is still paid even if it is suspended or removed before the epoch closes
+(CoreSlot retains the slot/payout/reward-weight data; see
+[Consensus & CoreSlot](../chain/consensus-and-coreslot.md)).
+
+Convention: reward credit for block N uses the active set observed at
+BeginBlock(N). A status change inside block N affects credit from block N+1.
+
+## Distribution (UNIFORM_ACTIVE_BLOCKS) {#distribution-uniform-active-blocks}
+
+v1 uses uniform active-block distribution:
+
+```text
+effectiveWeight(slot) = blocksActive(slot)
+slotReward(slot)      = floor(pool * effectiveWeight / totalEffectiveWeight)
+carryOut              = pool - sum(slotReward)
+```
+
+where `pool = mintedEmission + carryIn + distributableFees − treasuryAmount`.
+In v1 `distributableFees = 0` and the default `treasuryAmount = 0`, so
+`pool = mintedEmission + carryIn`.
+
+> Example: `pool = 4,161,900`, 4 slots each active for all 10 blocks
+> (total weight 40), each slot = `floor(4,161,900 × 10 / 40) = 1,040,475`,
+> sum = `4,161,900`, carry out = `0`.
+
+Properties:
+- floor-division dust carries forward (`remainder_policy = CARRY_FORWARD`);
+- a slot with zero active blocks gets no claim record;
+- if total weight is zero (no eligible slots), the **full pool carries forward**
+  and emission is still minted/advanced;
+- weighted distribution and consensus power are **never** used in v1.
+
+## Carry-forward
+
+The unallocated remainder (`carryOut`) is stored as `CarryForwardRemainder` and
+added to the next epoch's pool. Carry can never be negative. An empty active set
+carries the full pool; a later epoch with eligible slots distributes accumulated
+carry.
+
+## Treasury and fees
+
+The default treasury share is **zero**, so no treasury transfer occurs. A nonzero
+emission treasury share is supported and requires a valid treasury address; fee
+treasury shares stay inert while fees are disabled. Fee collection and
+distribution are disabled in v1 (`distributableFees = 0`); attempting to enable
+them is rejected by params validation.

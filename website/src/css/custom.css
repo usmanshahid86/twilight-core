@@ -1,0 +1,425 @@
+/* ==========================================================================
+   TWILIGHT CHAIN DOCS — design system
+
+   A dark, refined Twilight visual system for the nyks-core documentation site:
+   design tokens, Infima overrides, and a full component layer (typography,
+   navbar, sidebar, tables, code, admonitions, ToC, pagination).
+
+   Headings use Inter (clean, professional); Instrument Serif is reserved for
+   occasional display moments via .display-heading. Roboto Mono for code/UI.
+   ========================================================================== */
+
+/* ==========================================================================
+   1. DESIGN TOKENS
+   ========================================================================== */
+:root {
+  /* Fonts (loaded via Google Fonts in docusaurus.config.ts) */
+  --font-body:    Inter, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji";
+  --font-feature: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-ui:      "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+
+  /* Type scale */
+  --text-2xs:  0.625rem;
+  --text-xs:   0.75rem;
+  --text-sm:   0.875rem;
+  --text-base: 1rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.25rem;
+  --text-2xl:  1.5rem;
+  --text-3xl:  1.875rem;
+  --text-4xl:  2.25rem;
+
+  /* Background */
+  --tw-bg-base:     #08080a;
+  --tw-bg-elevated: #101014;
+  --tw-bg-surface:  #16161c;
+  --tw-bg-overlay:  #1c1c24;
+  --tw-bg-hover:    rgba(255, 255, 255, 0.04);
+
+  /* Foreground */
+  --tw-fg-primary:   #f0f0f2;
+  --tw-fg-secondary: #9898a8;
+  --tw-fg-muted:     #606070;
+  --tw-fg-disabled:  #404050;
+
+  /* Borders */
+  --tw-border:        rgba(255, 255, 255, 0.07);
+  --tw-border-strong: rgba(255, 255, 255, 0.13);
+  --tw-border-focus:  rgba(232, 121, 249, 0.5);
+
+  /* Accent (Twilight brand: fuchsia) */
+  --tw-accent:        #e879f9;
+  --tw-accent-hover:  #f0abfc;
+  --tw-accent-muted:  rgba(232, 121, 249, 0.12);
+  --tw-accent-glow:   rgba(232, 121, 249, 0.18);
+
+  /* Semantic */
+  --tw-positive: #22c55e;
+  --tw-negative: #f87171;
+  --tw-warning:  #fbbf24;
+  --tw-info:     #60a5fa;
+
+  /* Radius / shadow / motion / layout */
+  --tw-radius-xs: 4px;
+  --tw-radius-sm: 6px;
+  --tw-radius:    10px;
+  --tw-radius-lg: 14px;
+  --tw-shadow:    0 4px 16px rgba(0, 0, 0, 0.5);
+  --tw-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --tw-transition: 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  --tw-content-width: 760px;
+}
+
+/* ==========================================================================
+   2. INFIMA VARIABLE OVERRIDES
+   ========================================================================== */
+[data-theme="dark"],
+:root {
+  --ifm-color-primary:         var(--tw-accent);
+  --ifm-color-primary-dark:    #d946ef;
+  --ifm-color-primary-darker:  #c026d3;
+  --ifm-color-primary-darkest: #a21caf;
+  --ifm-color-primary-light:   var(--tw-accent-hover);
+  --ifm-color-primary-lighter: #f5d0fe;
+  --ifm-color-primary-lightest:#fdf4ff;
+
+  --ifm-background-color:         var(--tw-bg-base);
+  --ifm-background-surface-color: var(--tw-bg-surface);
+  --ifm-navbar-background-color:  var(--tw-bg-elevated);
+  --ifm-footer-background-color:  var(--tw-bg-elevated);
+  --ifm-toc-border-color:         var(--tw-border);
+  --ifm-hr-border-color:          var(--tw-border);
+  --ifm-table-border-color:       var(--tw-border-strong);
+
+  --ifm-font-family-base:      var(--font-body);
+  --ifm-font-family-monospace: var(--font-ui);
+  --ifm-font-color-base:       var(--tw-fg-primary);
+  --ifm-font-color-secondary:  var(--tw-fg-secondary);
+  --ifm-font-size-base:        var(--text-base);
+  --ifm-line-height-base:      1.72;
+  --ifm-heading-color:         var(--tw-fg-primary);
+  --ifm-heading-font-weight:   600;
+  --ifm-link-color:            var(--tw-accent);
+  --ifm-link-hover-color:      var(--tw-accent-hover);
+
+  --ifm-navbar-height:           64px;
+  --ifm-navbar-padding-horizontal: 1.5rem;
+  --ifm-navbar-shadow:           0 1px 0 var(--tw-border);
+  --ifm-navbar-link-color:       var(--tw-fg-secondary);
+  --ifm-navbar-link-hover-color: var(--tw-fg-primary);
+
+  --ifm-sidebar-width:                272px;
+  --ifm-menu-color:                   var(--tw-fg-secondary);
+  --ifm-menu-color-active:            var(--tw-accent);
+  --ifm-menu-color-background-active: var(--tw-accent-muted);
+  --ifm-menu-color-background-hover:  var(--tw-bg-hover);
+
+  --ifm-code-background:         var(--tw-bg-overlay);
+  --ifm-code-border-radius:      var(--tw-radius-sm);
+  --ifm-code-font-size:          0.875em;
+  --ifm-code-padding-horizontal: 0.4em;
+  --ifm-code-padding-vertical:   0.12em;
+  --ifm-pre-background:          var(--tw-bg-surface);
+  --ifm-pre-border-radius:       var(--tw-radius);
+
+  --ifm-blockquote-border-color: var(--tw-border-strong);
+  --ifm-blockquote-color:        var(--tw-fg-secondary);
+  --ifm-alert-border-radius:     var(--tw-radius);
+  --ifm-alert-padding-vertical:  1rem;
+  --ifm-alert-padding-horizontal:1.25rem;
+
+  --ifm-toc-link-color:          var(--tw-fg-muted);
+  --ifm-toc-link-color-active:   var(--tw-accent);
+  --ifm-breadcrumb-color-active: var(--tw-accent);
+  --ifm-pagination-nav-color-hover: var(--tw-accent);
+  --docusaurus-highlighted-code-line-bg: rgba(232, 121, 249, 0.12);
+}
+
+/* Light theme (if toggled) */
+[data-theme="light"] {
+  --tw-bg-base:      #fafafa;
+  --tw-bg-elevated:  #ffffff;
+  --tw-bg-surface:   #f4f4f5;
+  --tw-bg-overlay:   #ececef;
+  --tw-bg-hover:     rgba(0, 0, 0, 0.04);
+  --tw-fg-primary:   #09090b;
+  --tw-fg-secondary: #52525b;
+  --tw-fg-muted:     #a1a1aa;
+  --tw-border:       rgba(0, 0, 0, 0.08);
+  --tw-border-strong:rgba(0, 0, 0, 0.14);
+  --tw-accent:       #c026d3;
+  --tw-accent-hover: #a21caf;
+  --tw-accent-muted: rgba(192, 38, 211, 0.08);
+
+  --ifm-color-primary:            var(--tw-accent);
+  --ifm-background-color:         var(--tw-bg-base);
+  --ifm-background-surface-color: var(--tw-bg-surface);
+  --ifm-navbar-background-color:  var(--tw-bg-elevated);
+  --ifm-font-color-base:          var(--tw-fg-primary);
+  --ifm-heading-color:            var(--tw-fg-primary);
+}
+
+/* ==========================================================================
+   3. BASE / TYPOGRAPHY
+   ========================================================================== */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--tw-bg-base);
+  color: var(--tw-fg-primary);
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-body);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  color: var(--tw-fg-primary);
+}
+
+.markdown h1, article h1:first-child {
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  margin-bottom: 0.6rem;
+}
+.markdown h2 { font-size: var(--text-2xl); margin-top: 2.75rem; margin-bottom: 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--tw-border); }
+.markdown h3 { font-size: var(--text-xl);  margin-top: 2rem;    margin-bottom: 0.5rem; }
+.markdown h4 { font-size: var(--text-lg);  margin-top: 1.5rem; }
+
+/* Instrument Serif reserved for deliberate display moments only. */
+.display-heading {
+  font-family: var(--font-feature);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+.markdown p {
+  line-height: 1.75;
+  margin-bottom: 1.2rem;
+}
+
+a {
+  color: var(--tw-accent);
+  text-decoration: none;
+  transition: color var(--tw-transition);
+}
+a:hover {
+  color: var(--tw-accent-hover);
+  text-decoration: underline;
+  text-decoration-color: var(--tw-accent-muted);
+}
+
+code {
+  font-family: var(--font-ui);
+  font-size: 0.85em;
+  background: var(--tw-bg-overlay);
+  border: 1px solid var(--tw-border);
+  border-radius: var(--tw-radius-xs);
+  padding: 0.1em 0.4em;
+  color: var(--tw-fg-primary);
+}
+
+hr {
+  border-top: 1px solid var(--tw-border);
+  margin: 2.5rem 0;
+}
+
+.markdown ul, .markdown ol { padding-left: 1.4rem; margin-bottom: 1.2rem; }
+.markdown li { margin-bottom: 0.3rem; line-height: 1.7; }
+strong { font-weight: 600; color: var(--tw-fg-primary); }
+
+blockquote {
+  border-left: 3px solid var(--tw-accent-muted);
+  background: var(--tw-bg-surface);
+  border-radius: 0 var(--tw-radius-sm) var(--tw-radius-sm) 0;
+  margin: 1.5rem 0;
+  padding: 0.85rem 1.25rem;
+  color: var(--tw-fg-secondary);
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+/* ==========================================================================
+   4. TABLES (this site is table-heavy)
+   ========================================================================== */
+.markdown table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  margin-bottom: 1.5rem;
+  border: 1px solid var(--tw-border);
+  border-radius: var(--tw-radius);
+  overflow: hidden;
+}
+.markdown table thead { background: var(--tw-bg-surface); }
+.markdown table th {
+  background: var(--tw-bg-surface);
+  color: var(--tw-fg-secondary);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: left;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--tw-border-strong);
+}
+.markdown table td {
+  padding: 0.55rem 0.9rem;
+  border-top: 1px solid var(--tw-border);
+  color: var(--tw-fg-primary);
+}
+.markdown table tr:hover td { background: var(--tw-bg-hover); }
+
+/* ==========================================================================
+   5. NAVBAR
+   ========================================================================== */
+.navbar {
+  height: var(--ifm-navbar-height);
+  border-bottom: 1px solid var(--tw-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background-color: rgba(16, 16, 20, 0.9) !important;
+}
+[data-theme="light"] .navbar {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+.navbar__title {
+  font-weight: 700;
+  font-size: var(--text-base);
+  letter-spacing: -0.01em;
+  color: var(--tw-fg-primary);
+}
+.navbar__link {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  transition: color var(--tw-transition);
+}
+.navbar__link--active,
+.navbar__link:hover { color: var(--tw-fg-primary) !important; }
+
+/* ==========================================================================
+   6. SIDEBAR
+   ========================================================================== */
+.theme-doc-sidebar-container {
+  border-right: 1px solid var(--tw-border) !important;
+  background: var(--tw-bg-elevated) !important;
+}
+.menu { padding: 1rem 0.75rem; font-size: var(--text-sm); }
+.menu__link {
+  border-radius: var(--tw-radius-sm);
+  padding: 0.375rem 0.75rem;
+  font-weight: 500;
+  color: var(--tw-fg-secondary);
+  transition: background var(--tw-transition), color var(--tw-transition);
+}
+.menu__link:hover {
+  background: var(--tw-bg-hover);
+  color: var(--tw-fg-primary);
+  text-decoration: none;
+}
+.menu__link--active {
+  background: var(--tw-accent-muted) !important;
+  color: var(--tw-accent) !important;
+  font-weight: 600;
+}
+.menu__list-item-collapsible:hover { background: var(--tw-bg-hover); }
+/* Category labels: small uppercase caps */
+.menu__list-item > .menu__link--sublist-caret {
+  color: var(--tw-fg-secondary);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ==========================================================================
+   7. DOC CONTENT AREA
+   ========================================================================== */
+.theme-doc-markdown { max-width: var(--tw-content-width); }
+
+.breadcrumbs__link { color: var(--tw-fg-muted); font-size: var(--text-sm); }
+.breadcrumbs__item--active .breadcrumbs__link { color: var(--tw-fg-secondary); background: none; }
+
+.table-of-contents { font-size: var(--text-xs); border-left-color: var(--tw-border); }
+.table-of-contents__link { color: var(--tw-fg-muted); padding: 0.2rem 0; display: block; transition: color var(--tw-transition); }
+.table-of-contents__link:hover,
+.table-of-contents__link--active { color: var(--tw-accent); text-decoration: none; }
+
+.pagination-nav__link {
+  background: var(--tw-bg-surface);
+  border: 1px solid var(--tw-border);
+  border-radius: var(--tw-radius);
+  transition: border-color var(--tw-transition), background var(--tw-transition);
+}
+.pagination-nav__link:hover { border-color: var(--tw-border-strong); background: var(--tw-bg-overlay); text-decoration: none; }
+.pagination-nav__label { font-size: var(--text-sm); font-weight: 600; color: var(--tw-fg-primary); }
+.pagination-nav__sublabel { font-size: var(--text-xs); color: var(--tw-fg-muted); }
+
+.theme-edit-this-page, .theme-last-updated { font-size: var(--text-xs); color: var(--tw-fg-muted); }
+.theme-edit-this-page:hover { color: var(--tw-accent); }
+
+/* ==========================================================================
+   8. CODE BLOCKS
+   ========================================================================== */
+.prism-code {
+  font-family: var(--font-ui) !important;
+  font-size: var(--text-sm) !important;
+  line-height: 1.65 !important;
+}
+div[class*="codeBlockContainer"] {
+  border: 1px solid var(--tw-border) !important;
+  border-radius: var(--tw-radius) !important;
+  overflow: hidden;
+  box-shadow: var(--tw-shadow);
+}
+div[class*="codeBlockTitle"] {
+  background: var(--tw-bg-overlay) !important;
+  border-bottom: 1px solid var(--tw-border) !important;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  color: var(--tw-fg-muted);
+  padding: 0.5rem 1rem;
+}
+button[class*="copyButton"] {
+  color: var(--tw-fg-muted);
+  background: transparent;
+  transition: color var(--tw-transition);
+}
+button[class*="copyButton"]:hover { color: var(--tw-fg-primary); background: var(--tw-bg-hover); }
+
+/* ==========================================================================
+   9. ADMONITIONS (status boxes / warnings — used heavily)
+   ========================================================================== */
+.theme-admonition {
+  border-radius: var(--tw-radius);
+  border: 1px solid var(--tw-border);
+  background: var(--tw-bg-surface);
+  box-shadow: none;
+  margin-bottom: 1.5rem;
+}
+.theme-admonition [class*="admonitionHeading"] {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.theme-admonition-note   { border-color: rgba(96, 165, 250, 0.45);  background: rgba(96, 165, 250, 0.06); }
+.theme-admonition-info   { border-color: rgba(96, 165, 250, 0.45);  background: rgba(96, 165, 250, 0.06); }
+.theme-admonition-tip    { border-color: rgba(34, 197, 94, 0.45);   background: rgba(34, 197, 94, 0.06); }
+.theme-admonition-warning{ border-color: rgba(251, 191, 36, 0.45);  background: rgba(251, 191, 36, 0.06); }
+.theme-admonition-danger { border-color: rgba(248, 113, 113, 0.45); background: rgba(248, 113, 113, 0.06); }
+
+/* ==========================================================================
+   10. RESPONSIVE
+   ========================================================================== */
+@media (max-width: 996px) {
+  .markdown h1, article h1:first-child { font-size: var(--text-2xl); }
+  .markdown table { font-size: var(--text-xs); }
+}

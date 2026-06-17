@@ -1,0 +1,55 @@
+---
+title: Accounts & Denoms
+---
+
+import { constants } from '@site/docs/_snippets/constants.mdx';
+
+# Accounts & Denoms
+
+## Denominations
+
+| Field | Value | Role |
+|---|---|---|
+| Native (base) denom | `{constants.nativeDenom}` | The **only** denom used for stateful accounting |
+| Display denom | `{constants.displayDenom}` | Display metadata only |
+| Symbol | `{constants.symbol}` | Display metadata only |
+| Name | {constants.name} | Display metadata only |
+| Decimals | {constants.decimals} | `1 {constants.symbol} = 10^{constants.decimals} {constants.nativeDenom}` |
+| Max supply | {constants.maxSupply} | = {constants.maxSupplyDisplay} |
+
+:::warning utwlt is the only accounting denom
+`{constants.nativeDenom}` is the only denomination used by balances, minting,
+rewards, and claims. `{constants.displayDenom}` / `{constants.symbol}` /
+"{constants.name}" are **display metadata only** and never appear in accounting
+state. Rewards mint only `{constants.nativeDenom}`; claims pay only
+`{constants.nativeDenom}`. CLI and query outputs are in `{constants.nativeDenom}`
+unless explicitly formatted otherwise.
+:::
+
+## Premine
+
+The production rewards design assumes a **zero-premine** genesis:
+`CumulativeEmitted = 0`, and total supply rises only through epoch emission.
+
+Development/localnet fixtures may explicitly fund accounts (e.g. the localnet
+`init.sh` funds the authority and emergency accounts with
+`1,000,000,000,000{constants.nativeDenom}` each). Any funded balance is a test
+fixture, not a production premine — see [Localnet](localnet.md) and
+[Release Readiness](release-readiness.md).
+
+## Module accounts
+
+| Account | Permission | Purpose |
+|---|---|---|
+| `{constants.rewardsModuleAccount}` | `Minter` | Holds minted epoch emission and unclaimed rewards; the only minter on the chain |
+| `{constants.feePoolModuleAccount}` | _(none)_ | Dormant fee plumbing; holds nothing while fees are disabled |
+
+Module-account permissions are declared in `app/config.go`. The
+`{constants.rewardsModuleAccount}` account is the sole `Minter`; the
+`{constants.feePoolModuleAccount}` account has **no** permissions.
+
+:::note Fees are dormant
+Fee collection and fee distribution are **disabled** in the current version. The
+`{constants.feePoolModuleAccount}` account exists as forward-compatible plumbing
+only; its balance stays zero. Enabling fees requires a future coordinated upgrade.
+:::

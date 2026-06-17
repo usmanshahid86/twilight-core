@@ -1,0 +1,184 @@
+/* Twilight Chain docs — homepage hero + audience cards.
+   Uses the global design tokens defined in src/css/custom.css. */
+
+.hero {
+  position: relative;
+  padding: 6rem 1.5rem 3.5rem;
+  text-align: center;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 120% at 50% -10%, var(--tw-accent-glow), transparent 60%),
+    var(--tw-bg-base);
+  border-bottom: 1px solid var(--tw-border);
+}
+
+.heroInner {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.eyebrow {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--tw-fg-secondary);
+  border: 1px solid var(--tw-border);
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem;
+  margin-bottom: 1.5rem;
+}
+
+.title {
+  font-family: var(--font-feature);
+  font-weight: 400;
+  font-size: clamp(3rem, 8vw, 4.5rem);
+  line-height: 1.04;
+  letter-spacing: -0.01em;
+  margin: 0 0 1rem;
+  color: var(--tw-fg-primary);
+}
+
+.tagline {
+  font-size: var(--text-lg);
+  line-height: 1.6;
+  color: var(--tw-fg-secondary);
+  margin: 0 auto 2rem;
+  max-width: 620px;
+}
+
+.tagline code {
+  font-size: 0.9em;
+}
+
+.ctaRow {
+  display: flex;
+  gap: 0.85rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 1.75rem;
+}
+
+.ctaPrimary,
+.ctaSecondary {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--tw-radius-sm);
+  padding: 0.7rem 1.4rem;
+  font-size: var(--text-base);
+  font-weight: 600;
+  transition: all var(--tw-transition);
+}
+
+.ctaPrimary {
+  background: var(--tw-accent);
+  color: #0a0a0c;
+}
+.ctaPrimary:hover {
+  background: var(--tw-accent-hover);
+  color: #0a0a0c;
+  text-decoration: none;
+  box-shadow: 0 0 24px var(--tw-accent-glow);
+}
+
+.ctaSecondary {
+  background: transparent;
+  color: var(--tw-fg-primary);
+  border: 1px solid var(--tw-border-strong);
+}
+.ctaSecondary:hover {
+  border-color: var(--tw-accent);
+  color: var(--tw-accent);
+  text-decoration: none;
+}
+
+.statusNote {
+  font-size: var(--text-xs);
+  color: var(--tw-fg-muted);
+  max-width: 540px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 3.5rem 1.5rem 5rem;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.card {
+  position: relative;
+  display: block;
+  background: var(--tw-bg-surface);
+  border: 1px solid var(--tw-border);
+  border-radius: var(--tw-radius-lg);
+  padding: 1.4rem 1.4rem 1.5rem;
+  transition: border-color var(--tw-transition), transform var(--tw-transition),
+    box-shadow var(--tw-transition);
+  color: inherit;
+}
+.card:hover {
+  text-decoration: none;
+  border-color: var(--tw-border-focus);
+  transform: translateY(-2px);
+  box-shadow: var(--tw-shadow);
+}
+
+.cardTag {
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tw-accent);
+  margin-bottom: 0.75rem;
+}
+
+.cardTitle {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.4rem;
+  color: var(--tw-fg-primary);
+}
+
+.cardDesc {
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--tw-fg-secondary);
+  margin: 0;
+}
+
+.cardArrow {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.3rem;
+  color: var(--tw-fg-muted);
+  transition: color var(--tw-transition), transform var(--tw-transition);
+}
+.card:hover .cardArrow {
+  color: var(--tw-accent);
+  transform: translateX(2px);
+}
+
+@media (max-width: 996px) {
+  .cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .hero {
+    padding-top: 4.5rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}

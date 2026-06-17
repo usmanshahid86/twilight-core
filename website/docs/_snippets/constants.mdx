@@ -1,0 +1,26 @@
+{/*
+  Single source of truth for chain/rewards constants cited across the docs.
+  Import the named export and reference fields so numbers never drift:
+
+    import { constants } from '@site/docs/_snippets/constants.mdx';
+
+  This file is a partial (underscore-prefixed) and is excluded from routing.
+  All values are the production defaults from x/rewards/types/defaults.go and
+  app/params unless a page explicitly labels a localnet/test value.
+*/}
+
+export const constants = {
+  nativeDenom: "utwlt",
+  displayDenom: "twlt",
+  symbol: "TWLT",
+  name: "Twilight",
+  decimals: 6,
+  maxSupply: "21,000,000,000,000 utwlt",
+  maxSupplyDisplay: "21,000,000 TWLT",
+  epochLengthBlocks: "17,280",
+  initialBlockSubsidy: "416,190 utwlt",
+  distributionMode: "UNIFORM_ACTIVE_BLOCKS",
+  remainderPolicy: "CARRY_FORWARD",
+  rewardsModuleAccount: "rewards",
+  feePoolModuleAccount: "rewards_fee_pool",
+};
