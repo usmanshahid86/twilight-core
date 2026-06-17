@@ -32,7 +32,7 @@ Flags:
   -y, --yes                         Skip tx broadcasting prompt confirmation
 
 Global Flags:
-      --home string         directory for config and data (default "/Users/quasar/.twilightd")
+      --home string         directory for config and data (default "~/.twilightd")
       --log_format string   The logging format (json|plain) (default "plain")
       --log_level string    The logging level (trace|debug|info|warn|error|fatal|panic|disabled or '*:<level>,<key>:<level>') (default "info")
       --log_no_color        Disable colored logs
