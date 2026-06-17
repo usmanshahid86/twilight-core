@@ -1,4 +1,4 @@
-.PHONY: build test fmt proto localnet-init localnet-smoke localnet-rewards-smoke localnet-agree \
+.PHONY: build test fmt proto localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-soak localnet-agree \
 	drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -21,6 +21,13 @@ localnet-smoke:
 
 localnet-rewards-smoke:
 	./scripts/localnet/rewards-smoke.sh
+
+# Soak harness: runs the four-node rewards localnet for SOAK_DURATION seconds with
+# continuous determinism/accounting assertions + periodic claim/pause/param/restart
+# drills. Env-tunable (SOAK_DURATION, EPOCH_LENGTH, PREMINE, CHAOS, ...). See
+# docs/research/x-rewards-soak-harness-design.md.
+localnet-rewards-soak:
+	./scripts/localnet/rewards-soak.sh
 
 # Cross-node app/validators/next-validators hash agreement against an already
 # running localnet (use after `make localnet-init` + scripts/localnet/start.sh).
