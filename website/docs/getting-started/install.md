@@ -13,8 +13,8 @@ title: Install
 ## Build the node
 
 ```bash
-git clone https://github.com/twilight-project/nyks-core
-cd nyks-core
+git clone https://github.com/twilight-project/twilight-core
+cd twilight-core
 make build          # builds ./build/twilightd
 ```
 

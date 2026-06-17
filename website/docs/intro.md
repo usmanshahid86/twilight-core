@@ -53,7 +53,7 @@ only** (6 decimals) and never appear in accounting state.
 
 - **[Rewards overview](rewards/overview.mdx)** — how block rewards are minted,
   distributed, and claimed.
-- **Source:** the [`nyks-core` repository](https://github.com/twilight-project/nyks-core).
+- **Source:** the [`twilight-core` repository](https://github.com/twilight-project/twilight-core).
 
 More sections (Getting Started, Chain Architecture, Operators, Reference,
 Development) are being added; see the sidebar as it grows.

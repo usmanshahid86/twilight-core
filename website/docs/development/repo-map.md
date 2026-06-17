@@ -4,7 +4,7 @@ title: Repo Map
 
 # Repo Map
 
-Top-level layout of `nyks-core`.
+Top-level layout of `twilight-core`.
 
 | Path | Contents |
 |---|---|

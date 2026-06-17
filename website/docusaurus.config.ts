@@ -4,7 +4,7 @@ import { themes as prismThemes } from "prism-react-renderer";
 
 // Twilight Chain documentation site.
 // Fresh, self-contained Docusaurus project. All content is authored from the
-// nyks-core repository (code + phase reports). Visual language only evokes the
+// twilight-core repository (code + phase reports). Visual language only evokes the
 // Twilight brand; nothing is copied from other Twilight sites.
 const config: Config = {
   title: "Twilight Chain Docs",
@@ -14,7 +14,7 @@ const config: Config = {
   url: "https://twilight-project.github.io",
   baseUrl: "/",
   organizationName: "twilight-project",
-  projectName: "nyks-core",
+  projectName: "twilight-core",
   favicon: "img/twilight.svg",
 
   // Fail the build on any dead internal link or anchor.
@@ -60,7 +60,7 @@ const config: Config = {
           routeBasePath: "/",
           sidebarPath: "./sidebars.ts",
           editUrl:
-            "https://github.com/twilight-project/nyks-core/tree/main/website/",
+            "https://github.com/twilight-project/twilight-core/tree/main/website/",
         },
         blog: false,
         theme: { customCss: "./src/css/custom.css" },
@@ -81,7 +81,7 @@ const config: Config = {
       items: [
         { type: "docSidebar", sidebarId: "docs", position: "left", label: "Docs" },
         {
-          href: "https://github.com/twilight-project/nyks-core",
+          href: "https://github.com/twilight-project/twilight-core",
           label: "GitHub",
           position: "right",
         },
@@ -90,7 +90,7 @@ const config: Config = {
     footer: {
       style: "dark",
       links: [],
-      copyright: "Twilight Chain Docs — built from the nyks-core repository.",
+      copyright: "Twilight Chain Docs — built from the twilight-core repository.",
     },
     prism: {
       theme: prismThemes.dracula,

@@ -79,7 +79,6 @@ Temporary Items
 
 
 # Root build binaries (build to build/ instead; never track at repo root)
-/nyksd
 /twilightd
 
 # Docs site (Docusaurus) — Node artifacts stay isolated under website/ and are
