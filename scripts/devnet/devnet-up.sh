@@ -102,5 +102,5 @@ echo "RPC      : http://${PUBLIC_IP}:${RPC_PORT}"
 echo "home     : $HOME_DIR"
 echo "join doc : $HOME_DIR/JOIN.md"
 echo
-echo "start under tmux with:"
-echo "  tmux new-session -d -s devnet \"$BIN start --home $HOME_DIR --minimum-gas-prices 0utwlt 2>&1 | tee $HOME_DIR/devnet.log\""
+echo "start it (systemd recommended for a long-lived devnet; see devnet/README.md):"
+echo "  $BIN start --home $HOME_DIR --minimum-gas-prices 0utwlt"
