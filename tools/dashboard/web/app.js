@@ -22,9 +22,13 @@ function bar(pct) {
 }
 
 async function tick() {
-  let ov, pa, va, cl;
+  let ov, pa, va, cl, bl, tx;
   try {
-    [ov, pa, va, cl] = await Promise.all([j("/api/overview"), j("/api/params"), j("/api/validators"), j("/api/claims")]);
+    [ov, pa, va, cl, bl, tx] = await Promise.all([
+      j("/api/overview"), j("/api/params"), j("/api/validators"), j("/api/claims"),
+      j("/api/blocks?limit=12").catch(() => ({ blocks: [] })),
+      j("/api/txs?heights=200&limit=25").catch(() => ({ txs: [] })),
+    ]);
   } catch (e) {
     $("updated").textContent = "backend unreachable";
     return;
@@ -112,6 +116,38 @@ twilightd coreslot-query slots --node http://localhost:26657 -o json   # find ne
 twilightd coreslot activate &lt;slot-id&gt; $C</pre>
     <div class="k" style="text-transform:none;letter-spacing:0">Operator gets their pubkey with <code>twilightd comet show-validator | jq -r .key</code>. See devnet/README.md.</div>
   </div>`;
+
+  // --- blocks (wide) ---
+  const blocks = bl?.blocks || [];
+  html += `<div class="card wide"><div class="k">Latest blocks</div>
+    <table><thead><tr><th>height</th><th>time</th><th>proposer</th><th>txs</th><th>app hash</th></tr></thead><tbody>
+    ${blocks.map((b) => `<tr>
+      <td class="pill">${grp(b.height)}</td>
+      <td>${b.time ? new Date(b.time).toLocaleTimeString() : "—"}</td>
+      <td title="${b.proposer}">${(b.proposer || "").slice(0, 12)}…</td>
+      <td>${b.num_txs ?? 0}</td>
+      <td title="${b.app_hash}">${(b.app_hash || "").slice(0, 12)}…</td></tr>`).join("")}
+    </tbody></table></div>`;
+
+  // --- transactions (wide) — decoded with the chain codec (custom Msgs included) ---
+  const txs = tx?.txs || [];
+  html += `<div class="card wide"><div class="k">Transactions (${txs.length}) — decoded</div>
+    <table><thead><tr><th>height</th><th>hash</th><th>status</th><th>messages</th><th>details</th></tr></thead><tbody>
+    ${txs.map((t) => {
+      const types = (t.messages || []).map((m) => m.type).join(", ") || (t.decode_error ? "undecodable tx" : "—");
+      const detail = t.decode_error
+        ? `<details><summary>raw + error</summary><pre style="white-space:pre-wrap;font-size:.72rem;color:#f6a">${t.decode_error}\n${(t.raw || "").slice(0, 120)}…</pre></details>`
+        : `<details><summary>decoded JSON</summary><pre style="white-space:pre-wrap;font-size:.72rem;color:#cfcfe0">${(t.messages || [])
+            .map((m) => m.error ? `${m.type}\n  ⚠ ${m.error}` : `${m.type}\n${JSON.stringify(m.body, null, 1)}`)
+            .join("\n\n")}</pre></details>`;
+      return `<tr>
+        <td class="pill">${grp(t.height)}</td>
+        <td title="${t.hash}">${(t.hash || "").slice(0, 12)}…</td>
+        <td style="color:${t.success ? "var(--accent)" : "#f6a"}">${t.success ? "ok" : "code " + (t.code ?? "?")}</td>
+        <td style="font-size:.78rem">${types}</td>
+        <td>${detail}</td></tr>`;
+    }).join("")}
+    </tbody></table>${txs.length === 0 ? '<div class="k" style="text-transform:none">no transactions in the scanned range</div>' : ""}</div>`;
 
   $("cards").innerHTML = html;
 }
