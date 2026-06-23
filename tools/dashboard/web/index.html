@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Twilight Devnet Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --bg:#08080a; --surface:#121216; --border:#26262c; --fg:#ededf2; --muted:#8a8a96; --accent:#e879f9; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 ui-sans-serif,system-ui,Inter,sans-serif; }
+  header { padding:1.2rem 1.5rem; border-bottom:1px solid var(--border); display:flex; align-items:baseline; gap:1rem; }
+  header h1 { margin:0; font-size:1.2rem; } header .chain { color:var(--accent); font-weight:600; }
+  header .muted { color:var(--muted); margin-left:auto; font-size:.85rem; }
+  main { max-width:1100px; margin:0 auto; padding:1.5rem; display:grid; gap:1rem; grid-template-columns:repeat(4,1fr); }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1rem 1.1rem; }
+  .card.wide { grid-column:1/-1; }
+  .k { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; }
+  .v { font-size:1.4rem; font-weight:600; margin-top:.2rem; word-break:break-all; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  th,td { text-align:left; padding:.4rem .5rem; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:500; } .pill { color:var(--accent); }
+  @media(max-width:900px){ main{grid-template-columns:repeat(2,1fr);} }
+</style>
+</head>
+<body>
+<header>
+  <h1>Twilight <span class="chain" id="chain">devnet</span></h1>
+  <span class="muted" id="updated">connecting…</span>
+</header>
+<main id="cards"></main>
+<script src="/app.js"></script>
+</body>
+</html>
