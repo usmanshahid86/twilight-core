@@ -37,7 +37,7 @@ Base URL in examples: `REST=http://localhost:1317`.
 | `CoreSlots` | `/twilight/coreslot/v1/slots` | `status` (query enum); `pagination.*` (query) | `QueryCoreSlotsResponse` | `curl $REST/twilight/coreslot/v1/slots` | 200 |
 | `ActiveCoreSlots` | `/twilight/coreslot/v1/active-slots` | — | `QueryCoreSlotsResponse` | `curl $REST/twilight/coreslot/v1/active-slots` | 200 |
 | `CoreSlotByOperator` | `/twilight/coreslot/v1/operators/{operator_address}` | `operator_address` (path, bech32) | `QueryCoreSlotResponse` | `curl $REST/twilight/coreslot/v1/operators/twilight1...` | 200; 404 if none |
-| `CoreSlotByConsensusAddress` | `/twilight/coreslot/v1/consensus/{consensus_address}` | `consensus_address` (path) | `QueryCoreSlotResponse` | `curl $REST/twilight/coreslot/v1/consensus/<addr>` | 200; 404 if none |
+| `CoreSlotByConsensusAddress` | `/twilight/coreslot/v1/consensus/{consensus_address}` | `consensus_address` (path, **hex**) | `QueryCoreSlotResponse` | `curl $REST/twilight/coreslot/v1/consensus/<HEXADDR>` | 200; 404 if none |
 | `PendingKeyRotations` | `/twilight/coreslot/v1/pending-key-rotations` | — | `QueryPendingKeyRotationsResponse` | `curl $REST/twilight/coreslot/v1/pending-key-rotations` | 200 |
 | `LastAppliedValidators` | `/twilight/coreslot/v1/last-applied-validators` | — | `QueryLastAppliedValidatorsResponse` | `curl $REST/twilight/coreslot/v1/last-applied-validators` | 200 |
 | `ReservedConsensusAddress` | `/twilight/coreslot/v1/reserved-consensus-address/{consensus_address}` | `consensus_address` (path) | `QueryReservedConsensusAddressResponse` | `curl $REST/twilight/coreslot/v1/reserved-consensus-address/<addr>` | 200; 404 if none |
@@ -53,5 +53,23 @@ Base URL in examples: `REST=http://localhost:1317`.
   gRPC-only; they are now REST-exposed.
 - Standard cosmos modules Twilight does **not** run (staking/gov/mint/distribution)
   return `501` by design — that is expected, not a regression.
+- **`CoreSlotByConsensusAddress` / `ReservedConsensusAddress` take a hex-encoded
+  consensus address** (the keeper rejects bech32 `valcons`). A real hex value is
+  available from CometBFT `:26657/validators` (`validators[].address`).
 
-Smoke check: `./scripts/smoke-api-surface.sh` (honors `BASE_REST`, `BASE_GRPC`).
+Smoke check: `./scripts/smoke-api-surface.sh` (honors `BASE_REST`, `BASE_GRPC`,
+`BASE_RPC`). It exercises `CoreSlotByOperator` (REST-sourced operator) and
+`CoreSlotByConsensusAddress` (hex cons address via `BASE_RPC`) with real fixtures.
+
+`ReservedConsensusAddress` 200 coverage:
+- **Integration (deterministic):** `x/coreslot/keeper/query_server_test.go` seeds a
+  reservation via genesis and via the realistic inactivate→remove lifecycle, then asserts
+  the query returns it.
+- **Smoke (opt-in):** a clean chain has no reservations, so the smoke check is gated on
+  `RESERVED_CONS_HEX` (a known reserved lowercase-hex address) and skipped otherwise. To
+  produce one on a localnet, run `scripts/seed-reservation.sh` after `init.sh` and before
+  `start.sh`; it seeds a reservation into genesis and prints the hex to export:
+  ```sh
+  RESERVED_CONS_HEX="$(TWILIGHT_LOCALNET_HOME=/tmp/twilight-localnet ./scripts/seed-reservation.sh -q)" \
+    ./scripts/smoke-api-surface.sh
+  ```
