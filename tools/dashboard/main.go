@@ -185,10 +185,17 @@ func (s *server) validators(ctx context.Context) (any, error) {
 
 func (s *server) claims(ctx context.Context) (any, error) {
 	rows := []json.RawMessage{}
-	for slot := uint64(1); int(slot) <= *maxSlots; slot++ {
-		r, err := s.rewardsQ.SlotRewards(ctx, &rewardstypes.QuerySlotRewardsRequest{SlotId: slot})
-		if err != nil || r == nil {
+	slots, err := s.coreQ.CoreSlots(ctx, &coreslottypes.QueryCoreSlotsRequest{})
+	if err != nil {
+		return map[string]any{"by_slot": rows}, nil
+	}
+	for i, sl := range slots.Slots {
+		if i >= *maxSlots {
 			break
+		}
+		r, err := s.rewardsQ.SlotRewards(ctx, &rewardstypes.QuerySlotRewardsRequest{SlotId: sl.SlotId})
+		if err != nil {
+			continue
 		}
 		rows = append(rows, s.raw(r))
 	}
