@@ -33,10 +33,15 @@ func (AppModuleBasic) RegisterInterfaces(registry codectypes.InterfaceRegistry) 
 	types.RegisterInterfaces(registry)
 }
 
-// RegisterGRPCGatewayRoutes is intentionally empty: the rewards query service
-// and its REST gateway are deferred to Phase 9. Only the Msg service is wired in
-// Phase 8.
-func (AppModuleBasic) RegisterGRPCGatewayRoutes(client.Context, *gwruntime.ServeMux) {}
+// RegisterGRPCGatewayRoutes wires the rewards query service into the REST
+// gRPC-gateway mux (1317) over the chain's gRPC query surface. It panics on a
+// registration error so a broken gateway crashes the node at startup rather than
+// silently serving 501s.
+func (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *gwruntime.ServeMux) {
+	if err := types.RegisterQueryHandlerClient(context.Background(), mux, types.NewQueryClient(clientCtx)); err != nil {
+		panic(err)
+	}
+}
 
 func (AppModuleBasic) DefaultGenesis(cdc codec.JSONCodec) json.RawMessage {
 	return cdc.MustMarshalJSON(types.DefaultGenesis())
