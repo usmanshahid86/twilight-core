@@ -65,14 +65,17 @@ current_epoch() { rq epoch-info | jq -r '.state.current_epoch | tonumber' 2>/dev
 cumulative()    { rq cumulative-emitted | jq -r '.cumulative_emitted' 2>/dev/null || echo 0; }
 module_balance(){ rq module-balances | jq -r '.rewards_balance' 2>/dev/null || echo 0; }
 # claimed flag for (slot 1, epoch) from the proven rewards query.
-# Records are created at finalization with claimed=false, but proto3 JSON OMITS
-# false booleans, so an unclaimed record reports its .claimed as absent (null).
-# We therefore return "true" only when the bool is present and true, else "false"
-# (covers both not-yet-claimed and no-record-yet) — callers test != "true".
-slot_claimed()  { rq slot-rewards 1 --limit 500 | jq -r --arg e "$1" '([.rewards[]? | select(.epoch_number==$e) | .claimed] | first) == true' 2>/dev/null || echo false; }
-# The claim record query can read state one block behind the tx's /tx commit, so a
-# single read right after a successful claim intermittently sees the stale (false)
-# value. Retry briefly for the expected state before asserting (cf. agree_at_retry).
+# Is slot 1's reward for epoch $1 claimed? Use the TARGETED `claimable` query
+# (ClaimableRewards: single epoch range, no pagination, returns only UNCLAIMED
+# records) — never the paginated `slot-rewards` list, whose default --limit page
+# is ascending by epoch and so DROPS the just-finalized epoch once the chain has
+# more than a page of records (the cause of the false "not marked claimed" FAILs).
+# Empty claimable set for [$1,$1] => claimed; a present record => not yet claimed.
+# (Slot 1 is always active here with a positive reward, so a missing record can
+# only mean claimed, not a zero-amount skip.)
+slot_claimed()  { rq claimable 1 "$1" "$1" | jq -e '(.rewards | length) == 0' >/dev/null 2>&1 && echo true || echo false; }
+# The claim record can still read one block behind the tx's /tx commit, so retry
+# briefly for the expected state before asserting (cf. agree_at_retry).
 slot_claimed_is() { # want_bool epoch  -- true within ~10s, else last-seen value
   local want="$1" epoch="$2" got i
   for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -304,7 +307,7 @@ while (( SECONDS - START < SOAK_DURATION )); do
     # PER_SLOT left the module account (the live `query bank balances` path is not
     # used — it was never validated and races block production).
     if (( finalized % CLAIM_EVERY_N == 0 )) && (( finalized > LAST_CLAIMED_EPOCH )); then
-      [[ "$(slot_claimed "$finalized")" == "false" ]] || record_fail "epoch $finalized claim record not unclaimed before claim"
+      [[ "$(slot_claimed_is false "$finalized")" == "false" ]] || record_fail "epoch $finalized claim record not unclaimed before claim"
       ccode="$(submit_and_wait 1 operator1 rewards claim 1 "$finalized" "$finalized")"
       if [[ "$ccode" == "0" ]]; then
         [[ "$(slot_claimed_is true "$finalized")" == "true" ]] || record_fail "epoch $finalized not marked claimed after successful claim"
