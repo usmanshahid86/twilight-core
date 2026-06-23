@@ -1,5 +1,5 @@
 .PHONY: build test fmt proto localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-soak localnet-agree \
-	drill-lifecycle drill-restart-rotation drill-quorum drills
+	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
 	go build ./cmd/twilightd
@@ -33,6 +33,11 @@ localnet-rewards-soak:
 # running localnet (use after `make localnet-init` + scripts/localnet/start.sh).
 localnet-agree:
 	./scripts/localnet/agree.sh
+
+# Self-contained API-surface smoke: spins up a throwaway localnet with REST + Swagger
+# enabled and a seeded reservation, runs both smoke scripts, and tears it down.
+api-smoke:
+	./scripts/smoke-local.sh
 
 # Operational drills (each spins up its own four-node localnet and tears it down).
 drill-lifecycle:

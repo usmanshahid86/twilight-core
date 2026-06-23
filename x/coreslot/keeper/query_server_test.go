@@ -1,0 +1,112 @@
+package keeper_test
+
+import (
+	"encoding/hex"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	sdked25519 "github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	"github.com/twilight-project/twilight-core/x/coreslot/keeper"
+	"github.com/twilight-project/twilight-core/x/coreslot/types"
+)
+
+// consHexForMarker mirrors the keeper's consensus-address derivation (lowercase hex of
+// the ed25519 pubkey address) for the slot fixtures built by pubkey(t, marker). This is
+// the exact key the REST route /twilight/coreslot/v1/reserved-consensus-address/{hex}
+// expects.
+func consHexForMarker(marker byte) string {
+	key := make([]byte, sdked25519.PubKeySize)
+	key[0] = marker
+	pk := sdked25519.PubKey{Key: key}
+	return hex.EncodeToString(pk.Address().Bytes())
+}
+
+// TestReservedConsensusAddressQuery_GenesisFixture seeds a reservation through genesis
+// and asserts the ReservedConsensusAddress query returns it — the handler that backs the
+// REST /reserved-consensus-address/{hex} 200 response.
+func TestReservedConsensusAddressQuery_GenesisFixture(t *testing.T) {
+	k, ctx, authority, emergency := setup(t)
+	params := types.DefaultParams(authority, emergency)
+
+	consAddr := make([]byte, 20)
+	for i := range consAddr {
+		consAddr[i] = byte(i + 1)
+	}
+	op := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
+	_, err := k.InitGenesis(ctx, &types.GenesisState{
+		Params: &params,
+		// Genesis requires at least one active slot; the reservation below is the
+		// fixture under test and is independent of this slot's consensus key.
+		Slots:      []*types.CoreSlot{slot(t, 1, op, 5, types.SlotStatus_SLOT_STATUS_ACTIVE, 1)},
+		NextSlotId: 2,
+		ReservedConsensusAddresses: []*types.ReservedConsensusAddress{{
+			ConsAddress:   consAddr,
+			SlotId:        9,
+			ReservedUntil: 1234,
+			Reason:        "key rotation",
+		}},
+	})
+	require.NoError(t, err)
+
+	qs := keeper.NewQueryServer(k)
+	key := hex.EncodeToString(consAddr) // lowercase hex, matching the stored key
+
+	resp, err := qs.ReservedConsensusAddress(ctx, &types.QueryReservedConsensusAddressRequest{ConsensusAddress: key})
+	require.NoError(t, err)
+	require.NotNil(t, resp.Reservation)
+	require.Equal(t, consAddr, resp.Reservation.ConsAddress)
+	require.Equal(t, uint64(9), resp.Reservation.SlotId)
+	require.Equal(t, int64(1234), resp.Reservation.ReservedUntil)
+	require.Equal(t, "key rotation", resp.Reservation.Reason)
+
+	// Negative: an unknown consensus address is not found (the REST 404/not-found path).
+	_, err = qs.ReservedConsensusAddress(ctx, &types.QueryReservedConsensusAddressRequest{
+		ConsensusAddress: hex.EncodeToString(make([]byte, 20)),
+	})
+	require.Error(t, err)
+}
+
+// TestReservedConsensusAddressQuery_RemovalLifecycle drives the realistic creation path:
+// an active slot is inactivated then removed, which reserves its consensus address for
+// the reuse-lockout window; the query then returns that reservation.
+func TestReservedConsensusAddressQuery_RemovalLifecycle(t *testing.T) {
+	k, ctx, authority, emergency := setup(t)
+	params := types.DefaultParams(authority, emergency)
+	op1 := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
+	op2 := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
+
+	// Two active slots so removing one stays above the minimum-active-slots floor.
+	_, err := k.InitGenesis(ctx, &types.GenesisState{
+		Params: &params,
+		Slots: []*types.CoreSlot{
+			slot(t, 1, op1, 7, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
+			slot(t, 2, op2, 8, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
+		},
+		NextSlotId: 3,
+	})
+	require.NoError(t, err)
+
+	msgs := keeper.NewMsgServer(k)
+	// Active slots must be inactivated/suspended before removal.
+	_, err = msgs.InactivateCoreSlot(ctx, &types.MsgInactivateCoreSlot{
+		AuthorityOrOperator: authority, SlotId: 1, Reason: "maintenance",
+	})
+	require.NoError(t, err)
+	_, err = msgs.RemoveCoreSlot(ctx, &types.MsgRemoveCoreSlot{
+		Authority: authority, SlotId: 1, Reason: "decommission",
+	})
+	require.NoError(t, err)
+
+	qs := keeper.NewQueryServer(k)
+	key := consHexForMarker(7) // the removed slot's consensus address
+
+	resp, err := qs.ReservedConsensusAddress(ctx, &types.QueryReservedConsensusAddressRequest{ConsensusAddress: key})
+	require.NoError(t, err)
+	require.NotNil(t, resp.Reservation)
+	require.Equal(t, uint64(1), resp.Reservation.SlotId)
+	require.Equal(t, "decommission", resp.Reservation.Reason)
+	require.NotZero(t, resp.Reservation.ReservedUntil)
+}
