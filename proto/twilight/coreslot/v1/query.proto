@@ -18,7 +18,9 @@ service Query {
     option (google.api.http).get = "/twilight/coreslot/v1/slots";
   }
   rpc ActiveCoreSlots(QueryActiveCoreSlotsRequest) returns (QueryCoreSlotsResponse) {
-    option (google.api.http).get = "/twilight/coreslot/v1/slots/active";
+    // Distinct from /slots/{slot_id} on purpose: a /slots/active path collides with
+    // the CoreSlot route and gets parsed as slot_id="active" (HTTP 400).
+    option (google.api.http).get = "/twilight/coreslot/v1/active-slots";
   }
   rpc CoreSlotByOperator(QueryCoreSlotByOperatorRequest) returns (QueryCoreSlotResponse) {
     option (google.api.http).get = "/twilight/coreslot/v1/operators/{operator_address}";
@@ -26,10 +28,18 @@ service Query {
   rpc CoreSlotByConsensusAddress(QueryCoreSlotByConsensusAddressRequest) returns (QueryCoreSlotResponse) {
     option (google.api.http).get = "/twilight/coreslot/v1/consensus/{consensus_address}";
   }
-  rpc PendingKeyRotations(QueryPendingKeyRotationsRequest) returns (QueryPendingKeyRotationsResponse);
-  rpc LastAppliedValidators(QueryLastAppliedValidatorsRequest) returns (QueryLastAppliedValidatorsResponse);
-  rpc ReservedConsensusAddress(QueryReservedConsensusAddressRequest) returns (QueryReservedConsensusAddressResponse);
-  rpc RewardWeight(QueryRewardWeightRequest) returns (QueryRewardWeightResponse);
+  rpc PendingKeyRotations(QueryPendingKeyRotationsRequest) returns (QueryPendingKeyRotationsResponse) {
+    option (google.api.http).get = "/twilight/coreslot/v1/pending-key-rotations";
+  }
+  rpc LastAppliedValidators(QueryLastAppliedValidatorsRequest) returns (QueryLastAppliedValidatorsResponse) {
+    option (google.api.http).get = "/twilight/coreslot/v1/last-applied-validators";
+  }
+  rpc ReservedConsensusAddress(QueryReservedConsensusAddressRequest) returns (QueryReservedConsensusAddressResponse) {
+    option (google.api.http).get = "/twilight/coreslot/v1/reserved-consensus-address/{consensus_address}";
+  }
+  rpc RewardWeight(QueryRewardWeightRequest) returns (QueryRewardWeightResponse) {
+    option (google.api.http).get = "/twilight/coreslot/v1/slots/{slot_id}/reward-weight";
+  }
 }
 
 message QueryParamsRequest {}

@@ -18,6 +18,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/runtime"
+	serverapi "github.com/cosmos/cosmos-sdk/server/api"
+	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	_ "github.com/cosmos/cosmos-sdk/x/auth"
@@ -28,6 +30,7 @@ import (
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	_ "github.com/cosmos/cosmos-sdk/x/consensus"
 
+	"github.com/twilight-project/twilight-core/app/openapi"
 	"github.com/twilight-project/twilight-core/app/params"
 	"github.com/twilight-project/twilight-core/x/coreslot"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
@@ -124,6 +127,20 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ 
 		AccountKeeper:  accountKeeper,
 		BankKeeper:     bankKeeper,
 		appCodec:       cdc,
+	}
+}
+
+// RegisterAPIRoutes registers all the REST gRPC-gateway routes via the embedded
+// runtime.App, then mounts the Swagger UI + merged OpenAPI spec at /swagger/ when
+// api.swagger is enabled. It overrides runtime.App.RegisterAPIRoutes (which does not
+// serve Swagger). When the API server is disabled this method is never called, and
+// when swagger=false the Swagger registration is a no-op, so REST is unaffected.
+func (a *App) RegisterAPIRoutes(apiSvr *serverapi.Server, apiConfig serverconfig.APIConfig) {
+	a.App.RegisterAPIRoutes(apiSvr, apiConfig)
+	if apiConfig.Swagger {
+		if err := openapi.RegisterSwaggerAPI(apiSvr.Router, apiConfig.Swagger); err != nil {
+			panic(err)
+		}
 	}
 }
 

@@ -1,0 +1,5335 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "cosmos/auth/v1beta1/query.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "Query"
+    },
+    {
+      "name": "Service"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/cosmos/auth/v1beta1/account_info/{address}": {
+      "get": {
+        "summary": "AccountInfo queries account info which is common to all account types.",
+        "operationId": "Query_AccountInfo",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryAccountInfoResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address",
+            "description": "address is the account address string.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/auth/v1beta1/accounts": {
+      "get": {
+        "summary": "Accounts returns all the existing accounts.",
+        "description": "When called from another module, this query might consume a high amount of\ngas if the pagination field is incorrectly set.",
+        "operationId": "Query_Accounts",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryAccountsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/auth/v1beta1/accounts/{address}": {
+      "get": {
+        "summary": "Account returns account details based on address.",
+        "operationId": "Query_Account",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryAccountResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address",
+            "description": "address defines the address to query for.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/auth/v1beta1/address_by_id/{id}": {
+      "get": {
+        "summary": "AccountAddressByID returns account address based on account number.",
+        "operationId": "Query_AccountAddressByID",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryAccountAddressByIDResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "description": "Deprecated, use account_id instead\n\nid is the account number of the address to be queried. This field\nshould have been an uint64 (like all account numbers), and will be\nupdated to uint64 in a future version of the auth query.",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "account_id",
+            "description": "account_id is the account number of the address to be queried.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/auth/v1beta1/bech32": {
+      "get": {
+        "summary": "Bech32Prefix queries bech32Prefix",
+        "operationId": "Query_Bech32Prefix",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1Bech32PrefixResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/auth/v1beta1/bech32/{address_bytes}": {
+      "get": {
+        "summary": "AddressBytesToString converts Account Address bytes to string",
+        "operationId": "Query_AddressBytesToString",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1AddressBytesToStringResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address_bytes",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "byte"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/auth/v1beta1/bech32/{address_string}": {
+      "get": {
+        "summary": "AddressStringToBytes converts Address string to bytes",
+        "operationId": "Query_AddressStringToBytes",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1AddressStringToBytesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address_string",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/auth/v1beta1/module_accounts": {
+      "get": {
+        "summary": "ModuleAccounts returns all the existing module accounts.",
+        "operationId": "Query_ModuleAccounts",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryModuleAccountsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/auth/v1beta1/module_accounts/{name}": {
+      "get": {
+        "summary": "ModuleAccountByName returns the module account info by module name",
+        "operationId": "Query_ModuleAccountByName",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryModuleAccountByNameResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/auth/v1beta1/params": {
+      "get": {
+        "summary": "Params queries all parameters.",
+        "operationId": "Query_Params",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/cosmosAuthV1beta1QueryParamsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/balances/{address}": {
+      "get": {
+        "summary": "AllBalances queries the balance of all coins for a single account.",
+        "description": "When called from another module, this query might consume a high amount of\ngas if the pagination field is incorrectly set.",
+        "operationId": "Query_AllBalances",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryAllBalancesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address",
+            "description": "address is the address to query balances for.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "resolve_denom",
+            "description": "resolve_denom is the flag to resolve the denom into a human-readable form from the metadata.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/balances/{address}/by_denom": {
+      "get": {
+        "summary": "Balance queries the balance of a single coin for a single account.",
+        "operationId": "Query_Balance",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryBalanceResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address",
+            "description": "address is the address to query balances for.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "denom",
+            "description": "denom is the coin denom to query balances for.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/denom_owners/{denom}": {
+      "get": {
+        "summary": "DenomOwners queries for all account addresses that own a particular token\ndenomination.",
+        "description": "When called from another module, this query might consume a high amount of\ngas if the pagination field is incorrectly set.",
+        "operationId": "Query_DenomOwners",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryDenomOwnersResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "denom",
+            "description": "denom defines the coin denomination to query all account holders for.",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "pattern": ".+"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/denom_owners_by_query": {
+      "get": {
+        "summary": "DenomOwnersByQuery queries for all account addresses that own a particular token\ndenomination.",
+        "operationId": "Query_DenomOwnersByQuery",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryDenomOwnersByQueryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "denom",
+            "description": "denom defines the coin denomination to query all account holders for.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/denoms_metadata": {
+      "get": {
+        "summary": "DenomsMetadata queries the client metadata for all registered coin\ndenominations.",
+        "operationId": "Query_DenomsMetadata",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryDenomsMetadataResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/denoms_metadata/{denom}": {
+      "get": {
+        "summary": "DenomMetadata queries the client metadata of a given coin denomination.",
+        "operationId": "Query_DenomMetadata",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryDenomMetadataResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "denom",
+            "description": "denom is the coin denom to query the metadata for.",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "pattern": ".+"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/denoms_metadata_by_query_string": {
+      "get": {
+        "summary": "DenomMetadataByQueryString queries the client metadata of a given coin denomination.",
+        "operationId": "Query_DenomMetadataByQueryString",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryDenomMetadataByQueryStringResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "denom",
+            "description": "denom is the coin denom to query the metadata for.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/params": {
+      "get": {
+        "summary": "Params queries the parameters of x/bank module.",
+        "operationId": "Query_Params",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/cosmosBankV1beta1QueryParamsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/send_enabled": {
+      "get": {
+        "summary": "SendEnabled queries for SendEnabled entries.",
+        "description": "This query only returns denominations that have specific SendEnabled settings.\nAny denomination that does not have a specific setting will use the default\nparams.default_send_enabled, and will not be returned by this query.",
+        "operationId": "Query_SendEnabled",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QuerySendEnabledResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "denoms",
+            "description": "denoms is the specific denoms you want look up. Leave empty to get all entries.",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/spendable_balances/{address}": {
+      "get": {
+        "summary": "SpendableBalances queries the spendable balance of all coins for a single\naccount.",
+        "description": "When called from another module, this query might consume a high amount of\ngas if the pagination field is incorrectly set.",
+        "operationId": "Query_SpendableBalances",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QuerySpendableBalancesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address",
+            "description": "address is the address to query spendable balances for.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/spendable_balances/{address}/by_denom": {
+      "get": {
+        "summary": "SpendableBalanceByDenom queries the spendable balance of a single denom for\na single account.",
+        "description": "When called from another module, this query might consume a high amount of\ngas if the pagination field is incorrectly set.",
+        "operationId": "Query_SpendableBalanceByDenom",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QuerySpendableBalanceByDenomResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address",
+            "description": "address is the address to query balances for.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "denom",
+            "description": "denom is the coin denom to query balances for.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/supply": {
+      "get": {
+        "summary": "TotalSupply queries the total supply of all coins.",
+        "description": "When called from another module, this query might consume a high amount of\ngas if the pagination field is incorrectly set.",
+        "operationId": "Query_TotalSupply",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QueryTotalSupplyResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/bank/v1beta1/supply/by_denom": {
+      "get": {
+        "summary": "SupplyOf queries the supply of a single coin.",
+        "description": "When called from another module, this query might consume a high amount of\ngas if the pagination field is incorrectly set.",
+        "operationId": "Query_SupplyOf",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1QuerySupplyOfResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "denom",
+            "description": "denom is the coin denom to query balances for.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/base/node/v1beta1/config": {
+      "get": {
+        "summary": "Config queries for the operator configuration.",
+        "operationId": "Service_Config",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1ConfigResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/base/node/v1beta1/status": {
+      "get": {
+        "summary": "Status queries for the node status.",
+        "operationId": "Service_Status",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1StatusResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/base/tendermint/v1beta1/abci_query": {
+      "get": {
+        "summary": "ABCIQuery defines a query handler that supports ABCI queries directly to the\napplication, bypassing Tendermint completely. The ABCI query must contain\na valid and supported path, including app, custom, p2p, and store.",
+        "operationId": "Service_ABCIQuery",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1ABCIQueryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "data",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "prove",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/base/tendermint/v1beta1/blocks/latest": {
+      "get": {
+        "summary": "GetLatestBlock returns the latest block.",
+        "operationId": "Service_GetLatestBlock",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1GetLatestBlockResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/base/tendermint/v1beta1/blocks/{height}": {
+      "get": {
+        "summary": "GetBlockByHeight queries block for given height.",
+        "operationId": "Service_GetBlockByHeight",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1GetBlockByHeightResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "height",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/base/tendermint/v1beta1/node_info": {
+      "get": {
+        "summary": "GetNodeInfo queries the current node info.",
+        "operationId": "Service_GetNodeInfo",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1GetNodeInfoResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/base/tendermint/v1beta1/syncing": {
+      "get": {
+        "summary": "GetSyncing queries node syncing.",
+        "operationId": "Service_GetSyncing",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1GetSyncingResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/base/tendermint/v1beta1/validatorsets/latest": {
+      "get": {
+        "summary": "GetLatestValidatorSet queries latest validator-set.",
+        "operationId": "Service_GetLatestValidatorSet",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1GetLatestValidatorSetResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/base/tendermint/v1beta1/validatorsets/{height}": {
+      "get": {
+        "summary": "GetValidatorSetByHeight queries validator-set at a given height.",
+        "operationId": "Service_GetValidatorSetByHeight",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1GetValidatorSetByHeightResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "height",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/consensus/v1/params": {
+      "get": {
+        "summary": "Params queries the parameters of x/consensus module.",
+        "operationId": "Query_Params",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/cosmosConsensusV1QueryParamsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/cosmos/tx/v1beta1/decode": {
+      "post": {
+        "summary": "TxDecode decodes the transaction.",
+        "operationId": "Service_TxDecode",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1TxDecodeResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "TxDecodeRequest is the request type for the Service.TxDecode\nRPC method.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1beta1TxDecodeRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/tx/v1beta1/decode/amino": {
+      "post": {
+        "summary": "TxDecodeAmino decodes an Amino transaction from encoded bytes to JSON.",
+        "operationId": "Service_TxDecodeAmino",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1TxDecodeAminoResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "TxDecodeAminoRequest is the request type for the Service.TxDecodeAmino\nRPC method.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1beta1TxDecodeAminoRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/tx/v1beta1/encode": {
+      "post": {
+        "summary": "TxEncode encodes the transaction.",
+        "operationId": "Service_TxEncode",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1TxEncodeResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "TxEncodeRequest is the request type for the Service.TxEncode\nRPC method.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1beta1TxEncodeRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/tx/v1beta1/encode/amino": {
+      "post": {
+        "summary": "TxEncodeAmino encodes an Amino transaction from JSON to encoded bytes.",
+        "operationId": "Service_TxEncodeAmino",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1TxEncodeAminoResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "TxEncodeAminoRequest is the request type for the Service.TxEncodeAmino\nRPC method.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1beta1TxEncodeAminoRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/tx/v1beta1/simulate": {
+      "post": {
+        "summary": "Simulate simulates executing a transaction for estimating gas usage.",
+        "operationId": "Service_Simulate",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1SimulateResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "SimulateRequest is the request type for the Service.Simulate\nRPC method.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1beta1SimulateRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/tx/v1beta1/txs": {
+      "get": {
+        "summary": "GetTxsEvent fetches txs by event.",
+        "operationId": "Service_GetTxsEvent",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1GetTxsEventResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "events",
+            "description": "events is the list of transaction event type.\nDeprecated post v0.47.x: use query instead, which should contain a valid\nevents query.",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "order_by",
+            "description": " - ORDER_BY_UNSPECIFIED: ORDER_BY_UNSPECIFIED specifies an unknown sorting order. OrderBy defaults\nto ASC in this case.\n - ORDER_BY_ASC: ORDER_BY_ASC defines ascending order\n - ORDER_BY_DESC: ORDER_BY_DESC defines descending order",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "ORDER_BY_UNSPECIFIED",
+              "ORDER_BY_ASC",
+              "ORDER_BY_DESC"
+            ],
+            "default": "ORDER_BY_UNSPECIFIED"
+          },
+          {
+            "name": "page",
+            "description": "page is the page number to query, starts at 1. If not provided, will\ndefault to first page.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "query",
+            "description": "query defines the transaction event query that is proxied to Tendermint's\nTxSearch RPC method. The query must be valid.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      },
+      "post": {
+        "summary": "BroadcastTx broadcast transaction.",
+        "operationId": "Service_BroadcastTx",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1BroadcastTxResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "BroadcastTxRequest is the request type for the Service.BroadcastTxRequest\nRPC method.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1beta1BroadcastTxRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/tx/v1beta1/txs/block/{height}": {
+      "get": {
+        "summary": "GetBlockWithTxs fetches a block with decoded txs.",
+        "operationId": "Service_GetBlockWithTxs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1GetBlockWithTxsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "height",
+            "description": "height is the height of the block to query.",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/cosmos/tx/v1beta1/txs/{hash}": {
+      "get": {
+        "summary": "GetTx fetches a tx by hash.",
+        "operationId": "Service_GetTx",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1beta1GetTxResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "hash",
+            "description": "hash is the tx hash to query, encoded as a hex string.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Service"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/active-slots": {
+      "get": {
+        "operationId": "Query_ActiveCoreSlots",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryCoreSlotsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/consensus/{consensus_address}": {
+      "get": {
+        "operationId": "Query_CoreSlotByConsensusAddress",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryCoreSlotResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "consensus_address",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/last-applied-validators": {
+      "get": {
+        "operationId": "Query_LastAppliedValidators",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryLastAppliedValidatorsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/operators/{operator_address}": {
+      "get": {
+        "operationId": "Query_CoreSlotByOperator",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryCoreSlotResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "operator_address",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/params": {
+      "get": {
+        "operationId": "Query_Params",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/twilightCoreslotV1QueryParamsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/pending-key-rotations": {
+      "get": {
+        "operationId": "Query_PendingKeyRotations",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryPendingKeyRotationsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/reserved-consensus-address/{consensus_address}": {
+      "get": {
+        "operationId": "Query_ReservedConsensusAddress",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryReservedConsensusAddressResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "consensus_address",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/slots": {
+      "get": {
+        "operationId": "Query_CoreSlots",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryCoreSlotsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "SLOT_STATUS_UNSPECIFIED",
+              "SLOT_STATUS_PENDING",
+              "SLOT_STATUS_ACTIVE",
+              "SLOT_STATUS_INACTIVE",
+              "SLOT_STATUS_SUSPENDED",
+              "SLOT_STATUS_REMOVED"
+            ],
+            "default": "SLOT_STATUS_UNSPECIFIED"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/slots/{slot_id}": {
+      "get": {
+        "operationId": "Query_CoreSlot",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryCoreSlotResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/slots/{slot_id}/reward-weight": {
+      "get": {
+        "operationId": "Query_RewardWeight",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryRewardWeightResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/cumulative-emitted": {
+      "get": {
+        "operationId": "Query_CumulativeEmitted",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryCumulativeEmittedResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/current-epoch/active-blocks": {
+      "get": {
+        "operationId": "Query_CurrentEpochActiveBlocks",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryCurrentEpochActiveBlocksResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/epoch-info": {
+      "get": {
+        "operationId": "Query_EpochInfo",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryEpochInfoResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/epochs/{epoch_number}": {
+      "get": {
+        "operationId": "Query_EpochReward",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryEpochRewardResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "epoch_number",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/module-balances": {
+      "get": {
+        "operationId": "Query_ModuleBalances",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryModuleBalancesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/next-halving": {
+      "get": {
+        "operationId": "Query_NextHalving",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryNextHalvingResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/params": {
+      "get": {
+        "operationId": "Query_Params",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/twilightRewardsV1QueryParamsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/slots/{slot_id}/claimable": {
+      "get": {
+        "operationId": "Query_ClaimableRewards",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryClaimableRewardsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "start_epoch",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "end_epoch",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/slots/{slot_id}/rewards": {
+      "get": {
+        "operationId": "Query_SlotRewards",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySlotRewardsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/supply-schedule": {
+      "get": {
+        "operationId": "Query_SupplySchedule",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySupplyScheduleResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "ModeInfoMulti": {
+      "type": "object",
+      "properties": {
+        "bitarray": {
+          "$ref": "#/definitions/v1beta1CompactBitArray",
+          "title": "bitarray specifies which keys within the multisig are signing"
+        },
+        "mode_infos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1ModeInfo"
+          },
+          "title": "mode_infos is the corresponding modes of the signers of the multisig\nwhich could include nested multisig public keys"
+        }
+      },
+      "title": "Multi is the mode info for a multisig public key"
+    },
+    "ModeInfoSingle": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "$ref": "#/definitions/v1beta1SignMode",
+          "title": "mode is the signing mode of the single signer"
+        }
+      },
+      "title": "Single is the mode info for a single signer. It is structured as a message\nto allow for additional fields such as locale for SIGN_MODE_TEXTUAL in the\nfuture"
+    },
+    "abciEvent": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/abciEventAttribute"
+          }
+        }
+      },
+      "description": "Event allows application developers to attach additional information to\nResponseFinalizeBlock and ResponseCheckTx.\nLater, transactions may be queried using these events."
+    },
+    "abciEventAttribute": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "index": {
+          "type": "boolean",
+          "title": "nondeterministic"
+        }
+      },
+      "description": "EventAttribute is a single key-value pair, associated with an event."
+    },
+    "bankV1beta1SendEnabled": {
+      "type": "object",
+      "properties": {
+        "denom": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "description": "SendEnabled maps coin denom to a send_enabled status (whether a denom is\nsendable)."
+    },
+    "coreslotV1CoreSlot": {
+      "type": "object",
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "operator_address": {
+          "type": "string"
+        },
+        "consensus_pubkey": {
+          "$ref": "#/definitions/protobufAny"
+        },
+        "payout_address": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/v1SlotStatus"
+        },
+        "consensus_power": {
+          "type": "string",
+          "format": "int64"
+        },
+        "reward_weight": {
+          "type": "string"
+        },
+        "created_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "activated_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "updated_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "suspended_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "removed_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "metadata": {
+          "$ref": "#/definitions/v1OperatorMetadata"
+        }
+      }
+    },
+    "coreslotV1ReservedConsensusAddress": {
+      "type": "object",
+      "properties": {
+        "cons_address": {
+          "type": "string",
+          "format": "byte"
+        },
+        "slot_id": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "reserved_until": {
+          "type": "string",
+          "format": "int64"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "cosmosAuthV1beta1Params": {
+      "type": "object",
+      "properties": {
+        "max_memo_characters": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "tx_sig_limit": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "tx_size_cost_per_byte": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "sig_verify_cost_ed25519": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "sig_verify_cost_secp256k1": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "Params defines the parameters for the auth module."
+    },
+    "cosmosAuthV1beta1QueryParamsResponse": {
+      "type": "object",
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/cosmosAuthV1beta1Params",
+          "description": "params defines the parameters of the module."
+        }
+      },
+      "description": "QueryParamsResponse is the response type for the Query/Params RPC method."
+    },
+    "cosmosBankV1beta1Params": {
+      "type": "object",
+      "properties": {
+        "send_enabled": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/bankV1beta1SendEnabled"
+          },
+          "description": "Deprecated: Use of SendEnabled in params is deprecated.\nFor genesis, use the newly added send_enabled field in the genesis object.\nStorage, lookup, and manipulation of this information is now in the keeper.\n\nAs of cosmos-sdk 0.47, this only exists for backwards compatibility of genesis files."
+        },
+        "default_send_enabled": {
+          "type": "boolean"
+        }
+      },
+      "description": "Params defines the parameters for the bank module."
+    },
+    "cosmosBankV1beta1QueryParamsResponse": {
+      "type": "object",
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/cosmosBankV1beta1Params",
+          "description": "params provides the parameters of the bank module."
+        }
+      },
+      "description": "QueryParamsResponse defines the response type for querying x/bank parameters."
+    },
+    "cosmosConsensusV1QueryParamsResponse": {
+      "type": "object",
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/typesConsensusParams",
+          "description": "params are the tendermint consensus params stored in the consensus module.\nPlease note that `params.version` is not populated in this response, it is\ntracked separately in the x/upgrade module."
+        }
+      },
+      "description": "QueryParamsResponse defines the response type for querying x/consensus parameters."
+    },
+    "cryptoPublicKey": {
+      "type": "object",
+      "properties": {
+        "ed25519": {
+          "type": "string",
+          "format": "byte"
+        },
+        "secp256k1": {
+          "type": "string",
+          "format": "byte"
+        }
+      },
+      "title": "PublicKey defines the keys available for use with Validators"
+    },
+    "googleRpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "p2pDefaultNodeInfo": {
+      "type": "object",
+      "properties": {
+        "protocol_version": {
+          "$ref": "#/definitions/p2pProtocolVersion"
+        },
+        "default_node_id": {
+          "type": "string"
+        },
+        "listen_addr": {
+          "type": "string"
+        },
+        "network": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "channels": {
+          "type": "string",
+          "format": "byte"
+        },
+        "moniker": {
+          "type": "string"
+        },
+        "other": {
+          "$ref": "#/definitions/p2pDefaultNodeInfoOther"
+        }
+      }
+    },
+    "p2pDefaultNodeInfoOther": {
+      "type": "object",
+      "properties": {
+        "tx_index": {
+          "type": "string"
+        },
+        "rpc_address": {
+          "type": "string"
+        }
+      }
+    },
+    "p2pProtocolVersion": {
+      "type": "object",
+      "properties": {
+        "p2p": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "block": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "app": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string",
+          "description": "A URL/resource name that uniquely identifies the type of the serialized\nprotocol buffer message. This string must contain at least\none \"/\" character. The last segment of the URL's path must represent\nthe fully qualified name of the type (as in\n`path/google.protobuf.Duration`). The name should be in a canonical form\n(e.g., leading \".\" is not accepted).\n\nIn practice, teams usually precompile into the binary all types that they\nexpect it to use in the context of Any. However, for URLs which use the\nscheme `http`, `https`, or no scheme, one can optionally set up a type\nserver that maps type URLs to message definitions as follows:\n\n* If no scheme is provided, `https` is assumed.\n* An HTTP GET on the URL must yield a [google.protobuf.Type][]\n  value in binary format, or produce an error.\n* Applications are allowed to cache lookup results based on the\n  URL, or have them precompiled into a binary to avoid any\n  lookup. Therefore, binary compatibility needs to be preserved\n  on changes to types. (Use versioned type names to manage\n  breaking changes.)\n\nNote: this functionality is not currently available in the official\nprotobuf release, and it is not used for type URLs beginning with\ntype.googleapis.com.\n\nSchemes other than `http`, `https` (or the empty scheme) might be\nused with implementation specific semantics."
+        }
+      },
+      "additionalProperties": {},
+      "description": "`Any` contains an arbitrary serialized protocol buffer message along with a\nURL that describes the type of the serialized message.\n\nProtobuf library provides support to pack/unpack Any values in the form\nof utility functions or additional generated methods of the Any type.\n\nExample 1: Pack and unpack a message in C++.\n\n    Foo foo = ...;\n    Any any;\n    any.PackFrom(foo);\n    ...\n    if (any.UnpackTo(\u0026foo)) {\n      ...\n    }\n\nExample 2: Pack and unpack a message in Java.\n\n    Foo foo = ...;\n    Any any = Any.pack(foo);\n    ...\n    if (any.is(Foo.class)) {\n      foo = any.unpack(Foo.class);\n    }\n\n Example 3: Pack and unpack a message in Python.\n\n    foo = Foo(...)\n    any = Any()\n    any.Pack(foo)\n    ...\n    if any.Is(Foo.DESCRIPTOR):\n      any.Unpack(foo)\n      ...\n\n Example 4: Pack and unpack a message in Go\n\n     foo := \u0026pb.Foo{...}\n     any, err := anypb.New(foo)\n     if err != nil {\n       ...\n     }\n     ...\n     foo := \u0026pb.Foo{}\n     if err := any.UnmarshalTo(foo); err != nil {\n       ...\n     }\n\nThe pack methods provided by protobuf library will by default use\n'type.googleapis.com/full.type.name' as the type URL and the unpack\nmethods only use the fully qualified type name after the last '/'\nin the type URL, for example \"foo.bar.com/x/y.z\" will yield type\nname \"y.z\".\n\n\nJSON\n====\nThe JSON representation of an `Any` value uses the regular\nrepresentation of the deserialized, embedded message, with an\nadditional field `@type` which contains the type URL. Example:\n\n    package google.profile;\n    message Person {\n      string first_name = 1;\n      string last_name = 2;\n    }\n\n    {\n      \"@type\": \"type.googleapis.com/google.profile.Person\",\n      \"firstName\": \u003cstring\u003e,\n      \"lastName\": \u003cstring\u003e\n    }\n\nIf the embedded message type is well-known and has a custom JSON\nrepresentation, that representation will be embedded adding a field\n`value` which holds the custom JSON in addition to the `@type`\nfield. Example (for message [google.protobuf.Duration][]):\n\n    {\n      \"@type\": \"type.googleapis.com/google.protobuf.Duration\",\n      \"value\": \"1.212s\"\n    }"
+    },
+    "rewardsV1EpochReward": {
+      "type": "object",
+      "properties": {
+        "epoch_number": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "start_height": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "end_height": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "minted_emission": {
+          "type": "string"
+        },
+        "carry_in": {
+          "type": "string"
+        },
+        "distributable_fees": {
+          "type": "string"
+        },
+        "treasury_amount": {
+          "type": "string"
+        },
+        "reward_pool": {
+          "type": "string"
+        },
+        "allocated_amount": {
+          "type": "string"
+        },
+        "carry_out": {
+          "type": "string"
+        },
+        "distribution_method": {
+          "$ref": "#/definitions/v1DistributionMethod"
+        },
+        "remainder_policy": {
+          "$ref": "#/definitions/v1RemainderPolicy"
+        },
+        "rewards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EligibleSlotReward"
+          }
+        },
+        "cumulative_emitted_after_epoch": {
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/definitions/v1EpochConfigSnapshot"
+        }
+      }
+    },
+    "tendermintTypesBlock": {
+      "type": "object",
+      "properties": {
+        "header": {
+          "$ref": "#/definitions/tendermintTypesHeader"
+        },
+        "data": {
+          "$ref": "#/definitions/typesData"
+        },
+        "evidence": {
+          "$ref": "#/definitions/typesEvidenceList"
+        },
+        "last_commit": {
+          "$ref": "#/definitions/typesCommit"
+        }
+      }
+    },
+    "tendermintTypesHeader": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/definitions/versionConsensus",
+          "title": "basic block info"
+        },
+        "chain_id": {
+          "type": "string"
+        },
+        "height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_block_id": {
+          "$ref": "#/definitions/typesBlockID",
+          "title": "prev block info"
+        },
+        "last_commit_hash": {
+          "type": "string",
+          "format": "byte",
+          "description": "commit from validators from the last block",
+          "title": "hashes of block data"
+        },
+        "data_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "transactions"
+        },
+        "validators_hash": {
+          "type": "string",
+          "format": "byte",
+          "description": "validators for the current block",
+          "title": "hashes from the app output from the prev block"
+        },
+        "next_validators_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "validators for the next block"
+        },
+        "consensus_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "consensus params for current block"
+        },
+        "app_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "state after txs from the previous block"
+        },
+        "last_results_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "root hash of all results from the txs from the previous block"
+        },
+        "evidence_hash": {
+          "type": "string",
+          "format": "byte",
+          "description": "evidence included in the block",
+          "title": "consensus info"
+        },
+        "proposer_address": {
+          "type": "string",
+          "format": "byte",
+          "title": "original proposer of the block"
+        }
+      },
+      "description": "Header defines the structure of a block header."
+    },
+    "tendermintTypesValidator": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "format": "byte"
+        },
+        "pub_key": {
+          "$ref": "#/definitions/cryptoPublicKey"
+        },
+        "voting_power": {
+          "type": "string",
+          "format": "int64"
+        },
+        "proposer_priority": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "tendermintV1beta1Block": {
+      "type": "object",
+      "properties": {
+        "header": {
+          "$ref": "#/definitions/tendermintV1beta1Header"
+        },
+        "data": {
+          "$ref": "#/definitions/typesData"
+        },
+        "evidence": {
+          "$ref": "#/definitions/typesEvidenceList"
+        },
+        "last_commit": {
+          "$ref": "#/definitions/typesCommit"
+        }
+      },
+      "description": "Block is tendermint type Block, with the Header proposer address\nfield converted to bech32 string."
+    },
+    "tendermintV1beta1Header": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/definitions/versionConsensus",
+          "title": "basic block info"
+        },
+        "chain_id": {
+          "type": "string"
+        },
+        "height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_block_id": {
+          "$ref": "#/definitions/typesBlockID",
+          "title": "prev block info"
+        },
+        "last_commit_hash": {
+          "type": "string",
+          "format": "byte",
+          "description": "commit from validators from the last block",
+          "title": "hashes of block data"
+        },
+        "data_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "transactions"
+        },
+        "validators_hash": {
+          "type": "string",
+          "format": "byte",
+          "description": "validators for the current block",
+          "title": "hashes from the app output from the prev block"
+        },
+        "next_validators_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "validators for the next block"
+        },
+        "consensus_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "consensus params for current block"
+        },
+        "app_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "state after txs from the previous block"
+        },
+        "last_results_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "root hash of all results from the txs from the previous block"
+        },
+        "evidence_hash": {
+          "type": "string",
+          "format": "byte",
+          "description": "evidence included in the block",
+          "title": "consensus info"
+        },
+        "proposer_address": {
+          "type": "string",
+          "description": "proposer_address is the original block proposer address, formatted as a Bech32 string.\nIn Tendermint, this type is `bytes`, but in the SDK, we convert it to a Bech32 string\nfor better UX.\n\noriginal proposer of the block"
+        }
+      },
+      "description": "Header defines the structure of a Tendermint block header."
+    },
+    "tendermintV1beta1Validator": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "pub_key": {
+          "$ref": "#/definitions/protobufAny"
+        },
+        "voting_power": {
+          "type": "string",
+          "format": "int64"
+        },
+        "proposer_priority": {
+          "type": "string",
+          "format": "int64"
+        }
+      },
+      "description": "Validator is the type for the validator-set."
+    },
+    "twilightCoreslotV1Params": {
+      "type": "object",
+      "properties": {
+        "authority": {
+          "type": "string"
+        },
+        "emergency_authority": {
+          "type": "string"
+        },
+        "slot_voting_power": {
+          "type": "string",
+          "format": "int64"
+        },
+        "min_active_slots": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "max_active_slots": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "activation_delay_blocks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "key_rotation_delay_blocks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "removal_delay_blocks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "consensus_key_reuse_lockout": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "allow_self_registration": {
+          "type": "boolean"
+        },
+        "allow_emergency_below_min_active": {
+          "type": "boolean"
+        }
+      }
+    },
+    "twilightCoreslotV1QueryParamsResponse": {
+      "type": "object",
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/twilightCoreslotV1Params"
+        }
+      }
+    },
+    "twilightRewardsV1Params": {
+      "type": "object",
+      "properties": {
+        "emissions_enabled": {
+          "type": "boolean"
+        },
+        "epoch_settlement_enabled": {
+          "type": "boolean"
+        },
+        "claims_enabled": {
+          "type": "boolean"
+        },
+        "native_denom": {
+          "type": "string"
+        },
+        "max_supply": {
+          "type": "string"
+        },
+        "initial_block_subsidy": {
+          "type": "string"
+        },
+        "target_block_time_seconds": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "epoch_length_blocks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "halving_mode": {
+          "$ref": "#/definitions/v1HalvingMode"
+        },
+        "distribution_method": {
+          "$ref": "#/definitions/v1DistributionMethod"
+        },
+        "remainder_policy": {
+          "$ref": "#/definitions/v1RemainderPolicy"
+        },
+        "max_claim_epochs_per_tx": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "fee_collection_enabled": {
+          "type": "boolean"
+        },
+        "fee_distribution_enabled": {
+          "type": "boolean"
+        },
+        "fee_denom": {
+          "type": "string"
+        },
+        "fee_distribution_mode": {
+          "$ref": "#/definitions/v1FeeDistributionMode"
+        },
+        "treasury_address": {
+          "type": "string"
+        },
+        "emission_treasury_share_bps": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "fee_treasury_share_bps": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "weighted_rewards_enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "twilightRewardsV1QueryParamsResponse": {
+      "type": "object",
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/twilightRewardsV1Params"
+        }
+      }
+    },
+    "typesABCIParams": {
+      "type": "object",
+      "properties": {
+        "vote_extensions_enable_height": {
+          "type": "string",
+          "format": "int64",
+          "description": "vote_extensions_enable_height configures the first height during which\nvote extensions will be enabled. During this specified height, and for all\nsubsequent heights, precommit messages that do not contain valid extension data\nwill be considered invalid. Prior to this height, vote extensions will not\nbe used or accepted by validators on the network.\n\nOnce enabled, vote extensions will be created by the application in ExtendVote,\npassed to the application for validation in VerifyVoteExtension and given\nto the application to use when proposing a block during PrepareProposal."
+        }
+      },
+      "description": "ABCIParams configure functionality specific to the Application Blockchain Interface."
+    },
+    "typesBlockID": {
+      "type": "object",
+      "properties": {
+        "hash": {
+          "type": "string",
+          "format": "byte"
+        },
+        "part_set_header": {
+          "$ref": "#/definitions/typesPartSetHeader"
+        }
+      },
+      "title": "BlockID"
+    },
+    "typesBlockIDFlag": {
+      "type": "string",
+      "enum": [
+        "BLOCK_ID_FLAG_UNKNOWN",
+        "BLOCK_ID_FLAG_ABSENT",
+        "BLOCK_ID_FLAG_COMMIT",
+        "BLOCK_ID_FLAG_NIL"
+      ],
+      "default": "BLOCK_ID_FLAG_UNKNOWN",
+      "description": "- BLOCK_ID_FLAG_UNKNOWN: indicates an error condition\n - BLOCK_ID_FLAG_ABSENT: the vote was not received\n - BLOCK_ID_FLAG_COMMIT: voted for the block that received the majority\n - BLOCK_ID_FLAG_NIL: voted for nil",
+      "title": "BlockIdFlag indicates which BlockID the signature is for"
+    },
+    "typesBlockParams": {
+      "type": "object",
+      "properties": {
+        "max_bytes": {
+          "type": "string",
+          "format": "int64",
+          "title": "Max block size, in bytes.\nNote: must be greater than 0"
+        },
+        "max_gas": {
+          "type": "string",
+          "format": "int64",
+          "title": "Max gas per block.\nNote: must be greater or equal to -1"
+        }
+      },
+      "description": "BlockParams contains limits on the block size."
+    },
+    "typesCommit": {
+      "type": "object",
+      "properties": {
+        "height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "round": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "block_id": {
+          "$ref": "#/definitions/typesBlockID"
+        },
+        "signatures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/typesCommitSig"
+          }
+        }
+      },
+      "description": "Commit contains the evidence that a block was committed by a set of validators."
+    },
+    "typesCommitSig": {
+      "type": "object",
+      "properties": {
+        "block_id_flag": {
+          "$ref": "#/definitions/typesBlockIDFlag"
+        },
+        "validator_address": {
+          "type": "string",
+          "format": "byte"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "signature": {
+          "type": "string",
+          "format": "byte"
+        }
+      },
+      "description": "CommitSig is a part of the Vote included in a Commit."
+    },
+    "typesConsensusParams": {
+      "type": "object",
+      "properties": {
+        "block": {
+          "$ref": "#/definitions/typesBlockParams"
+        },
+        "evidence": {
+          "$ref": "#/definitions/typesEvidenceParams"
+        },
+        "validator": {
+          "$ref": "#/definitions/typesValidatorParams"
+        },
+        "version": {
+          "$ref": "#/definitions/typesVersionParams"
+        },
+        "abci": {
+          "$ref": "#/definitions/typesABCIParams"
+        }
+      },
+      "description": "ConsensusParams contains consensus critical parameters that determine the\nvalidity of blocks."
+    },
+    "typesData": {
+      "type": "object",
+      "properties": {
+        "txs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "byte"
+          },
+          "description": "Txs that will be applied by state @ block.Height+1.\nNOTE: not all txs here are valid.  We're just agreeing on the order first.\nThis means that block.AppHash does not include these txs."
+        }
+      },
+      "title": "Data contains the set of transactions included in the block"
+    },
+    "typesDuplicateVoteEvidence": {
+      "type": "object",
+      "properties": {
+        "vote_a": {
+          "$ref": "#/definitions/typesVote"
+        },
+        "vote_b": {
+          "$ref": "#/definitions/typesVote"
+        },
+        "total_voting_power": {
+          "type": "string",
+          "format": "int64"
+        },
+        "validator_power": {
+          "type": "string",
+          "format": "int64"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "DuplicateVoteEvidence contains evidence of a validator signed two conflicting votes."
+    },
+    "typesEvidence": {
+      "type": "object",
+      "properties": {
+        "duplicate_vote_evidence": {
+          "$ref": "#/definitions/typesDuplicateVoteEvidence"
+        },
+        "light_client_attack_evidence": {
+          "$ref": "#/definitions/typesLightClientAttackEvidence"
+        }
+      }
+    },
+    "typesEvidenceList": {
+      "type": "object",
+      "properties": {
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/typesEvidence"
+          }
+        }
+      }
+    },
+    "typesEvidenceParams": {
+      "type": "object",
+      "properties": {
+        "max_age_num_blocks": {
+          "type": "string",
+          "format": "int64",
+          "description": "Max age of evidence, in blocks.\n\nThe basic formula for calculating this is: MaxAgeDuration / {average block\ntime}."
+        },
+        "max_age_duration": {
+          "type": "string",
+          "description": "Max age of evidence, in time.\n\nIt should correspond with an app's \"unbonding period\" or other similar\nmechanism for handling [Nothing-At-Stake\nattacks](https://github.com/ethereum/wiki/wiki/Proof-of-Stake-FAQ#what-is-the-nothing-at-stake-problem-and-how-can-it-be-fixed)."
+        },
+        "max_bytes": {
+          "type": "string",
+          "format": "int64",
+          "title": "This sets the maximum size of total evidence in bytes that can be committed in a single block.\nand should fall comfortably under the max block bytes.\nDefault is 1048576 or 1MB"
+        }
+      },
+      "description": "EvidenceParams determine how we handle evidence of malfeasance."
+    },
+    "typesLightBlock": {
+      "type": "object",
+      "properties": {
+        "signed_header": {
+          "$ref": "#/definitions/typesSignedHeader"
+        },
+        "validator_set": {
+          "$ref": "#/definitions/typesValidatorSet"
+        }
+      }
+    },
+    "typesLightClientAttackEvidence": {
+      "type": "object",
+      "properties": {
+        "conflicting_block": {
+          "$ref": "#/definitions/typesLightBlock"
+        },
+        "common_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "byzantine_validators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/tendermintTypesValidator"
+          }
+        },
+        "total_voting_power": {
+          "type": "string",
+          "format": "int64"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "LightClientAttackEvidence contains evidence of a set of validators attempting to mislead a light client."
+    },
+    "typesPartSetHeader": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "hash": {
+          "type": "string",
+          "format": "byte"
+        }
+      },
+      "title": "PartsetHeader"
+    },
+    "typesSignedHeader": {
+      "type": "object",
+      "properties": {
+        "header": {
+          "$ref": "#/definitions/tendermintTypesHeader"
+        },
+        "commit": {
+          "$ref": "#/definitions/typesCommit"
+        }
+      }
+    },
+    "typesSignedMsgType": {
+      "type": "string",
+      "enum": [
+        "SIGNED_MSG_TYPE_UNKNOWN",
+        "SIGNED_MSG_TYPE_PREVOTE",
+        "SIGNED_MSG_TYPE_PRECOMMIT",
+        "SIGNED_MSG_TYPE_PROPOSAL"
+      ],
+      "default": "SIGNED_MSG_TYPE_UNKNOWN",
+      "description": "SignedMsgType is a type of signed message in the consensus.\n\n - SIGNED_MSG_TYPE_PREVOTE: Votes\n - SIGNED_MSG_TYPE_PROPOSAL: Proposals"
+    },
+    "typesValidatorParams": {
+      "type": "object",
+      "properties": {
+        "pub_key_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "ValidatorParams restrict the public key types validators can use.\nNOTE: uses ABCI pubkey naming, not Amino names."
+    },
+    "typesValidatorSet": {
+      "type": "object",
+      "properties": {
+        "validators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/tendermintTypesValidator"
+          }
+        },
+        "proposer": {
+          "$ref": "#/definitions/tendermintTypesValidator"
+        },
+        "total_voting_power": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "typesVersionParams": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "VersionParams contains the ABCI application version."
+    },
+    "typesVote": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/typesSignedMsgType"
+        },
+        "height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "round": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "block_id": {
+          "$ref": "#/definitions/typesBlockID",
+          "description": "zero if vote is nil."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "validator_address": {
+          "type": "string",
+          "format": "byte"
+        },
+        "validator_index": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "signature": {
+          "type": "string",
+          "format": "byte",
+          "description": "Vote signature by the validator if they participated in consensus for the\nassociated block."
+        },
+        "extension": {
+          "type": "string",
+          "format": "byte",
+          "description": "Vote extension provided by the application. Only valid for precommit\nmessages."
+        },
+        "extension_signature": {
+          "type": "string",
+          "format": "byte",
+          "description": "Vote extension signature by the validator if they participated in\nconsensus for the associated block.\nOnly valid for precommit messages."
+        }
+      },
+      "description": "Vote represents a prevote or precommit vote from validators for\nconsensus."
+    },
+    "v1DistributionMethod": {
+      "type": "string",
+      "enum": [
+        "DISTRIBUTION_METHOD_UNSPECIFIED",
+        "DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS",
+        "DISTRIBUTION_METHOD_WEIGHTED_ACTIVE_BLOCKS",
+        "DISTRIBUTION_METHOD_SNAPSHOT_UNIFORM"
+      ],
+      "default": "DISTRIBUTION_METHOD_UNSPECIFIED",
+      "description": "Enum numeric values are permanent after release. Future upgrades may add\nvalues but must not reuse, reorder, or change existing numeric values."
+    },
+    "v1EligibleSlotReward": {
+      "type": "object",
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "operator_address": {
+          "type": "string"
+        },
+        "payout_address": {
+          "type": "string"
+        },
+        "blocks_active": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "reward_weight": {
+          "type": "string"
+        },
+        "effective_weight": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "string"
+        },
+        "claimed": {
+          "type": "boolean"
+        },
+        "claimed_at_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "epoch_number": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "v1EpochConfigSnapshot": {
+      "type": "object",
+      "properties": {
+        "snapshot_version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "epoch_length_blocks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "distribution_method": {
+          "$ref": "#/definitions/v1DistributionMethod"
+        },
+        "remainder_policy": {
+          "$ref": "#/definitions/v1RemainderPolicy"
+        },
+        "initial_block_subsidy": {
+          "type": "string"
+        },
+        "halving_mode": {
+          "$ref": "#/definitions/v1HalvingMode"
+        },
+        "weighted_rewards_enabled": {
+          "type": "boolean"
+        },
+        "fee_collection_enabled": {
+          "type": "boolean"
+        },
+        "fee_distribution_enabled": {
+          "type": "boolean"
+        },
+        "fee_denom": {
+          "type": "string"
+        },
+        "fee_distribution_mode": {
+          "$ref": "#/definitions/v1FeeDistributionMode"
+        },
+        "treasury_address": {
+          "type": "string"
+        },
+        "emission_treasury_share_bps": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "fee_treasury_share_bps": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "v1FeeDistributionMode": {
+      "type": "string",
+      "enum": [
+        "FEE_DISTRIBUTION_MODE_UNSPECIFIED",
+        "FEE_DISTRIBUTION_MODE_NONE",
+        "FEE_DISTRIBUTION_MODE_ACTIVE_SET_POOL",
+        "FEE_DISTRIBUTION_MODE_TREASURY_ONLY",
+        "FEE_DISTRIBUTION_MODE_BURN"
+      ],
+      "default": "FEE_DISTRIBUTION_MODE_UNSPECIFIED",
+      "description": "Enum numeric values are permanent after release. Future upgrades may add\nvalues but must not reuse, reorder, or change existing numeric values."
+    },
+    "v1HalvingMode": {
+      "type": "string",
+      "enum": [
+        "HALVING_MODE_UNSPECIFIED",
+        "HALVING_MODE_SUPPLY_THRESHOLD"
+      ],
+      "default": "HALVING_MODE_UNSPECIFIED",
+      "description": "Enum numeric values are permanent after release. Future upgrades may add\nvalues but must not reuse, reorder, or change existing numeric values."
+    },
+    "v1LastAppliedValidator": {
+      "type": "object",
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "consensus_pubkey": {
+          "$ref": "#/definitions/protobufAny"
+        },
+        "power": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "v1NextHalvingInfo": {
+      "type": "object",
+      "properties": {
+        "current_tier": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "current_block_subsidy": {
+          "type": "string"
+        },
+        "next_threshold": {
+          "type": "string"
+        },
+        "remaining_until_next_halving": {
+          "type": "string"
+        },
+        "cumulative_emitted": {
+          "type": "string"
+        },
+        "max_supply": {
+          "type": "string"
+        },
+        "has_next_halving": {
+          "type": "boolean"
+        }
+      }
+    },
+    "v1OperatorMetadata": {
+      "type": "object",
+      "properties": {
+        "moniker": {
+          "type": "string"
+        },
+        "identity": {
+          "type": "string"
+        },
+        "website": {
+          "type": "string"
+        },
+        "security_contact": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        }
+      }
+    },
+    "v1OperatorRewardWeight": {
+      "type": "object",
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "base_weight": {
+          "type": "string"
+        },
+        "uptime_weight": {
+          "type": "string"
+        },
+        "performance_weight": {
+          "type": "string"
+        },
+        "stake_weight": {
+          "type": "string"
+        },
+        "external_weight": {
+          "type": "string"
+        },
+        "final_weight": {
+          "type": "string"
+        },
+        "updated_height": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "v1PendingKeyRotation": {
+      "type": "object",
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "old_pubkey": {
+          "$ref": "#/definitions/protobufAny"
+        },
+        "new_pubkey": {
+          "$ref": "#/definitions/protobufAny"
+        },
+        "requested_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "effective_height": {
+          "type": "string",
+          "format": "int64"
+        }
+      }
+    },
+    "v1QueryClaimableRewardsResponse": {
+      "type": "object",
+      "properties": {
+        "rewards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EligibleSlotReward"
+          }
+        },
+        "total_amount": {
+          "type": "string"
+        }
+      }
+    },
+    "v1QueryCoreSlotResponse": {
+      "type": "object",
+      "properties": {
+        "slot": {
+          "$ref": "#/definitions/coreslotV1CoreSlot"
+        }
+      }
+    },
+    "v1QueryCoreSlotsResponse": {
+      "type": "object",
+      "properties": {
+        "slots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/coreslotV1CoreSlot"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse"
+        }
+      }
+    },
+    "v1QueryCumulativeEmittedResponse": {
+      "type": "object",
+      "properties": {
+        "cumulative_emitted": {
+          "type": "string"
+        },
+        "max_supply": {
+          "type": "string"
+        }
+      }
+    },
+    "v1QueryCurrentEpochActiveBlocksResponse": {
+      "type": "object",
+      "properties": {
+        "epoch_number": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "active_blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1SlotActiveBlocks"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse"
+        }
+      }
+    },
+    "v1QueryEpochInfoResponse": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/v1RewardsState"
+        },
+        "current_epoch_config": {
+          "$ref": "#/definitions/v1EpochConfigSnapshot"
+        },
+        "current_epoch_end_height": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "has_pending_params": {
+          "type": "boolean"
+        },
+        "pending_params": {
+          "$ref": "#/definitions/twilightRewardsV1Params"
+        }
+      }
+    },
+    "v1QueryEpochRewardResponse": {
+      "type": "object",
+      "properties": {
+        "epoch_reward": {
+          "$ref": "#/definitions/rewardsV1EpochReward"
+        }
+      }
+    },
+    "v1QueryLastAppliedValidatorsResponse": {
+      "type": "object",
+      "properties": {
+        "validators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1LastAppliedValidator"
+          }
+        }
+      }
+    },
+    "v1QueryModuleBalancesResponse": {
+      "type": "object",
+      "properties": {
+        "denom": {
+          "type": "string"
+        },
+        "rewards_balance": {
+          "type": "string"
+        },
+        "fee_pool_balance": {
+          "type": "string"
+        }
+      }
+    },
+    "v1QueryNextHalvingResponse": {
+      "type": "object",
+      "properties": {
+        "info": {
+          "$ref": "#/definitions/v1NextHalvingInfo"
+        }
+      }
+    },
+    "v1QueryPendingKeyRotationsResponse": {
+      "type": "object",
+      "properties": {
+        "rotations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1PendingKeyRotation"
+          }
+        }
+      }
+    },
+    "v1QueryReservedConsensusAddressResponse": {
+      "type": "object",
+      "properties": {
+        "reservation": {
+          "$ref": "#/definitions/coreslotV1ReservedConsensusAddress"
+        }
+      }
+    },
+    "v1QueryRewardWeightResponse": {
+      "type": "object",
+      "properties": {
+        "reward_weight": {
+          "$ref": "#/definitions/v1OperatorRewardWeight"
+        }
+      }
+    },
+    "v1QuerySlotRewardsResponse": {
+      "type": "object",
+      "properties": {
+        "rewards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EligibleSlotReward"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse"
+        }
+      }
+    },
+    "v1QuerySupplyScheduleResponse": {
+      "type": "object",
+      "properties": {
+        "params": {
+          "$ref": "#/definitions/twilightRewardsV1Params"
+        },
+        "next_halving": {
+          "$ref": "#/definitions/v1NextHalvingInfo"
+        }
+      }
+    },
+    "v1RemainderPolicy": {
+      "type": "string",
+      "enum": [
+        "REMAINDER_POLICY_UNSPECIFIED",
+        "REMAINDER_POLICY_CARRY_FORWARD",
+        "REMAINDER_POLICY_BURN"
+      ],
+      "default": "REMAINDER_POLICY_UNSPECIFIED",
+      "description": "Enum numeric values are permanent after release. Future upgrades may add\nvalues but must not reuse, reorder, or change existing numeric values."
+    },
+    "v1RewardsState": {
+      "type": "object",
+      "properties": {
+        "current_epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "current_epoch_start_height": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "cumulative_emitted": {
+          "type": "string"
+        },
+        "carry_forward_remainder": {
+          "type": "string"
+        }
+      }
+    },
+    "v1SlotActiveBlocks": {
+      "type": "object",
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "blocks_active": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "v1SlotStatus": {
+      "type": "string",
+      "enum": [
+        "SLOT_STATUS_UNSPECIFIED",
+        "SLOT_STATUS_PENDING",
+        "SLOT_STATUS_ACTIVE",
+        "SLOT_STATUS_INACTIVE",
+        "SLOT_STATUS_SUSPENDED",
+        "SLOT_STATUS_REMOVED"
+      ],
+      "default": "SLOT_STATUS_UNSPECIFIED"
+    },
+    "v1beta1ABCIMessageLog": {
+      "type": "object",
+      "properties": {
+        "msg_index": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "log": {
+          "type": "string"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1StringEvent"
+          },
+          "description": "Events contains a slice of Event objects that were emitted during some\nexecution."
+        }
+      },
+      "description": "ABCIMessageLog defines a structure containing an indexed tx ABCI message log."
+    },
+    "v1beta1ABCIQueryResponse": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "log": {
+          "type": "string",
+          "title": "nondeterministic"
+        },
+        "info": {
+          "type": "string",
+          "title": "nondeterministic"
+        },
+        "index": {
+          "type": "string",
+          "format": "int64"
+        },
+        "key": {
+          "type": "string",
+          "format": "byte"
+        },
+        "value": {
+          "type": "string",
+          "format": "byte"
+        },
+        "proof_ops": {
+          "$ref": "#/definitions/v1beta1ProofOps"
+        },
+        "height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "codespace": {
+          "type": "string"
+        }
+      },
+      "description": "ABCIQueryResponse defines the response structure for the ABCIQuery gRPC query.\n\nNote: This type is a duplicate of the ResponseQuery proto type defined in\nTendermint."
+    },
+    "v1beta1AddressBytesToStringResponse": {
+      "type": "object",
+      "properties": {
+        "address_string": {
+          "type": "string"
+        }
+      },
+      "description": "AddressBytesToStringResponse is the response type for AddressString rpc method."
+    },
+    "v1beta1AddressStringToBytesResponse": {
+      "type": "object",
+      "properties": {
+        "address_bytes": {
+          "type": "string",
+          "format": "byte"
+        }
+      },
+      "description": "AddressStringToBytesResponse is the response type for AddressBytes rpc method."
+    },
+    "v1beta1Attribute": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "description": "Attribute defines an attribute wrapper where the key and value are\nstrings instead of raw bytes."
+    },
+    "v1beta1AuthInfo": {
+      "type": "object",
+      "properties": {
+        "signer_infos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1SignerInfo"
+          },
+          "description": "signer_infos defines the signing modes for the required signers. The number\nand order of elements must match the required signers from TxBody's\nmessages. The first element is the primary signer and the one which pays\nthe fee."
+        },
+        "fee": {
+          "$ref": "#/definitions/v1beta1Fee",
+          "description": "Fee is the fee and gas limit for the transaction. The first signer is the\nprimary signer and the one which pays the fee. The fee can be calculated\nbased on the cost of evaluating the body and doing signature verification\nof the signers. This can be estimated via simulation."
+        },
+        "tip": {
+          "$ref": "#/definitions/v1beta1Tip",
+          "description": "Tip is the optional tip used for transactions fees paid in another denom.\n\nThis field is ignored if the chain didn't enable tips, i.e. didn't add the\n`TipDecorator` in its posthandler."
+        }
+      },
+      "description": "AuthInfo describes the fee and signer modes that are used to sign a\ntransaction."
+    },
+    "v1beta1BaseAccount": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "pub_key": {
+          "$ref": "#/definitions/protobufAny"
+        },
+        "account_number": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "sequence": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "BaseAccount defines a base account type. It contains all the necessary fields\nfor basic account functionality. Any custom account type should extend this\ntype for additional functionality (e.g. vesting)."
+    },
+    "v1beta1Bech32PrefixResponse": {
+      "type": "object",
+      "properties": {
+        "bech32_prefix": {
+          "type": "string"
+        }
+      },
+      "description": "Bech32PrefixResponse is the response type for Bech32Prefix rpc method."
+    },
+    "v1beta1BroadcastMode": {
+      "type": "string",
+      "enum": [
+        "BROADCAST_MODE_UNSPECIFIED",
+        "BROADCAST_MODE_BLOCK",
+        "BROADCAST_MODE_SYNC",
+        "BROADCAST_MODE_ASYNC"
+      ],
+      "default": "BROADCAST_MODE_UNSPECIFIED",
+      "description": "BroadcastMode specifies the broadcast mode for the TxService.Broadcast RPC\nmethod.\n\n - BROADCAST_MODE_UNSPECIFIED: zero-value for mode ordering\n - BROADCAST_MODE_BLOCK: DEPRECATED: use BROADCAST_MODE_SYNC instead,\nBROADCAST_MODE_BLOCK is not supported by the SDK from v0.47.x onwards.\n - BROADCAST_MODE_SYNC: BROADCAST_MODE_SYNC defines a tx broadcasting mode where the client waits\nfor a CheckTx execution response only.\n - BROADCAST_MODE_ASYNC: BROADCAST_MODE_ASYNC defines a tx broadcasting mode where the client\nreturns immediately."
+    },
+    "v1beta1BroadcastTxRequest": {
+      "type": "object",
+      "properties": {
+        "tx_bytes": {
+          "type": "string",
+          "format": "byte",
+          "description": "tx_bytes is the raw transaction."
+        },
+        "mode": {
+          "$ref": "#/definitions/v1beta1BroadcastMode"
+        }
+      },
+      "description": "BroadcastTxRequest is the request type for the Service.BroadcastTxRequest\nRPC method."
+    },
+    "v1beta1BroadcastTxResponse": {
+      "type": "object",
+      "properties": {
+        "tx_response": {
+          "$ref": "#/definitions/v1beta1TxResponse",
+          "description": "tx_response is the queried TxResponses."
+        }
+      },
+      "description": "BroadcastTxResponse is the response type for the\nService.BroadcastTx method."
+    },
+    "v1beta1Coin": {
+      "type": "object",
+      "properties": {
+        "denom": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "string"
+        }
+      },
+      "description": "Coin defines a token with a denomination and an amount.\n\nNOTE: The amount field is an Int which implements the custom method\nsignatures required by gogoproto."
+    },
+    "v1beta1CompactBitArray": {
+      "type": "object",
+      "properties": {
+        "extra_bits_stored": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "elems": {
+          "type": "string",
+          "format": "byte"
+        }
+      },
+      "description": "CompactBitArray is an implementation of a space efficient bit array.\nThis is used to ensure that the encoded data takes up a minimal amount of\nspace after proto encoding.\nThis is not thread safe, and is not intended for concurrent usage."
+    },
+    "v1beta1ConfigResponse": {
+      "type": "object",
+      "properties": {
+        "minimum_gas_price": {
+          "type": "string"
+        },
+        "pruning_keep_recent": {
+          "type": "string"
+        },
+        "pruning_interval": {
+          "type": "string"
+        },
+        "halt_height": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "ConfigResponse defines the response structure for the Config gRPC query."
+    },
+    "v1beta1DenomOwner": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "address defines the address that owns a particular denomination."
+        },
+        "balance": {
+          "$ref": "#/definitions/v1beta1Coin",
+          "description": "balance is the balance of the denominated coin for an account."
+        }
+      },
+      "description": "DenomOwner defines structure representing an account that owns or holds a\nparticular denominated token. It contains the account address and account\nbalance of the denominated token."
+    },
+    "v1beta1DenomUnit": {
+      "type": "object",
+      "properties": {
+        "denom": {
+          "type": "string",
+          "description": "denom represents the string name of the given denom unit (e.g uatom)."
+        },
+        "exponent": {
+          "type": "integer",
+          "format": "int64",
+          "description": "exponent represents power of 10 exponent that one must\nraise the base_denom to in order to equal the given DenomUnit's denom\n1 denom = 10^exponent base_denom\n(e.g. with a base_denom of uatom, one can create a DenomUnit of 'atom' with\nexponent = 6, thus: 1 atom = 10^6 uatom)."
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "aliases is a list of string aliases for the given denom"
+        }
+      },
+      "description": "DenomUnit represents a struct that describes a given\ndenomination unit of the basic token."
+    },
+    "v1beta1Fee": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Coin"
+          },
+          "title": "amount is the amount of coins to be paid as a fee"
+        },
+        "gas_limit": {
+          "type": "string",
+          "format": "uint64",
+          "title": "gas_limit is the maximum gas that can be used in transaction processing\nbefore an out of gas error occurs"
+        },
+        "payer": {
+          "type": "string",
+          "description": "if unset, the first signer is responsible for paying the fees. If set, the\nspecified account must pay the fees. the payer must be a tx signer (and\nthus have signed this field in AuthInfo). setting this field does *not*\nchange the ordering of required signers for the transaction."
+        },
+        "granter": {
+          "type": "string",
+          "title": "if set, the fee payer (either the first signer or the value of the payer\nfield) requests that a fee grant be used to pay fees instead of the fee\npayer's own balance. If an appropriate fee grant does not exist or the\nchain does not support fee grants, this will fail"
+        }
+      },
+      "description": "Fee includes the amount of coins paid in fees and the maximum\ngas to be used by the transaction. The ratio yields an effective \"gasprice\",\nwhich must be above some miminum to be accepted into the mempool."
+    },
+    "v1beta1GasInfo": {
+      "type": "object",
+      "properties": {
+        "gas_wanted": {
+          "type": "string",
+          "format": "uint64",
+          "description": "GasWanted is the maximum units of work we allow this tx to perform."
+        },
+        "gas_used": {
+          "type": "string",
+          "format": "uint64",
+          "description": "GasUsed is the amount of gas actually consumed."
+        }
+      },
+      "description": "GasInfo defines tx execution gas context."
+    },
+    "v1beta1GetBlockByHeightResponse": {
+      "type": "object",
+      "properties": {
+        "block_id": {
+          "$ref": "#/definitions/typesBlockID"
+        },
+        "block": {
+          "$ref": "#/definitions/tendermintTypesBlock",
+          "title": "Deprecated: please use `sdk_block` instead"
+        },
+        "sdk_block": {
+          "$ref": "#/definitions/tendermintV1beta1Block"
+        }
+      },
+      "description": "GetBlockByHeightResponse is the response type for the Query/GetBlockByHeight RPC method."
+    },
+    "v1beta1GetBlockWithTxsResponse": {
+      "type": "object",
+      "properties": {
+        "txs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Tx"
+          },
+          "description": "txs are the transactions in the block."
+        },
+        "block_id": {
+          "$ref": "#/definitions/typesBlockID"
+        },
+        "block": {
+          "$ref": "#/definitions/tendermintTypesBlock"
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines a pagination for the response."
+        }
+      },
+      "description": "GetBlockWithTxsResponse is the response type for the Service.GetBlockWithTxs\nmethod."
+    },
+    "v1beta1GetLatestBlockResponse": {
+      "type": "object",
+      "properties": {
+        "block_id": {
+          "$ref": "#/definitions/typesBlockID"
+        },
+        "block": {
+          "$ref": "#/definitions/tendermintTypesBlock",
+          "title": "Deprecated: please use `sdk_block` instead"
+        },
+        "sdk_block": {
+          "$ref": "#/definitions/tendermintV1beta1Block"
+        }
+      },
+      "description": "GetLatestBlockResponse is the response type for the Query/GetLatestBlock RPC method."
+    },
+    "v1beta1GetLatestValidatorSetResponse": {
+      "type": "object",
+      "properties": {
+        "block_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "validators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/tendermintV1beta1Validator"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines an pagination for the response."
+        }
+      },
+      "description": "GetLatestValidatorSetResponse is the response type for the Query/GetValidatorSetByHeight RPC method."
+    },
+    "v1beta1GetNodeInfoResponse": {
+      "type": "object",
+      "properties": {
+        "default_node_info": {
+          "$ref": "#/definitions/p2pDefaultNodeInfo"
+        },
+        "application_version": {
+          "$ref": "#/definitions/v1beta1VersionInfo"
+        }
+      },
+      "description": "GetNodeInfoResponse is the response type for the Query/GetNodeInfo RPC method."
+    },
+    "v1beta1GetSyncingResponse": {
+      "type": "object",
+      "properties": {
+        "syncing": {
+          "type": "boolean"
+        }
+      },
+      "description": "GetSyncingResponse is the response type for the Query/GetSyncing RPC method."
+    },
+    "v1beta1GetTxResponse": {
+      "type": "object",
+      "properties": {
+        "tx": {
+          "$ref": "#/definitions/v1beta1Tx",
+          "description": "tx is the queried transaction."
+        },
+        "tx_response": {
+          "$ref": "#/definitions/v1beta1TxResponse",
+          "description": "tx_response is the queried TxResponses."
+        }
+      },
+      "description": "GetTxResponse is the response type for the Service.GetTx method."
+    },
+    "v1beta1GetTxsEventResponse": {
+      "type": "object",
+      "properties": {
+        "txs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Tx"
+          },
+          "description": "txs is the list of queried transactions."
+        },
+        "tx_responses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1TxResponse"
+          },
+          "description": "tx_responses is the list of queried TxResponses."
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines a pagination for the response.\nDeprecated post v0.46.x: use total instead."
+        },
+        "total": {
+          "type": "string",
+          "format": "uint64",
+          "title": "total is total number of results available"
+        }
+      },
+      "description": "GetTxsEventResponse is the response type for the Service.TxsByEvents\nRPC method."
+    },
+    "v1beta1GetValidatorSetByHeightResponse": {
+      "type": "object",
+      "properties": {
+        "block_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "validators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/tendermintV1beta1Validator"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines an pagination for the response."
+        }
+      },
+      "description": "GetValidatorSetByHeightResponse is the response type for the Query/GetValidatorSetByHeight RPC method."
+    },
+    "v1beta1Metadata": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "denom_units": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1DenomUnit"
+          },
+          "title": "denom_units represents the list of DenomUnit's for a given coin"
+        },
+        "base": {
+          "type": "string",
+          "description": "base represents the base denom (should be the DenomUnit with exponent = 0)."
+        },
+        "display": {
+          "type": "string",
+          "description": "display indicates the suggested denom that should be\ndisplayed in clients."
+        },
+        "name": {
+          "type": "string",
+          "title": "name defines the name of the token (eg: Cosmos Atom)"
+        },
+        "symbol": {
+          "type": "string",
+          "description": "symbol is the token symbol usually shown on exchanges (eg: ATOM). This can\nbe the same as the display."
+        },
+        "uri": {
+          "type": "string",
+          "description": "URI to a document (on or off-chain) that contains additional information. Optional."
+        },
+        "uri_hash": {
+          "type": "string",
+          "description": "URIHash is a sha256 hash of a document pointed by URI. It's used to verify that\nthe document didn't change. Optional."
+        }
+      },
+      "description": "Metadata represents a struct that describes\na basic token."
+    },
+    "v1beta1ModeInfo": {
+      "type": "object",
+      "properties": {
+        "single": {
+          "$ref": "#/definitions/ModeInfoSingle",
+          "title": "single represents a single signer"
+        },
+        "multi": {
+          "$ref": "#/definitions/ModeInfoMulti",
+          "title": "multi represents a nested multisig signer"
+        }
+      },
+      "description": "ModeInfo describes the signing mode of a single or nested multisig signer."
+    },
+    "v1beta1Module": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "title": "module path"
+        },
+        "version": {
+          "type": "string",
+          "title": "module version"
+        },
+        "sum": {
+          "type": "string",
+          "title": "checksum"
+        }
+      },
+      "title": "Module is the type for VersionInfo"
+    },
+    "v1beta1OrderBy": {
+      "type": "string",
+      "enum": [
+        "ORDER_BY_UNSPECIFIED",
+        "ORDER_BY_ASC",
+        "ORDER_BY_DESC"
+      ],
+      "default": "ORDER_BY_UNSPECIFIED",
+      "description": "- ORDER_BY_UNSPECIFIED: ORDER_BY_UNSPECIFIED specifies an unknown sorting order. OrderBy defaults\nto ASC in this case.\n - ORDER_BY_ASC: ORDER_BY_ASC defines ascending order\n - ORDER_BY_DESC: ORDER_BY_DESC defines descending order",
+      "title": "OrderBy defines the sorting order"
+    },
+    "v1beta1PageRequest": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "format": "byte",
+          "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set."
+        },
+        "offset": {
+          "type": "string",
+          "format": "uint64",
+          "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set."
+        },
+        "limit": {
+          "type": "string",
+          "format": "uint64",
+          "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app."
+        },
+        "count_total": {
+          "type": "boolean",
+          "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set."
+        },
+        "reverse": {
+          "type": "boolean",
+          "description": "reverse is set to true if results are to be returned in the descending order."
+        }
+      },
+      "description": "message SomeRequest {\n         Foo some_parameter = 1;\n         PageRequest pagination = 2;\n }",
+      "title": "PageRequest is to be embedded in gRPC request messages for efficient\npagination. Ex:"
+    },
+    "v1beta1PageResponse": {
+      "type": "object",
+      "properties": {
+        "next_key": {
+          "type": "string",
+          "format": "byte",
+          "description": "next_key is the key to be passed to PageRequest.key to\nquery the next page most efficiently. It will be empty if\nthere are no more results."
+        },
+        "total": {
+          "type": "string",
+          "format": "uint64",
+          "title": "total is total number of results available if PageRequest.count_total\nwas set, its value is undefined otherwise"
+        }
+      },
+      "description": "PageResponse is to be embedded in gRPC response messages where the\ncorresponding request message has used PageRequest.\n\n message SomeResponse {\n         repeated Bar results = 1;\n         PageResponse page = 2;\n }"
+    },
+    "v1beta1ProofOp": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "format": "byte"
+        },
+        "data": {
+          "type": "string",
+          "format": "byte"
+        }
+      },
+      "description": "ProofOp defines an operation used for calculating Merkle root. The data could\nbe arbitrary format, providing necessary data for example neighbouring node\nhash.\n\nNote: This type is a duplicate of the ProofOp proto type defined in Tendermint."
+    },
+    "v1beta1ProofOps": {
+      "type": "object",
+      "properties": {
+        "ops": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1ProofOp"
+          }
+        }
+      },
+      "description": "ProofOps is Merkle proof defined by the list of ProofOps.\n\nNote: This type is a duplicate of the ProofOps proto type defined in Tendermint."
+    },
+    "v1beta1QueryAccountAddressByIDResponse": {
+      "type": "object",
+      "properties": {
+        "account_address": {
+          "type": "string"
+        }
+      },
+      "title": "QueryAccountAddressByIDResponse is the response type for AccountAddressByID rpc method"
+    },
+    "v1beta1QueryAccountInfoResponse": {
+      "type": "object",
+      "properties": {
+        "info": {
+          "$ref": "#/definitions/v1beta1BaseAccount",
+          "description": "info is the account info which is represented by BaseAccount."
+        }
+      },
+      "description": "QueryAccountInfoResponse is the Query/AccountInfo response type."
+    },
+    "v1beta1QueryAccountResponse": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/definitions/protobufAny",
+          "description": "account defines the account of the corresponding address."
+        }
+      },
+      "description": "QueryAccountResponse is the response type for the Query/Account RPC method."
+    },
+    "v1beta1QueryAccountsResponse": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          },
+          "title": "accounts are the existing accounts"
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines the pagination in the response."
+        }
+      },
+      "description": "QueryAccountsResponse is the response type for the Query/Accounts RPC method."
+    },
+    "v1beta1QueryAllBalancesResponse": {
+      "type": "object",
+      "properties": {
+        "balances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Coin"
+          },
+          "description": "balances is the balances of all the coins."
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines the pagination in the response."
+        }
+      },
+      "description": "QueryAllBalancesResponse is the response type for the Query/AllBalances RPC\nmethod."
+    },
+    "v1beta1QueryBalanceResponse": {
+      "type": "object",
+      "properties": {
+        "balance": {
+          "$ref": "#/definitions/v1beta1Coin",
+          "description": "balance is the balance of the coin."
+        }
+      },
+      "description": "QueryBalanceResponse is the response type for the Query/Balance RPC method."
+    },
+    "v1beta1QueryDenomMetadataByQueryStringResponse": {
+      "type": "object",
+      "properties": {
+        "metadata": {
+          "$ref": "#/definitions/v1beta1Metadata",
+          "description": "metadata describes and provides all the client information for the requested token."
+        }
+      },
+      "description": "QueryDenomMetadataByQueryStringResponse is the response type for the Query/DenomMetadata RPC\nmethod. Identical with QueryDenomMetadataResponse but receives denom as query string in request."
+    },
+    "v1beta1QueryDenomMetadataResponse": {
+      "type": "object",
+      "properties": {
+        "metadata": {
+          "$ref": "#/definitions/v1beta1Metadata",
+          "description": "metadata describes and provides all the client information for the requested token."
+        }
+      },
+      "description": "QueryDenomMetadataResponse is the response type for the Query/DenomMetadata RPC\nmethod."
+    },
+    "v1beta1QueryDenomOwnersByQueryResponse": {
+      "type": "object",
+      "properties": {
+        "denom_owners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1DenomOwner"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines the pagination in the response."
+        }
+      },
+      "description": "QueryDenomOwnersByQueryResponse defines the RPC response of a DenomOwnersByQuery RPC query."
+    },
+    "v1beta1QueryDenomOwnersResponse": {
+      "type": "object",
+      "properties": {
+        "denom_owners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1DenomOwner"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines the pagination in the response."
+        }
+      },
+      "description": "QueryDenomOwnersResponse defines the RPC response of a DenomOwners RPC query."
+    },
+    "v1beta1QueryDenomsMetadataResponse": {
+      "type": "object",
+      "properties": {
+        "metadatas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Metadata"
+          },
+          "description": "metadata provides the client information for all the registered tokens."
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines the pagination in the response."
+        }
+      },
+      "description": "QueryDenomsMetadataResponse is the response type for the Query/DenomsMetadata RPC\nmethod."
+    },
+    "v1beta1QueryModuleAccountByNameResponse": {
+      "type": "object",
+      "properties": {
+        "account": {
+          "$ref": "#/definitions/protobufAny"
+        }
+      },
+      "description": "QueryModuleAccountByNameResponse is the response type for the Query/ModuleAccountByName RPC method."
+    },
+    "v1beta1QueryModuleAccountsResponse": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      },
+      "description": "QueryModuleAccountsResponse is the response type for the Query/ModuleAccounts RPC method."
+    },
+    "v1beta1QuerySendEnabledResponse": {
+      "type": "object",
+      "properties": {
+        "send_enabled": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/bankV1beta1SendEnabled"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines the pagination in the response. This field is only\npopulated if the denoms field in the request is empty."
+        }
+      },
+      "description": "QuerySendEnabledResponse defines the RPC response of a SendEnable query."
+    },
+    "v1beta1QuerySpendableBalanceByDenomResponse": {
+      "type": "object",
+      "properties": {
+        "balance": {
+          "$ref": "#/definitions/v1beta1Coin",
+          "description": "balance is the balance of the coin."
+        }
+      },
+      "description": "QuerySpendableBalanceByDenomResponse defines the gRPC response structure for\nquerying an account's spendable balance for a specific denom."
+    },
+    "v1beta1QuerySpendableBalancesResponse": {
+      "type": "object",
+      "properties": {
+        "balances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Coin"
+          },
+          "description": "balances is the spendable balances of all the coins."
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines the pagination in the response."
+        }
+      },
+      "description": "QuerySpendableBalancesResponse defines the gRPC response structure for querying\nan account's spendable balances."
+    },
+    "v1beta1QuerySupplyOfResponse": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "$ref": "#/definitions/v1beta1Coin",
+          "description": "amount is the supply of the coin."
+        }
+      },
+      "description": "QuerySupplyOfResponse is the response type for the Query/SupplyOf RPC method."
+    },
+    "v1beta1QueryTotalSupplyResponse": {
+      "type": "object",
+      "properties": {
+        "supply": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Coin"
+          },
+          "title": "supply is the supply of the coins"
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse",
+          "description": "pagination defines the pagination in the response."
+        }
+      },
+      "title": "QueryTotalSupplyResponse is the response type for the Query/TotalSupply RPC\nmethod"
+    },
+    "v1beta1Result": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "format": "byte",
+          "description": "Data is any data returned from message or handler execution. It MUST be\nlength prefixed in order to separate data from multiple message executions.\nDeprecated. This field is still populated, but prefer msg_response instead\nbecause it also contains the Msg response typeURL."
+        },
+        "log": {
+          "type": "string",
+          "description": "Log contains the log information from message or handler execution."
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/abciEvent"
+          },
+          "description": "Events contains a slice of Event objects that were emitted during message\nor handler execution."
+        },
+        "msg_responses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          },
+          "description": "msg_responses contains the Msg handler responses type packed in Anys."
+        }
+      },
+      "description": "Result is the union of ResponseFormat and ResponseCheckTx."
+    },
+    "v1beta1SignMode": {
+      "type": "string",
+      "enum": [
+        "SIGN_MODE_UNSPECIFIED",
+        "SIGN_MODE_DIRECT",
+        "SIGN_MODE_TEXTUAL",
+        "SIGN_MODE_DIRECT_AUX",
+        "SIGN_MODE_LEGACY_AMINO_JSON",
+        "SIGN_MODE_EIP_191"
+      ],
+      "default": "SIGN_MODE_UNSPECIFIED",
+      "description": "SignMode represents a signing mode with its own security guarantees.\n\nThis enum should be considered a registry of all known sign modes\nin the Cosmos ecosystem. Apps are not expected to support all known\nsign modes. Apps that would like to support custom  sign modes are\nencouraged to open a small PR against this file to add a new case\nto this SignMode enum describing their sign mode so that different\napps have a consistent version of this enum.\n\n - SIGN_MODE_UNSPECIFIED: SIGN_MODE_UNSPECIFIED specifies an unknown signing mode and will be\nrejected.\n - SIGN_MODE_DIRECT: SIGN_MODE_DIRECT specifies a signing mode which uses SignDoc and is\nverified with raw bytes from Tx.\n - SIGN_MODE_TEXTUAL: SIGN_MODE_TEXTUAL is a future signing mode that will verify some\nhuman-readable textual representation on top of the binary representation\nfrom SIGN_MODE_DIRECT.\n\nSince: cosmos-sdk 0.50\n - SIGN_MODE_DIRECT_AUX: SIGN_MODE_DIRECT_AUX specifies a signing mode which uses\nSignDocDirectAux. As opposed to SIGN_MODE_DIRECT, this sign mode does not\nrequire signers signing over other signers' `signer_info`.\n\nSince: cosmos-sdk 0.46\n - SIGN_MODE_LEGACY_AMINO_JSON: SIGN_MODE_LEGACY_AMINO_JSON is a backwards compatibility mode which uses\nAmino JSON and will be removed in the future.\n - SIGN_MODE_EIP_191: SIGN_MODE_EIP_191 specifies the sign mode for EIP 191 signing on the Cosmos\nSDK. Ref: https://eips.ethereum.org/EIPS/eip-191\n\nCurrently, SIGN_MODE_EIP_191 is registered as a SignMode enum variant,\nbut is not implemented on the SDK by default. To enable EIP-191, you need\nto pass a custom `TxConfig` that has an implementation of\n`SignModeHandler` for EIP-191. The SDK may decide to fully support\nEIP-191 in the future.\n\nSince: cosmos-sdk 0.45.2"
+    },
+    "v1beta1SignerInfo": {
+      "type": "object",
+      "properties": {
+        "public_key": {
+          "$ref": "#/definitions/protobufAny",
+          "description": "public_key is the public key of the signer. It is optional for accounts\nthat already exist in state. If unset, the verifier can use the required \\\nsigner address for this position and lookup the public key."
+        },
+        "mode_info": {
+          "$ref": "#/definitions/v1beta1ModeInfo",
+          "title": "mode_info describes the signing mode of the signer and is a nested\nstructure to support nested multisig pubkey's"
+        },
+        "sequence": {
+          "type": "string",
+          "format": "uint64",
+          "description": "sequence is the sequence of the account, which describes the\nnumber of committed transactions signed by a given address. It is used to\nprevent replay attacks."
+        }
+      },
+      "description": "SignerInfo describes the public key and signing mode of a single top-level\nsigner."
+    },
+    "v1beta1SimulateRequest": {
+      "type": "object",
+      "properties": {
+        "tx": {
+          "$ref": "#/definitions/v1beta1Tx",
+          "description": "tx is the transaction to simulate.\nDeprecated. Send raw tx bytes instead."
+        },
+        "tx_bytes": {
+          "type": "string",
+          "format": "byte",
+          "description": "tx_bytes is the raw transaction."
+        }
+      },
+      "description": "SimulateRequest is the request type for the Service.Simulate\nRPC method."
+    },
+    "v1beta1SimulateResponse": {
+      "type": "object",
+      "properties": {
+        "gas_info": {
+          "$ref": "#/definitions/v1beta1GasInfo",
+          "description": "gas_info is the information about gas used in the simulation."
+        },
+        "result": {
+          "$ref": "#/definitions/v1beta1Result",
+          "description": "result is the result of the simulation."
+        }
+      },
+      "description": "SimulateResponse is the response type for the\nService.SimulateRPC method."
+    },
+    "v1beta1StatusResponse": {
+      "type": "object",
+      "properties": {
+        "earliest_store_height": {
+          "type": "string",
+          "format": "uint64",
+          "title": "earliest block height available in the store"
+        },
+        "height": {
+          "type": "string",
+          "format": "uint64",
+          "title": "current block height"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "title": "block height timestamp"
+        },
+        "app_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "app hash of the current block"
+        },
+        "validator_hash": {
+          "type": "string",
+          "format": "byte",
+          "title": "validator hash provided by the consensus header"
+        }
+      },
+      "description": "StateResponse defines the response structure for the status of a node."
+    },
+    "v1beta1StringEvent": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Attribute"
+          }
+        }
+      },
+      "description": "StringEvent defines en Event object wrapper where all the attributes\ncontain key/value pairs that are strings instead of raw bytes."
+    },
+    "v1beta1Tip": {
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Coin"
+          },
+          "title": "amount is the amount of the tip"
+        },
+        "tipper": {
+          "type": "string",
+          "title": "tipper is the address of the account paying for the tip"
+        }
+      },
+      "description": "Tip is the tip used for meta-transactions."
+    },
+    "v1beta1Tx": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "$ref": "#/definitions/v1beta1TxBody",
+          "title": "body is the processable content of the transaction"
+        },
+        "auth_info": {
+          "$ref": "#/definitions/v1beta1AuthInfo",
+          "title": "auth_info is the authorization related content of the transaction,\nspecifically signers, signer modes and fee"
+        },
+        "signatures": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "byte"
+          },
+          "description": "signatures is a list of signatures that matches the length and order of\nAuthInfo's signer_infos to allow connecting signature meta information like\npublic key and signing mode by position."
+        }
+      },
+      "description": "Tx is the standard type used for broadcasting transactions."
+    },
+    "v1beta1TxBody": {
+      "type": "object",
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          },
+          "description": "messages is a list of messages to be executed. The required signers of\nthose messages define the number and order of elements in AuthInfo's\nsigner_infos and Tx's signatures. Each required signer address is added to\nthe list only the first time it occurs.\nBy convention, the first required signer (usually from the first message)\nis referred to as the primary signer and pays the fee for the whole\ntransaction."
+        },
+        "memo": {
+          "type": "string",
+          "description": "memo is any arbitrary note/comment to be added to the transaction.\nWARNING: in clients, any publicly exposed text should not be called memo,\nbut should be called `note` instead (see\nhttps://github.com/cosmos/cosmos-sdk/issues/9122)."
+        },
+        "timeout_height": {
+          "type": "string",
+          "format": "uint64",
+          "description": "timeout_height is the block height after which this transaction will not\nbe processed by the chain."
+        },
+        "unordered": {
+          "type": "boolean",
+          "description": "unordered, when set to true, indicates that the transaction signer(s)\nintend for the transaction to be evaluated and executed in an un-ordered\nfashion. Specifically, the account's nonce will NOT be checked or\nincremented, which allows for fire-and-forget as well as concurrent\ntransaction execution.\n\nNote, when set to true, the existing 'timeout_timestamp' value must\nbe set and will be used to correspond to a timestamp in which the transaction is deemed\nvalid.\n\nWhen true, the sequence value MUST be 0, and any transaction with unordered=true and a non-zero sequence value will\nbe rejected.\nExternal services that make assumptions about sequence values may need to be updated because of this."
+        },
+        "timeout_timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "timeout_timestamp is the block time after which this transaction will not\nbe processed by the chain.\n\nNote, if unordered=true this value MUST be set\nand will act as a short-lived TTL in which the transaction is deemed valid\nand kept in memory to prevent duplicates."
+        },
+        "extension_options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          },
+          "title": "extension_options are arbitrary options that can be added by chains\nwhen the default options are not sufficient. If any of these are present\nand can't be handled, the transaction will be rejected"
+        },
+        "non_critical_extension_options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          },
+          "title": "extension_options are arbitrary options that can be added by chains\nwhen the default options are not sufficient. If any of these are present\nand can't be handled, they will be ignored"
+        }
+      },
+      "description": "TxBody is the body of a transaction that all signers sign over."
+    },
+    "v1beta1TxDecodeAminoRequest": {
+      "type": "object",
+      "properties": {
+        "amino_binary": {
+          "type": "string",
+          "format": "byte"
+        }
+      },
+      "description": "TxDecodeAminoRequest is the request type for the Service.TxDecodeAmino\nRPC method."
+    },
+    "v1beta1TxDecodeAminoResponse": {
+      "type": "object",
+      "properties": {
+        "amino_json": {
+          "type": "string"
+        }
+      },
+      "description": "TxDecodeAminoResponse is the response type for the Service.TxDecodeAmino\nRPC method."
+    },
+    "v1beta1TxDecodeRequest": {
+      "type": "object",
+      "properties": {
+        "tx_bytes": {
+          "type": "string",
+          "format": "byte",
+          "description": "tx_bytes is the raw transaction."
+        }
+      },
+      "description": "TxDecodeRequest is the request type for the Service.TxDecode\nRPC method."
+    },
+    "v1beta1TxDecodeResponse": {
+      "type": "object",
+      "properties": {
+        "tx": {
+          "$ref": "#/definitions/v1beta1Tx",
+          "description": "tx is the decoded transaction."
+        }
+      },
+      "description": "TxDecodeResponse is the response type for the\nService.TxDecode method."
+    },
+    "v1beta1TxEncodeAminoRequest": {
+      "type": "object",
+      "properties": {
+        "amino_json": {
+          "type": "string"
+        }
+      },
+      "description": "TxEncodeAminoRequest is the request type for the Service.TxEncodeAmino\nRPC method."
+    },
+    "v1beta1TxEncodeAminoResponse": {
+      "type": "object",
+      "properties": {
+        "amino_binary": {
+          "type": "string",
+          "format": "byte"
+        }
+      },
+      "description": "TxEncodeAminoResponse is the response type for the Service.TxEncodeAmino\nRPC method."
+    },
+    "v1beta1TxEncodeRequest": {
+      "type": "object",
+      "properties": {
+        "tx": {
+          "$ref": "#/definitions/v1beta1Tx",
+          "description": "tx is the transaction to encode."
+        }
+      },
+      "description": "TxEncodeRequest is the request type for the Service.TxEncode\nRPC method."
+    },
+    "v1beta1TxEncodeResponse": {
+      "type": "object",
+      "properties": {
+        "tx_bytes": {
+          "type": "string",
+          "format": "byte",
+          "description": "tx_bytes is the encoded transaction bytes."
+        }
+      },
+      "description": "TxEncodeResponse is the response type for the\nService.TxEncode method."
+    },
+    "v1beta1TxResponse": {
+      "type": "object",
+      "properties": {
+        "height": {
+          "type": "string",
+          "format": "int64",
+          "title": "The block height"
+        },
+        "txhash": {
+          "type": "string",
+          "description": "The transaction hash."
+        },
+        "codespace": {
+          "type": "string",
+          "title": "Namespace for the Code"
+        },
+        "code": {
+          "type": "integer",
+          "format": "int64",
+          "description": "Response code."
+        },
+        "data": {
+          "type": "string",
+          "description": "Result bytes, if any."
+        },
+        "raw_log": {
+          "type": "string",
+          "description": "The output of the application's logger (raw string). May be\nnon-deterministic."
+        },
+        "logs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1ABCIMessageLog"
+          },
+          "description": "The output of the application's logger (typed). May be non-deterministic."
+        },
+        "info": {
+          "type": "string",
+          "description": "Additional information. May be non-deterministic."
+        },
+        "gas_wanted": {
+          "type": "string",
+          "format": "int64",
+          "description": "Amount of gas requested for transaction."
+        },
+        "gas_used": {
+          "type": "string",
+          "format": "int64",
+          "description": "Amount of gas consumed by transaction."
+        },
+        "tx": {
+          "$ref": "#/definitions/protobufAny",
+          "description": "The request transaction bytes."
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Time of the previous block. For heights \u003e 1, it's the weighted median of\nthe timestamps of the valid votes in the block.LastCommit. For height == 1,\nit's genesis time."
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/abciEvent"
+          },
+          "description": "Events defines all the events emitted by processing a transaction. Note,\nthese events include those emitted by processing all the messages and those\nemitted from the ante. Whereas Logs contains the events, with\nadditional metadata, emitted only by processing the messages."
+        }
+      },
+      "description": "TxResponse defines a structure containing relevant tx data and metadata. The\ntags are stringified and the log is JSON decoded."
+    },
+    "v1beta1VersionInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "app_name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "git_commit": {
+          "type": "string"
+        },
+        "build_tags": {
+          "type": "string"
+        },
+        "go_version": {
+          "type": "string"
+        },
+        "build_deps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1beta1Module"
+          }
+        },
+        "cosmos_sdk_version": {
+          "type": "string"
+        }
+      },
+      "description": "VersionInfo is the type for the GetNodeInfoResponse message."
+    },
+    "versionConsensus": {
+      "type": "object",
+      "properties": {
+        "block": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "app": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "Consensus captures the consensus rules for processing a block in the blockchain,\nincluding all blockchain data structures and the rules of the application's\nstate transition machine."
+    }
+  }
+}
