@@ -70,6 +70,17 @@ module_balance(){ rq module-balances | jq -r '.rewards_balance' 2>/dev/null || e
 # We therefore return "true" only when the bool is present and true, else "false"
 # (covers both not-yet-claimed and no-record-yet) — callers test != "true".
 slot_claimed()  { rq slot-rewards 1 --limit 500 | jq -r --arg e "$1" '([.rewards[]? | select(.epoch_number==$e) | .claimed] | first) == true' 2>/dev/null || echo false; }
+# The claim record query can read state one block behind the tx's /tx commit, so a
+# single read right after a successful claim intermittently sees the stale (false)
+# value. Retry briefly for the expected state before asserting (cf. agree_at_retry).
+slot_claimed_is() { # want_bool epoch  -- true within ~10s, else last-seen value
+  local want="$1" epoch="$2" got i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    got="$(slot_claimed "$epoch")"; [[ "$got" == "$want" ]] && { echo "$got"; return; }
+    sleep 1
+  done
+  echo "$got"
+}
 
 # Minimum latest height across all nodes — a height every node has surely
 # committed, so a cross-node hash compare there can't false-positive on a peer
@@ -296,7 +307,7 @@ while (( SECONDS - START < SOAK_DURATION )); do
       [[ "$(slot_claimed "$finalized")" == "false" ]] || record_fail "epoch $finalized claim record not unclaimed before claim"
       ccode="$(submit_and_wait 1 operator1 rewards claim 1 "$finalized" "$finalized")"
       if [[ "$ccode" == "0" ]]; then
-        [[ "$(slot_claimed "$finalized")" == "true" ]] || record_fail "epoch $finalized not marked claimed after successful claim"
+        [[ "$(slot_claimed_is true "$finalized")" == "true" ]] || record_fail "epoch $finalized not marked claimed after successful claim"
         dcode="$(submit_and_wait 1 operator1 rewards claim 1 "$finalized" "$finalized")"
         [[ "$dcode" != "0" ]] || record_fail "double claim of epoch $finalized succeeded"
         CLAIMS=$((CLAIMS + 1)); CLAIMED_TOTAL=$((CLAIMED_TOTAL + PER_SLOT)); LAST_CLAIMED_EPOCH=$finalized
