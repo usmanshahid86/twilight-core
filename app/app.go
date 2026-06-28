@@ -10,14 +10,18 @@ import (
 	cmttypes "github.com/cometbft/cometbft/types"
 	dbm "github.com/cosmos/cosmos-db"
 
+	"cosmossdk.io/client/v2/autocli"
+	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/codec"
+	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/runtime"
+	runtimeservices "github.com/cosmos/cosmos-sdk/runtime/services"
 	serverapi "github.com/cosmos/cosmos-sdk/server/api"
 	serverconfig "github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
@@ -77,6 +81,25 @@ func AuthorityAddress() string {
 
 func EmergencyAuthorityAddress() string {
 	return authtypes.NewModuleAddress(EmergencyAuthorityModuleName).String()
+}
+
+// AutoCliOpts returns the AutoCLI options built from the live module manager. It
+// is used by the root command to generate the standard `tx`/`query` command
+// trees for every wired module (bank, auth, consensus, ...).
+func (app *App) AutoCliOpts() autocli.AppOptions {
+	modules := make(map[string]appmodule.AppModule, len(app.ModuleManager.Modules))
+	for name, m := range app.ModuleManager.Modules {
+		if am, ok := m.(appmodule.AppModule); ok {
+			modules[name] = am
+		}
+	}
+	return autocli.AppOptions{
+		Modules:               modules,
+		ModuleOptions:         runtimeservices.ExtractAutoCLIOptions(app.ModuleManager.Modules),
+		AddressCodec:          addresscodec.NewBech32Codec(AccountPrefix),
+		ValidatorAddressCodec: addresscodec.NewBech32Codec(AccountPrefix + "valoper"),
+		ConsensusAddressCodec: addresscodec.NewBech32Codec(AccountPrefix + "valcons"),
+	}
 }
 
 func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ servertypes.AppOptions, baseAppOptions ...func(*baseapp.BaseApp)) *App {

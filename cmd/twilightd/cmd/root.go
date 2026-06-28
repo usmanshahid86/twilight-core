@@ -15,6 +15,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/config"
 	"github.com/cosmos/cosmos-sdk/client/debug"
+	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/client/keys"
 	"github.com/cosmos/cosmos-sdk/client/pruning"
 	"github.com/cosmos/cosmos-sdk/client/rpc"
@@ -90,16 +91,11 @@ func NewRootCmd() *cobra.Command {
 		debug.Cmd(),
 		pruning.Cmd(newApp, app.DefaultNodeHome),
 		snapshot.Cmd(newApp),
-		rpc.QueryEventForTxCmd(),
-		server.QueryBlockCmd(),
-		server.QueryBlocksCmd(),
-		authcmd.QueryTxsByEventsCmd(),
-		authcmd.QueryTxCmd(),
-		authcmd.GetSignCommand(),
-		authcmd.GetBroadcastCommand(),
-		authcmd.GetEncodeCommand(),
-		authcmd.GetDecodeCommand(),
+		queryCommand(),
+		txCommand(),
 		keys.Commands(),
+		// Custom modules keep their bespoke top-level commands (coreslot register,
+		// coreslot-query, rewards, rewards-query) for tooling compatibility.
 		coreslotcli.GetTxCmd(),
 		coreslotcli.GetQueryCmd(),
 		coreslotcli.GetGenesisCmd(),
@@ -107,7 +103,59 @@ func NewRootCmd() *cobra.Command {
 		rewardscli.GetQueryCmd(),
 	)
 	server.AddCommandsWithStartCmdOptions(root, app.DefaultNodeHome, newApp, appExport, server.StartCmdOptions{})
+
+	// Wire AutoCLI: generate the standard `tx`/`query` module command trees (bank,
+	// auth, consensus, ...) onto the parents added above. A throwaway in-memory app
+	// yields the module metadata; app.New ignores AppOptions (nil ok) and
+	// loadLatest=false avoids touching any state.
+	tempApp := app.New(log.NewNopLogger(), dbm.NewMemDB(), nil, false, nil)
+	if err := tempApp.AutoCliOpts().EnhanceRootCommand(root); err != nil {
+		panic(err)
+	}
 	return root
+}
+
+// queryCommand assembles the standard `query` parent; AutoCLI adds per-module
+// query subcommands (e.g. `query bank balances`) onto it.
+func queryCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                        "query",
+		Aliases:                    []string{"q"},
+		Short:                      "Querying subcommands",
+		SuggestionsMinimumDistance: 2,
+		RunE:                       client.ValidateCmd,
+	}
+	cmd.AddCommand(
+		rpc.QueryEventForTxCmd(),
+		server.QueryBlockCmd(),
+		server.QueryBlocksCmd(),
+		authcmd.QueryTxsByEventsCmd(),
+		authcmd.QueryTxCmd(),
+	)
+	cmd.PersistentFlags().String(flags.FlagNode, "tcp://localhost:26657", "<host>:<port> to CometBFT RPC interface for this chain")
+	return cmd
+}
+
+// txCommand assembles the standard `tx` parent; AutoCLI adds per-module tx
+// subcommands (e.g. `tx bank send`) onto it.
+func txCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                        "tx",
+		Short:                      "Transactions subcommands",
+		SuggestionsMinimumDistance: 2,
+		RunE:                       client.ValidateCmd,
+	}
+	cmd.AddCommand(
+		authcmd.GetSignCommand(),
+		authcmd.GetSignBatchCommand(),
+		authcmd.GetMultiSignCommand(),
+		authcmd.GetValidateSignaturesCommand(),
+		authcmd.GetBroadcastCommand(),
+		authcmd.GetEncodeCommand(),
+		authcmd.GetDecodeCommand(),
+	)
+	cmd.PersistentFlags().String(flags.FlagNode, "tcp://localhost:26657", "<host>:<port> to CometBFT RPC interface for this chain")
+	return cmd
 }
 
 func newApp(logger log.Logger, db dbm.DB, traceStore io.Writer, opts servertypes.AppOptions) servertypes.Application {
