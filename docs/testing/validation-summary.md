@@ -30,6 +30,7 @@ points to the evidence; it is not a raw log dump. Supporting design is in the
 | Cross-node app-hash / validator-hash agreement | `scripts/localnet/agree.sh` | PASS | App, validators, and next-validators hash agreement |
 | Multi-day endurance | [Soak C1 report](soak-c1-endurance.md) | PASS | 48 h continuous; exact accounting; zero-premine integrity |
 | Off-happy-path economic branches are exercised in integration | [Branch-coverage drills](branch-coverage-drills.md) (`app/rewards_drills_test.go`) | PASS | Halving and treasury via `FinalizeBlock` + `Commit`; multi-slot, churn, carry-forward, and claim-range branches via the direct keeper lifecycle in runtime order; identity re-asserted |
+| No known reachable dependency / toolchain vulnerabilities | `govulncheck` (blocking in CI, `.github/workflows/ci.yml`) | PASS | Go 1.25.11 + grpc v1.79.3 + x/net v0.53.0; 0 advisories affecting called symbols (non-called advisories in required modules do not gate) |
 
 ## Known exclusions
 

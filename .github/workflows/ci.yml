@@ -111,20 +111,19 @@ jobs:
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest
-    # Non-blocking. govulncheck currently reports Go standard-library advisories tied
-    # to the pinned `go 1.23.2` toolchain, plus grpc / x-net module advisories. These
-    # clear with a separate, tested dependency + toolchain upgrade (tracked in its own
-    # issue), not in this PR. The `|| echo` guard keeps the check green and informational;
-    # remove it (so the step blocks again) once that upgrade lands.
-    continue-on-error: true
+    # Blocking. The dependency + Go-toolchain upgrade (go 1.25.11, grpc v1.79.3,
+    # x/net v0.53.0) cleared every reachable advisory -- govulncheck reports 0
+    # vulnerabilities affecting called symbols. The step is intentionally blocking
+    # so a newly reachable advisory fails CI and is triaged, rather than silently
+    # accumulating. (govulncheck exits non-zero only on reachable findings;
+    # advisories in required modules that the code does not call do not fail it.)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - name: Run govulncheck (informational)
+      - name: Run govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          "$(go env GOPATH)/bin/govulncheck" ./... || \
-            echo "::warning::govulncheck reported advisories (Go stdlib + grpc/x-net); non-blocking, tracked for a separate dependency/toolchain upgrade"
+          "$(go env GOPATH)/bin/govulncheck" ./...
