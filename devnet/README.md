@@ -23,8 +23,8 @@ wiped and re-genesis'd at any time (you'll just re-join).
 ## Prerequisites
 
 - Linux host, ~2 GB free disk.
-- **Go 1.23.x** to build (newer Go breaks a pinned dependency). Get the latest
-  1.23.x from <https://go.dev/dl/>.
+- **Go 1.25.x** to build (Go 1.26 breaks a pinned dependency). Get the latest
+  1.25.x from <https://go.dev/dl/>.
 - `git`, `jq`, `curl`.
 
 ## 1. Build `twilightd`

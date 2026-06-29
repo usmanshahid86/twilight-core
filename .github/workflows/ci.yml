@@ -39,9 +39,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.62.2
+          # golangci-lint v2.x is required for Go 1.25 (the v1 line stops at Go 1.24).
+          # .golangci.yml is in v2 config format. Bump this pin intentionally.
+          version: v2.12.2
           # Only flag issues introduced by the PR — keeps the large existing
           # codebase from blocking CI while enforcing quality on new code.
           only-new-issues: true
@@ -125,5 +127,7 @@ jobs:
           cache: true
       - name: Run govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          # Pinned (bump intentionally, like protoc/golangci-lint) so a new
+          # govulncheck release cannot change gating behavior without a code change.
+          go install golang.org/x/vuln/cmd/govulncheck@v1.5.0
           "$(go env GOPATH)/bin/govulncheck" ./...

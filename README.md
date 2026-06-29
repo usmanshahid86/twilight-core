@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/twilight-project/twilight-core/actions/workflows/ci.yml/badge.svg)](https://github.com/twilight-project/twilight-core/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go)](go.mod)
+[![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](go.mod)
 
 Twilight Core is a greenfield Cosmos SDK and CometBFT Proof-of-Authority chain. The node
 binary is `twilightd`.
@@ -69,7 +69,7 @@ devnet/           devnet genesis and configuration
 
 ## Prerequisites
 
-- **Go 1.23.x** and **make** — to build and test the chain (see `go.mod`).
+- **Go 1.25.x** and **make** — to build and test the chain (see `go.mod`).
 - **protoc** — only if you regenerate protobuf (`make proto`).
 - **Node.js + npm** — only to build the documentation site under `website/`.
 
