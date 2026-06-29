@@ -1,4 +1,4 @@
-.PHONY: build test fmt proto localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -8,10 +8,32 @@ test:
 	go test ./...
 
 fmt:
-	gofmt -w $$(find . -name '*.go' -not -path './vendor/*')
+	gofmt -w $$(find . -name '*.go' -not -path './vendor/*' -not -path './website/*')
+
+# Static analysis — matches the CI golangci-lint job (config in .golangci.yml).
+# Requires golangci-lint: https://golangci-lint.run/usage/install/
+lint:
+	golangci-lint run
+
+vet:
+	go vet ./...
+
+# Dependency vulnerability scan (matches CI). Installs govulncheck on demand.
+vuln:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+tidy:
+	go mod tidy
 
 proto:
 	PATH="$${PATH}:$$(go env GOPATH)/bin" ./scripts/protocgen.sh
+
+# Regenerate the offline tx-decode descriptor set for downstream indexers/explorers
+# (docs/proto/twilight-descriptors.pb + manifest). CI re-runs this and fails if the
+# committed output is stale (.github/workflows/ci.yml: proto-descriptor). Use the
+# protoc version pinned in scripts/export-proto-descriptor.sh to avoid byte drift.
+proto-descriptor:
+	./scripts/export-proto-descriptor.sh
 
 localnet-init:
 	./scripts/localnet/init.sh

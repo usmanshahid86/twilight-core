@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test -count=1 ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62.2
+          # Only flag issues introduced by the PR — keeps the large existing
+          # codebase from blocking CI while enforcing quality on new code.
+          only-new-issues: true
+
+  formatting:
+    name: gofmt & tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l $(find . -name '*.go' -not -path './website/*'))
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+      - name: go mod tidy is clean
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  proto-descriptor:
+    name: proto descriptor up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install protoc (pinned)
+        # Must match EXPECTED_PROTOC_VERSION in scripts/export-proto-descriptor.sh —
+        # the descriptor set is byte-reproducible only for a fixed protoc version.
+        run: |
+          PROTOC_VERSION=27.0
+          curl -sSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          unzip -q /tmp/protoc.zip -d /tmp/protoc
+          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
+      - name: Populate module cache (proto include paths)
+        # Explicitly fetch the modules whose proto/ trees the export script includes.
+        # Some are indirect / proto-only deps (e.g. gogo/googleapis) that a bare
+        # `go mod download` can prune, leaving the script's include paths missing.
+        run: |
+          go mod download
+          go mod download \
+            github.com/cosmos/cosmos-sdk \
+            github.com/cosmos/gogoproto \
+            cosmossdk.io/api \
+            github.com/cosmos/cosmos-proto \
+            github.com/gogo/googleapis
+      - name: Regenerate descriptor
+        run: make proto-descriptor
+      - name: Verify committed descriptor is up to date
+        run: |
+          changed=$(git status --porcelain -- docs/proto/)
+          if [ -n "$changed" ]; then
+            echo "::error::docs/proto/ is stale. Run 'make proto-descriptor' (protoc 27.0) and commit the result."
+            echo "$changed"
+            git diff -- docs/proto/ || true
+            exit 1
+          fi
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    # Non-blocking. govulncheck currently reports Go standard-library advisories tied
+    # to the pinned `go 1.23.2` toolchain, plus grpc / x-net module advisories. These
+    # clear with a separate, tested dependency + toolchain upgrade (tracked in its own
+    # issue), not in this PR. The `|| echo` guard keeps the check green and informational;
+    # remove it (so the step blocks again) once that upgrade lands.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run govulncheck (informational)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./... || \
+            echo "::warning::govulncheck reported advisories (Go stdlib + grpc/x-net); non-blocking, tracked for a separate dependency/toolchain upgrade"
