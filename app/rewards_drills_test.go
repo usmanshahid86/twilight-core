@@ -94,7 +94,9 @@ func driveBlock(t *testing.T, a *app.App, base sdk.Context, height int64) sdk.Co
 // state and fails on any broken one.
 func assertInvariants(t *testing.T, a *app.App, ctx sdk.Context) {
 	t.Helper()
-	invariants := map[string]sdk.Invariant{
+	// Stored under the plain func signature rather than the deprecated
+	// sdk.Invariant named type (tied to x/crisis), which the linter rejects.
+	invariants := map[string]func(sdk.Context) (string, bool){
 		"supply-cap":                a.RewardsKeeper.SupplyCapInvariant(),
 		"cumulative-emitted":        a.RewardsKeeper.CumulativeEmittedInvariant(),
 		"module-balance-coverage":   a.RewardsKeeper.ModuleBalanceCoverageInvariant(),
