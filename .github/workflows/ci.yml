@@ -85,7 +85,17 @@ jobs:
           unzip -q /tmp/protoc.zip -d /tmp/protoc
           echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
       - name: Populate module cache (proto include paths)
-        run: go mod download
+        # Explicitly fetch the modules whose proto/ trees the export script includes.
+        # Some are indirect / proto-only deps (e.g. gogo/googleapis) that a bare
+        # `go mod download` can prune, leaving the script's include paths missing.
+        run: |
+          go mod download
+          go mod download \
+            github.com/cosmos/cosmos-sdk \
+            github.com/cosmos/gogoproto \
+            cosmossdk.io/api \
+            github.com/cosmos/cosmos-proto \
+            github.com/gogo/googleapis
       - name: Regenerate descriptor
         run: make proto-descriptor
       - name: Verify committed descriptor is up to date
