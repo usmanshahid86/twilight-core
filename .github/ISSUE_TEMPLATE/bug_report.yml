@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a defect in Twilight Core (not a security vulnerability)
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report security vulnerabilities here** — follow [SECURITY.md](../blob/main/SECURITY.md) for private disclosure.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and its impact.
+      placeholder: Describe the unexpected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands, a failing test, or a drill that triggers it.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `twilightd version` or the git commit/branch.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - x/coreslot (consensus / validator set)
+        - x/rewards (emission / claims)
+        - app / wiring
+        - CLI / REST / gRPC
+        - tooling / scripts / docs
+        - unsure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Relevant node logs or error output (redact any secrets/IPs).
+      render: shell

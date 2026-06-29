@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test -count=1 ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.62.2
+          # Only flag issues introduced by the PR — keeps the large existing
+          # codebase from blocking CI while enforcing quality on new code.
+          only-new-issues: true
+
+  formatting:
+    name: gofmt & tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l $(find . -name '*.go' -not -path './website/*'))
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+      - name: go mod tidy is clean
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  proto-descriptor:
+    name: proto descriptor up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install protoc (pinned)
+        # Must match EXPECTED_PROTOC_VERSION in scripts/export-proto-descriptor.sh —
+        # the descriptor set is byte-reproducible only for a fixed protoc version.
+        run: |
+          PROTOC_VERSION=27.0
+          curl -sSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          unzip -q /tmp/protoc.zip -d /tmp/protoc
+          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
+      - name: Populate module cache (proto include paths)
+        run: go mod download
+      - name: Regenerate descriptor
+        run: make proto-descriptor
+      - name: Verify committed descriptor is up to date
+        run: |
+          changed=$(git status --porcelain -- docs/proto/)
+          if [ -n "$changed" ]; then
+            echo "::error::docs/proto/ is stale. Run 'make proto-descriptor' (protoc 27.0) and commit the result."
+            echo "$changed"
+            git diff -- docs/proto/ || true
+            exit 1
+          fi
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    # Informational until dependencies are clean; flip to blocking by removing
+    # this line once `govulncheck ./...` is green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...

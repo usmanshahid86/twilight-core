@@ -1,0 +1,85 @@
+name: Feature request
+description: Propose an enhancement or new capability for Twilight Core
+labels: ["enhancement", "triage"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for non-security feature requests.
+
+        **Do not describe security vulnerabilities here.** If the request involves funds, validator keys, consensus safety, private data, or network security, follow the private disclosure process in [SECURITY.md](/SECURITY.md).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem does this solve? Why is it needed?
+      placeholder: Describe the limitation, missing capability, or operational pain point.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen?
+      placeholder: Describe the proposed behavior, interface, module change, CLI command, API, or documentation update.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - x/coreslot
+        - x/emissions
+        - x/rewards
+        - app / module wiring
+        - CLI / REST / gRPC
+        - genesis / config
+        - tooling / scripts / docs
+        - tests / CI
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: state-impact
+    attributes:
+      label: Consensus / state impact
+      description: Does this change deterministic chain state or consensus behavior?
+      options:
+        - no consensus or state impact
+        - changes CLI / API behavior only
+        - changes module state or params
+        - changes validator set / consensus behavior
+        - changes emissions / rewards / token economics
+        - requires further analysis
+    validations:
+      required: true
+
+  - type: textarea
+    id: upgrade-impact
+    attributes:
+      label: Migration / upgrade impact
+      description: Note any expected genesis changes, store migrations, parameter changes, or coordinated network upgrade requirements.
+      placeholder: |
+        - Store migration needed?
+        - Genesis/config change?
+        - Param change?
+        - Coordinated upgrade needed?
+        - Backward compatibility concerns?
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches were considered, and why are they less suitable?
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add links, examples from other chains, screenshots, API sketches, or related issues.
