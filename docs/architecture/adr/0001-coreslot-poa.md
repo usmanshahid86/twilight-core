@@ -10,7 +10,7 @@
 
 In short: Twilight does not use token staking to decide who validates blocks. Validator
 admission, lifecycle, consensus-key rotation, and validator-update emission are owned by
-`x/coreslot`, a dedicated PoA module. This gives the chain a single, auditable control plane
+`x/coreslot`, a dedicated PoA module. This gives the chain a single, reviewable control plane
 for consensus-set changes and keeps staking structurally off the consensus path.
 
 ## Context
@@ -61,8 +61,10 @@ emitter of the validator set.
   `new@power`), rejects duplicates, sorts canonically, and persists only on full success.
 - Lifecycle is an explicit `PENDING / ACTIVE / INACTIVE / SUSPENDED / REMOVED` state machine
   with authority-gated transitions; removal is non-destructive (no stake to burn).
-- Reward weight is **separate state** from consensus power, so operators can later be paid on
-  a weight independent of voting power (v1: equal weight).
+- Reward weight is **separate state** from consensus power, so future payout weighting can
+  evolve without changing validator voting power. In v1, configured reward weight is
+  snapshotted but not used for allocation; rewards are allocated by active-block participation
+  in [`x/rewards`](../../../x/rewards).
 - Consensus-key rotation is coreslot-owned and delayed, emitting `old@0 / new@power`
   atomically while a slot is active.
 
@@ -76,13 +78,13 @@ The shipped implementation tightened the original decision in two important ways
    omission *and* that `x/coreslot` is the only validator-update-emitting EndBlock module.
    Rationale and trade-offs are recorded in
    [`staking-omission-or-inert-staking.md`](../../security/staking-omission-or-inert-staking.md).
-2. **Rewards live in [`x/rewards`](../../../x/rewards)** (epoch emission + claims), keyed on
-   reward weight — not the placeholder `x/operatorrewards` name used in the memo. See
+2. **Rewards live in [`x/rewards`](../../../x/rewards)** (epoch emission + active-block
+   allocation + claims), not the placeholder `x/operatorrewards` name used in the memo. See
    [ADR-0002](0002-rewards-emission.md).
 
 ## Consequences
 
-**Positive.** Exactly one audited code path can move the validator set, which minimizes the
+**Positive.** Exactly one code path can move the validator set, which minimizes the
 blast radius of consensus-set bugs. The design supports Twilight's full validator lifecycle,
 cleanly separates consensus power from reward weight and status, and allows active
 consensus-key rotation without relying on staking semantics.

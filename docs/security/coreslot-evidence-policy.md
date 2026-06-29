@@ -22,10 +22,13 @@ automatic reaction.
   `ACTIVE` at `SlotVotingPower` until an authority explicitly changes it. (Proven
   by the offline-validator drill: `scripts/localnet/quorum-drill.sh`,
   action `02-offline-no-auto-change`.)
-- **No operator reward forfeiture exists in CoreSlot.** Reward weight
-  (`OperatorRewardWeight.FinalWeight`) is separate from consensus power and is not
-  consumed by any v1 module. Any future reward forfeiture is a **future
-  `x/emissions` policy**, not CoreSlot validator-set logic.
+- **No operator reward forfeiture exists in CoreSlot.** Consensus power and reward
+  configuration are independent: the operator reward weight (`OperatorRewardWeight`) is
+  separate from consensus power and is not consumed by CoreSlot. CoreSlot reward metadata
+  must not affect validator-set derivation or emitted `ValidatorUpdate`s. In v1, rewards are
+  allocated by active-block participation in `x/rewards`; configured reward weight is
+  snapshotted but unused. Any future reward forfeiture would be an `x/rewards` policy, not
+  CoreSlot validator-set logic.
 
 ## 3. How v1 responds to equivocation / double-sign
 
