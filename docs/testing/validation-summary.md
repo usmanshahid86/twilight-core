@@ -29,6 +29,7 @@ points to the evidence; it is not a raw log dump. Supporting design is in the
 | Operational drills (lifecycle, restart/rotation, quorum) | `make drills` (`scripts/localnet/`) | PASS | Lifecycle, restart-rotation, quorum |
 | Cross-node app-hash / validator-hash agreement | `scripts/localnet/agree.sh` | PASS | App, validators, and next-validators hash agreement |
 | Multi-day endurance | [Soak C1 report](soak-c1-endurance.md) | PASS | 48 h continuous; exact accounting; zero-premine integrity |
+| Off-happy-path economic branches are exercised in integration | [Branch-coverage drills](branch-coverage-drills.md) (`app/rewards_drills_test.go`) | PASS | Halving and treasury via `FinalizeBlock` + `Commit`; multi-slot, churn, carry-forward, and claim-range branches via the direct keeper lifecycle in runtime order; identity re-asserted |
 
 ## Known exclusions
 
@@ -39,7 +40,12 @@ points to the evidence; it is not a raw log dump. Supporting design is in the
 - **Stock SDK simulation** is not used: it assumes a staking module, which Twilight
   intentionally omits. Determinism and import/export are covered by module-specific tests and
   cross-node hash agreement instead.
-- **Endurance coverage is happy-path.** Several economic branches (halving, non-zero carry,
-  non-uniform participation, treasury, active-set churn, the claim-range cap) are unit-tested
-  but not yet driven in a long integration run.
+- **Endurance coverage is happy-path.** The multi-day soak ran default parameters, so the
+  off-the-happy-path economic branches (halving, non-zero carry, non-uniform participation,
+  treasury, active-set churn, the claim-range cap) never fired during it. Those branches are now
+  exercised by the [branch-coverage drills](branch-coverage-drills.md) — halving and treasury
+  through `FinalizeBlock` + `Commit`, the rest through the direct keeper lifecycle in runtime
+  order; what remains deferred is *cross-node agreement* on those specific transitions (e.g. every
+  validator computing the same app-hash when a halving fires), which belongs to the multi-host
+  endurance track, not a single-process test.
 - Public validation evidence is curated and sanitized; raw local run artifacts remain internal.
