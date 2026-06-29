@@ -20,8 +20,9 @@ omitted.** There is **no automatic slashing or jailing** — see
   UNUSED in v1.** Only `key_rotation_delay_blocks` is honored; activation,
   inactivation, suspension, and removal take effect in the including block's
   EndBlock. Do not rely on activation/removal delays in v1.
-- **Reward weight is separate from consensus power** and has no payout in v1
-  (deferred to a future `x/emissions`).
+- **Reward weight is separate from consensus power** and has no payout effect in v1.
+  Rewards are allocated by active-block participation in `x/rewards`; configured reward
+  weight is snapshotted but not used for allocation.
 
 ## 1. Localnet / devnet startup
 

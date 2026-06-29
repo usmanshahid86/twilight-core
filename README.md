@@ -31,8 +31,8 @@ delegation, staking, slashing, or unbonding.
 **Rewards & emission (`x/rewards`).** Block subsidy is emitted on an epoch schedule: at
 epoch finalization, `utwlt` is minted into the rewards module account, tracked against a
 maximum supply with **supply-threshold halving** (not a fixed block-height schedule). Each
-epoch's emission is allocated to the eligible active operators and is claimable per
-`(slot, epoch)` until claimed. An emergency authority can pause emission, epoch settlement,
+epoch's emission is allocated to eligible active operators by active-block participation and is
+claimable per `(slot, epoch)` until claimed. An emergency authority can pause emission, epoch settlement,
 or claims independently. The chain's **default genesis has no premine**. (The standard
 Cosmos `distribution` module is omitted; reward distribution is handled entirely by
 Twilight's custom `x/rewards` module.)
@@ -128,7 +128,9 @@ npm run build                 # production build (use `npm run start` for local 
 
 Key docs:
 
-- [docs/architecture/coreslot-poa.md](docs/architecture/coreslot-poa.md) — CoreSlot PoA design
+- [docs/architecture/overview.md](docs/architecture/overview.md) — architecture overview (read-first)
+- [docs/architecture/adr/](docs/architecture/adr/README.md) — Architecture Decision Records
+- [docs/architecture/coreslot-poa.md](docs/architecture/coreslot-poa.md) — CoreSlot module design
 - [docs/operators/core-slot-operator-guide.md](docs/operators/core-slot-operator-guide.md) — operator guide
 - [CONTRIBUTING.md](CONTRIBUTING.md), [REVIEW.md](REVIEW.md), [SECURITY.md](SECURITY.md)
 
