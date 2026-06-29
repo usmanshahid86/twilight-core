@@ -38,6 +38,7 @@ func (AppModuleBasic) RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
 func (AppModuleBasic) RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	types.RegisterInterfaces(registry)
 }
+
 // RegisterGRPCGatewayRoutes wires the coreslot query service into the REST
 // gRPC-gateway mux (1317). It panics on a registration error so a broken gateway
 // crashes the node at startup rather than silently serving 501s.

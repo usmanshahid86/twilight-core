@@ -43,10 +43,10 @@ var (
 )
 
 type server struct {
-	ctx    client.Context
+	ctx      client.Context
 	rewardsQ rewardstypes.QueryClient
-	coreQ  coreslottypes.QueryClient
-	bankQ  banktypes.QueryClient
+	coreQ    coreslottypes.QueryClient
+	bankQ    banktypes.QueryClient
 }
 
 func main() {

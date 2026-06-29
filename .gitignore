@@ -45,6 +45,12 @@ go.work.sum
 !.vscode/launch.json
 !.vscode/tasks.json
 
+# Vim / editor swap & temp files
+*.swp
+*.swo
+*.swn
+*~
+
 # Delve debugger temporary binaries
 __debug_bin
 
