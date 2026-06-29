@@ -20,7 +20,7 @@ and `app/` is high.
 
 ## Development setup
 
-Requires **Go 1.23.x** (see `go.mod`).
+Requires **Go 1.25.x** (see `go.mod`).
 
 ```bash
 make build     # go build ./cmd/twilightd

@@ -1,40 +1,54 @@
-# golangci-lint configuration for twilight-core.
+# golangci-lint configuration for twilight-core (v2 format).
 # Moderate, non-noisy baseline; tighten over time (e.g. add gosec, revive).
+# Migrated from v1 for golangci-lint v2.x / Go 1.25; default linters
+# (errcheck, govet, ineffassign, staticcheck, unused) are enabled implicitly.
+version: "2"
 run:
-  timeout: 5m
-  go: "1.23"
-
+  go: "1.25"
 linters:
   enable:
-    - errcheck
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - gosimple
-    - gofmt
-    - goimports
     - misspell
     - unconvert
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/twilight-project/twilight-core
-  misspell:
-    locale: US
-
+  settings:
+    misspell:
+      locale: US
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: _test\.go
+    paths:
+      - .*\.pb\.go$
+      - .*\.pb\.gw\.go$
+      - .*\.pulsar\.go$
+      - website
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  # Generated code is not linted.
-  exclude-files:
-    - ".*\\.pb\\.go$"
-    - ".*\\.pb\\.gw\\.go$"
-    - ".*\\.pulsar\\.go$"
-  exclude-dirs:
-    - website
-  exclude-rules:
-    # Tests routinely ignore errors on cleanup paths.
-    - path: _test\.go
-      linters:
-        - errcheck
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/twilight-project/twilight-core
+  exclusions:
+    generated: lax
+    paths:
+      - .*\.pb\.go$
+      - .*\.pb\.gw\.go$
+      - .*\.pulsar\.go$
+      - website
+      - third_party$
+      - builtin$
+      - examples$
