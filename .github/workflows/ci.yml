@@ -39,7 +39,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v1.62.2
           # Only flag issues introduced by the PR — keeps the large existing
