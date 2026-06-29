@@ -128,7 +128,9 @@ npm run build                 # production build (use `npm run start` for local 
 
 Key docs:
 
-- [docs/architecture/coreslot-poa.md](docs/architecture/coreslot-poa.md) — CoreSlot PoA design
+- [docs/architecture/overview.md](docs/architecture/overview.md) — architecture overview (read-first)
+- [docs/architecture/adr/](docs/architecture/adr/README.md) — Architecture Decision Records
+- [docs/architecture/coreslot-poa.md](docs/architecture/coreslot-poa.md) — CoreSlot module design
 - [docs/operators/core-slot-operator-guide.md](docs/operators/core-slot-operator-guide.md) — operator guide
 - [CONTRIBUTING.md](CONTRIBUTING.md), [REVIEW.md](REVIEW.md), [SECURITY.md](SECURITY.md)
 

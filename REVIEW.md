@@ -16,8 +16,10 @@ work was merged locally without a PR).
 (PRs + CI + the checklist below). The already-built modules are additionally covered
 retroactively by:
 
-- a **recorded baseline review** of `x/coreslot` and `x/rewards` (planned; the validation
-  evidence will be published as it is curated), and
+- a **recorded baseline review** of `x/coreslot` and `x/rewards`
+  ([docs/reviews/2026-06-29-baseline-coreslot-rewards.md](docs/reviews/2026-06-29-baseline-coreslot-rewards.md)),
+  with supporting evidence indexed in
+  [docs/testing/validation-summary.md](docs/testing/validation-summary.md), and
 - the going-forward automated gates, simulations, and chaos drills, which run against the
   current code regardless of how it was originally merged.
 

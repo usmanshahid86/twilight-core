@@ -2,7 +2,8 @@
 
 - **Status:** Accepted — implemented in [`x/coreslot`](../../../x/coreslot)
 - **Date:** 2026-06-10 (decision); curated for publication 2026-06-29
-- **Relates to:** [`coreslot-poa.md`](../coreslot-poa.md),
+- **Relates to:** [architecture overview](../overview.md), [ADR-0002](0002-rewards-emission.md),
+  [`coreslot-poa.md`](../coreslot-poa.md),
   [`../../security/staking-omission-or-inert-staking.md`](../../security/staking-omission-or-inert-staking.md)
 
 ## Summary

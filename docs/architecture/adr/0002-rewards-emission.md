@@ -2,8 +2,8 @@
 
 - **Status:** Accepted — implemented in [`x/rewards`](../../../x/rewards)
 - **Date:** 2026-06-29
-- **Relates to:** [ADR-0001](0001-coreslot-poa.md) (reward weight is separate state from
-  consensus power)
+- **Relates to:** [architecture overview](../overview.md),
+  [ADR-0001](0001-coreslot-poa.md) (reward weight is separate state from consensus power)
 
 ## Summary
 
