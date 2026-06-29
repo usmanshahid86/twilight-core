@@ -31,8 +31,8 @@ delegation, staking, slashing, or unbonding.
 **Rewards & emission (`x/rewards`).** Block subsidy is emitted on an epoch schedule: at
 epoch finalization, `utwlt` is minted into the rewards module account, tracked against a
 maximum supply with **supply-threshold halving** (not a fixed block-height schedule). Each
-epoch's emission is allocated to eligible active operators by active-block participation and is claimable per
-`(slot, epoch)` until claimed. An emergency authority can pause emission, epoch settlement,
+epoch's emission is allocated to eligible active operators by active-block participation and is
+claimable per `(slot, epoch)` until claimed. An emergency authority can pause emission, epoch settlement,
 or claims independently. The chain's **default genesis has no premine**. (The standard
 Cosmos `distribution` module is omitted; reward distribution is handled entirely by
 Twilight's custom `x/rewards` module.)
