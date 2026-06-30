@@ -336,6 +336,10 @@ func assertValidatorDiff(t *testing.T, updates []abci.ValidatorUpdate, applied, 
 	for _, u := range updates {
 		k := u.PubKey.GetEd25519()
 		require.NotEmptyf(t, k, "seed %d step %d: non-ed25519 validator update", seed, step)
+		// Enforce the one-update-per-key oracle directly: a second update for the
+		// same pubkey would otherwise silently overwrite in the map and be masked.
+		_, dup := actual[k[0]]
+		require.Falsef(t, dup, "seed %d step %d: EndBlock emitted a duplicate validator update for key %d", seed, step, k[0])
 		actual[k[0]] = u.Power
 	}
 	require.Equalf(t, expected, actual, "seed %d step %d: validator-update diff mismatch", seed, step)

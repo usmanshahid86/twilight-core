@@ -177,6 +177,7 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 		case 0, 1, 2: // advance a block (the dominant op)
 			ctx = driveBlock(t, a, base, height)
 			height++
+			ctx = base.WithBlockHeight(height) // subsequent ops act at the new current block height
 
 		case 3: // churn: suspend an active slot or reactivate a suspended one (floor-respecting).
 			// Pick the smallest eligible slot id deterministically (no map-order dependence).
@@ -293,7 +294,9 @@ func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ ui
 		reason = "claim range exceeds maximum"
 	default:
 		for e := start; e <= end; e++ {
-			if _, fin, ferr := a.RewardsKeeper.GetFinalizedEpoch(ctx, e); ferr == nil && !fin {
+			_, fin, ferr := a.RewardsKeeper.GetFinalizedEpoch(ctx, e)
+			require.NoError(t, ferr) // a store error here is a real regression, not "unfinalized"
+			if !fin {
 				reason = "is not finalized"
 				break
 			}
