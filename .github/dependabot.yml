@@ -11,6 +11,14 @@ updates:
       go-dependencies:
         patterns:
           - "*"
+    # Consensus-critical libraries are upgraded deliberately (changelog review,
+    # code changes, localnet + multi-node app-hash validation), never via an
+    # auto-PR. govulncheck (blocking in CI) is the backstop for reachable vulns.
+    ignore:
+      - dependency-name: "github.com/cosmos/cosmos-sdk"
+      - dependency-name: "github.com/cometbft/cometbft"
+      - dependency-name: "cosmossdk.io/*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -27,3 +35,8 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
+    # Take security patches/minors automatically; major bumps (e.g. React 19,
+    # TypeScript 6) are deliberate and tied to a Docusaurus upgrade.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
