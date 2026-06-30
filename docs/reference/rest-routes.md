@@ -51,6 +51,12 @@ Base URL in examples: `REST=http://localhost:1317`.
 - `PendingKeyRotations`, `LastAppliedValidators`, `ReservedConsensusAddress`,
   `RewardWeight` had no `google.api.http` annotation before this work and were
   gRPC-only; they are now REST-exposed.
+- **`RewardWeight` is metadata-only in v1 — do not build payout logic on it.** The
+  `OperatorRewardWeight` fields (`base_weight`, `uptime_weight`, `performance_weight`,
+  `stake_weight`, `external_weight`, `final_weight`) are snapshotted but have **no payout
+  effect**. Rewards are allocated solely by active-block participation
+  (`amount = pool × blocks_active / Σ blocks_active`); weighted rewards are code-gated and
+  inactive in v1. See [ADR-0002](../architecture/adr/0002-rewards-emission.md).
 - Standard cosmos modules Twilight does **not** run (staking/gov/mint/distribution)
   return `501` by design — that is expected, not a regression.
 - **`CoreSlotByConsensusAddress` / `ReservedConsensusAddress` take a hex-encoded
