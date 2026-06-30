@@ -40,16 +40,47 @@ import (
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
+// rewardsCoverage accumulates, across seeds, that each claimed branch was really
+// exercised — a standing guard against the sim silently regressing to vacuous.
+type rewardsCoverage struct {
+	claimOk, claimReject, capReject, replayReject, pauseClaimReject int
+	carry, treasury, halving                                        int
+}
+
+func (c *rewardsCoverage) add(o rewardsCoverage) {
+	c.claimOk += o.claimOk
+	c.claimReject += o.claimReject
+	c.capReject += o.capReject
+	c.replayReject += o.replayReject
+	c.pauseClaimReject += o.pauseClaimReject
+	c.carry += o.carry
+	c.treasury += o.treasury
+	c.halving += o.halving
+}
+
 func TestRewardsEconomicSimulation(t *testing.T) {
+	var cov rewardsCoverage
 	for seed := int64(1); seed <= 8; seed++ {
 		seed := seed
 		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
-			runRewardsSim(t, seed, 220)
+			cov.add(runRewardsSim(t, seed, 220))
 		})
 	}
+	// Across the 8 seeds, every branch the sim claims to cover must fire at least
+	// once; otherwise the corresponding assurance is vacuous and should fail loudly.
+	require.Positivef(t, cov.claimOk, "no successful claim was exercised: %+v", cov)
+	require.Positivef(t, cov.claimReject, "no rejected claim was exercised: %+v", cov)
+	require.Positivef(t, cov.capReject, "claim-cap rejection never exercised: %+v", cov)
+	require.Positivef(t, cov.replayReject, "double-claim (replay) rejection never exercised: %+v", cov)
+	require.Positivef(t, cov.pauseClaimReject, "claims-disabled rejection never exercised: %+v", cov)
+	require.Positivef(t, cov.carry, "nonzero carry-forward never produced: %+v", cov)
+	require.Positivef(t, cov.treasury, "treasury split never exercised: %+v", cov)
+	require.Positivef(t, cov.halving, "halving crossing never exercised: %+v", cov)
+	t.Logf("rewards-sim coverage: %+v", cov)
 }
 
-func runRewardsSim(t *testing.T, seed int64, steps int) {
+func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
+	var cov rewardsCoverage
 	rng := rand.New(rand.NewSource(seed))
 	a := bootApp(t)
 	base := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
@@ -62,6 +93,9 @@ func runRewardsSim(t *testing.T, seed int64, steps int) {
 	subsidy := int64(100 + rng.Intn(900)) // 100..999 (odd values exercise carry)
 	epochLen := uint64(1 + rng.Intn(4))   // 1..4
 	cap_ := uint64(2 + rng.Intn(4))       // 2..5
+	if seed <= 4 {
+		cap_ = uint64(seed + 1) // seeds 1-4 deterministically cover caps 2,3,4,5
+	}
 	treasuryBps := uint64(0)
 	treasuryAddr := ""
 	if rng.Intn(2) == 0 {
@@ -143,7 +177,6 @@ func runRewardsSim(t *testing.T, seed int64, steps int) {
 		case 0, 1, 2: // advance a block (the dominant op)
 			ctx = driveBlock(t, a, base, height)
 			height++
-			reconcile(ctx)
 
 		case 3: // churn: suspend an active slot or reactivate a suspended one (floor-respecting).
 			// Pick the smallest eligible slot id deterministically (no map-order dependence).
@@ -162,13 +195,14 @@ func runRewardsSim(t *testing.T, seed int64, steps int) {
 			}
 
 		case 4: // claim: predict validity from chain state, then assert
-			simClaim(t, a, ctx, rng, cap_, seed, step)
+			simClaim(t, a, ctx, rng, cap_, &cov, seed, step)
 
 		case 5: // emergency pause or resume a random subset of flags
 			pause := rng.Intn(2) == 0
 			msgErr := pauseResume(t, a, ctx, emer, pause, rng)
 			require.NoErrorf(t, msgErr, "seed %d step %d: pause/resume", seed, step)
 		}
+		reconcile(ctx) // invariants + identity after EVERY operation, not just block advances
 	}
 
 	// Resume all flags for a clean final drain, then drive enough blocks that a
@@ -193,21 +227,31 @@ func runRewardsSim(t *testing.T, seed int64, steps int) {
 	// the exact halving math (that a single subsidy halves by exactly 2); the exact
 	// decay schedule is verified by TestDrillHalvingSubsidyDecay and the emission
 	// unit tests. Here the point is that the accounting identity survives the crossing.
-	if smallSupply {
-		state, err := a.RewardsKeeper.GetState(ctx)
+	state, err := a.RewardsKeeper.GetState(ctx)
+	require.NoError(t, err)
+	distinct := map[string]bool{}
+	sumTreasury := math.ZeroInt()
+	for e := uint64(1); e < state.CurrentEpoch; e++ {
+		ep, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, e)
 		require.NoError(t, err)
-		distinct := map[string]bool{}
-		for e := uint64(1); e < state.CurrentEpoch; e++ {
-			ep, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, e)
-			require.NoError(t, err)
-			require.True(t, found)
-			if ep.MintedEmission != "0" {
-				distinct[ep.MintedEmission] = true
-			}
+		require.True(t, found)
+		if ep.MintedEmission != "0" {
+			distinct[ep.MintedEmission] = true
 		}
+		if intStr(t, ep.CarryOut).IsPositive() {
+			cov.carry++
+		}
+		sumTreasury = sumTreasury.Add(intStr(t, ep.TreasuryAmount))
+	}
+	if treasuryAddr != "" && sumTreasury.IsPositive() {
+		cov.treasury++
+	}
+	if smallSupply {
 		require.GreaterOrEqualf(t, len(distinct), 2,
 			"seed %d (maxSupply %s): run must cross a halving (>=2 distinct nonzero emissions); got %v", seed, maxSupply, distinct)
+		cov.halving++
 	}
+	return cov
 }
 
 // smallestSlotWithStatus returns the lowest slot id with the given status, or 0
@@ -225,7 +269,7 @@ func smallestSlotWithStatus(m map[uint64]coreslottypes.SlotStatus, st coreslotty
 // simClaim attempts a claim for a random slot+range and asserts the outcome
 // matches what the chain state implies (finalized? already claimed? over cap?
 // claims enabled?).
-func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ uint64, seed int64, step int) {
+func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ uint64, cov *rewardsCoverage, seed int64, step int) {
 	t.Helper()
 	state, err := a.RewardsKeeper.GetState(ctx)
 	require.NoError(t, err)
@@ -269,14 +313,34 @@ func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ ui
 		}
 	}
 
+	// Snapshot funds state so a rejected claim can be proven to mutate nothing (B).
+	modAddr := a.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName)
+	preMod := a.BankKeeper.GetBalance(ctx, modAddr, app.BaseDenom).Amount.String()
+	preSupply := a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String()
+
 	err = a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
 		Signer: acc(9), SlotId: slot, StartEpoch: start, EndEpoch: end,
 	})
 	if reason == "" {
 		require.NoErrorf(t, err, "seed %d step %d: predicted-valid claim slot %d [%d,%d] must succeed", seed, step, slot, start, end)
+		cov.claimOk++
 	} else {
 		require.Errorf(t, err, "seed %d step %d: predicted-invalid claim slot %d [%d,%d] must fail (%s)", seed, step, slot, start, end, reason)
 		require.Containsf(t, err.Error(), reason, "seed %d step %d: claim rejected for a different reason than predicted (%s)", seed, step, reason)
+		// Atomic rejection: no module-balance or supply change.
+		require.Equalf(t, preMod, a.BankKeeper.GetBalance(ctx, modAddr, app.BaseDenom).Amount.String(),
+			"seed %d step %d: rejected claim changed module balance", seed, step)
+		require.Equalf(t, preSupply, a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String(),
+			"seed %d step %d: rejected claim changed supply", seed, step)
+		cov.claimReject++
+		switch reason {
+		case "claim range exceeds maximum":
+			cov.capReject++
+		case "already claimed":
+			cov.replayReject++
+		case "claims are disabled":
+			cov.pauseClaimReject++
+		}
 	}
 }
 

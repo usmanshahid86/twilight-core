@@ -189,6 +189,88 @@ func runCoreSlotSim(t *testing.T, seed int64, steps int) {
 	checkInvariants(t, a, base.WithBlockHeight(height+1), model, seed)
 }
 
+// TestCoreSlotGuardRejections covers the negative-path guards the random lifecycle
+// sim does not exercise (each scenario isolates ONE guard, so require.ErrorIs is
+// unambiguous): authority rejection, duplicate-consensus-key rejection, active-slot
+// removal rejection, MaxActiveSlots pressure, and the F6 hard floor of one active
+// validator made decisive via AllowEmergencyBelowMinActive.
+func TestCoreSlotGuardRejections(t *testing.T) {
+	auth := app.AuthorityAddress()
+	emer := app.EmergencyAuthorityAddress()
+	setup := func() (sdk.Context, coreslottypes.MsgServer) {
+		a := bootApp(t)
+		base := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
+		specs := []slotSpec{
+			{id: 1, operator: acc(2), payout: acc(12), keyMarker: 1},
+			{id: 2, operator: acc(3), payout: acc(13), keyMarker: 2},
+			{id: 3, operator: acc(4), payout: acc(14), keyMarker: 3},
+		}
+		rp, snap := rewardsParams(t, func(p *rewardstypes.Params) {})
+		initCoreSlotsAndRewards(t, a, base, specs, genesisState(rp, snap))
+		return base.WithBlockHeight(1), coreslotkeeper.NewMsgServer(a.CoreSlotKeeper)
+	}
+
+	t.Run("authority-rejection", func(t *testing.T) {
+		ctx, srv := setup()
+		_, err := srv.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
+			Authority: acc(99), OperatorAddress: acc(50), PayoutAddress: acc(150),
+			ConsensusPubkey: ed25519Any(t, 50), Metadata: &coreslottypes.OperatorMetadata{Moniker: "x"},
+		})
+		require.ErrorIs(t, err, coreslottypes.ErrUnauthorized, "non-authority register must be rejected")
+		_, err = srv.ActivateCoreSlot(ctx, &coreslottypes.MsgActivateCoreSlot{Authority: acc(99), SlotId: 1})
+		require.ErrorIs(t, err, coreslottypes.ErrUnauthorized, "non-authority activate must be rejected")
+	})
+
+	t.Run("duplicate-consensus-key", func(t *testing.T) {
+		ctx, srv := setup()
+		_, err := srv.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
+			Authority: auth, OperatorAddress: acc(51), PayoutAddress: acc(151),
+			ConsensusPubkey: ed25519Any(t, 1), // key marker 1 already belongs to slot 1
+			Metadata:        &coreslottypes.OperatorMetadata{Moniker: "dup"},
+		})
+		require.ErrorIs(t, err, coreslottypes.ErrDuplicateConsensusKey)
+	})
+
+	t.Run("active-removal-rejected", func(t *testing.T) {
+		ctx, srv := setup()
+		_, err := srv.RemoveCoreSlot(ctx, &coreslottypes.MsgRemoveCoreSlot{Authority: auth, SlotId: 1, Reason: "x"})
+		require.ErrorIs(t, err, coreslottypes.ErrInvalidTransition, "active slots must be inactivated/suspended before removal")
+	})
+
+	t.Run("max-active-slots", func(t *testing.T) {
+		ctx, srv := setup()
+		p := coreslottypes.DefaultParams(auth, emer)
+		p.MaxActiveSlots = 4 // 3 active now -> room for exactly one more
+		_, err := srv.UpdateParams(ctx, &coreslottypes.MsgUpdateParams{Authority: auth, Params: &p})
+		require.NoError(t, err)
+		for _, km := range []byte{64, 65} {
+			_, err = srv.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
+				Authority: auth, OperatorAddress: acc(km), PayoutAddress: acc(km + 100),
+				ConsensusPubkey: ed25519Any(t, km), Metadata: &coreslottypes.OperatorMetadata{Moniker: "m"},
+			})
+			require.NoError(t, err)
+		}
+		_, err = srv.ActivateCoreSlot(ctx, &coreslottypes.MsgActivateCoreSlot{Authority: auth, SlotId: 4})
+		require.NoError(t, err, "4th activation is at the cap and allowed")
+		_, err = srv.ActivateCoreSlot(ctx, &coreslottypes.MsgActivateCoreSlot{Authority: auth, SlotId: 5})
+		require.ErrorIs(t, err, coreslottypes.ErrMaxActiveSlots, "5th activation must exceed MaxActiveSlots")
+	})
+
+	t.Run("hard-floor-emergency-below-min", func(t *testing.T) {
+		ctx, srv := setup()
+		p := coreslottypes.DefaultParams(auth, emer)
+		p.AllowEmergencyBelowMinActive = true // skips the MinActiveSlots check, so count<=1 is decisive
+		_, err := srv.UpdateParams(ctx, &coreslottypes.MsgUpdateParams{Authority: auth, Params: &p})
+		require.NoError(t, err)
+		for _, id := range []uint64{2, 3} {
+			_, e := srv.InactivateCoreSlot(ctx, &coreslottypes.MsgInactivateCoreSlot{AuthorityOrOperator: auth, SlotId: id, Reason: "x"})
+			require.NoError(t, e)
+		}
+		_, err = srv.SuspendCoreSlot(ctx, &coreslottypes.MsgSuspendCoreSlot{Authority: emer, SlotId: 1, Reason: "x"})
+		require.ErrorIs(t, err, coreslottypes.ErrCannotRemoveLastValidator, "the hard floor of one active validator must hold")
+	})
+}
+
 // desiredSet is the validator set implied by the model's ACTIVE slots.
 func desiredSet(model map[uint64]*modelSlot) map[byte]int64 {
 	d := map[byte]int64{}
