@@ -175,7 +175,7 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 	for step := 0; step < steps; step++ {
 		switch rng.Intn(6) {
 		case 0, 1, 2: // advance a block (the dominant op)
-			ctx = driveBlock(t, a, base, height)
+			driveBlock(t, a, base, height) // side effect only; ctx is refreshed to the new height below
 			height++
 			ctx = base.WithBlockHeight(height) // subsequent ops act at the new current block height
 
