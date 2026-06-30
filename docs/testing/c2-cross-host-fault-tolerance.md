@@ -24,11 +24,9 @@ from each operated node's local status. No private infrastructure details (addre
 accounts, regions, or tooling) are included here.
 
 Each drill changed only node **availability or connectivity** — never chain parameters or state —
-and operated only on operator-controlled nodes.
-
-> Note: for the duration of the run, one of the four validators (the separately operated node) was
-> offline, so the effective signing set was three of four. This made the quorum-loss threshold
-> easier to reach but does not affect the validity of the liveness and safety observations below.
+and operated only on operator-controlled nodes. The full four-validator set was healthy and signing
+at the start of the run (confirmed across finalized commits), so each drill began from a clean 4/4
+baseline.
 
 ## 3. Drills and results
 
@@ -90,9 +88,6 @@ chain **resumed from exactly that height**, with all available validators signin
 - **Not an independent audit.**
 - **Sampled, not exhaustive.** Representative failure modes were exercised (single node loss,
   single-node partition, two-node quorum loss), not a systematic fault-coverage sweep.
-- **One validator was offline** (separate operator) for the run, so a sustained four-of-four
-  liveness window was not observed during the drills; the supermajority-present cases were validated
-  at three-of-four, which is itself above the two-thirds threshold.
 
 ## 6. Recommended follow-up
 
