@@ -4,11 +4,6 @@ title: Security & Failure Modes
 
 # Security & Failure Modes
 
-:::note Current status
-This page reflects the **Phase 10 validated** implementation. Production
-zero-premine genesis and longer soak drills remain **Phase 11** items.
-:::
-
 ## Invariants
 
 The module defines five callable invariants (`x/rewards/keeper/invariants.go`).
@@ -24,8 +19,8 @@ are exercised in tests rather than auto-run on-chain.
 | `ClosedEpochImmutabilityInvariant` | finalized epoch aggregates carry no claim markers | a closed epoch was mutated |
 
 By construction, after each finalization and claim the module-balance coverage
-holds exactly (`balance ≥ unclaimed + carry`). The Phase 10 smoke verified all
-five against a real bank after finalize and after claim.
+holds exactly (`balance ≥ unclaimed + carry`). The multi-node localnet smoke
+checks all five against a real bank after finalize and after claim.
 
 ## Fail-closed lifecycle
 
@@ -37,9 +32,9 @@ the fault **halts the block rather than half-committing**.
 
 This is the intended safety posture for a monetary module: a halt is recoverable
 (the emergency authority can pause settlement; operators can patch), but a
-half-committed or silently-wrong mint is not. Phase 10 proved this end-to-end — a
-forced finalization fault made `FinalizeBlock` return an error and left the
-committed height unchanged with no finalized epoch written.
+half-committed or silently-wrong mint is not. The multi-node smoke exercises this
+end-to-end — a forced finalization fault makes `FinalizeBlock` return an error and
+leaves the committed height unchanged with no finalized epoch written.
 
 :::warning Operator implication
 Because rewards is fail-closed, a genuine finalization fault stops block
@@ -53,7 +48,7 @@ retains its data). Monitor for repeated EndBlock errors in node logs.
 No rewards state transition reads wall-clock time, randomness, environment
 variables, or CometBFT-local config. Finalization and claims iterate sorted
 collections (never raw Go map order). Cross-node app-hash agreement after
-finalization and after claim (Phase 10) is the multi-node evidence.
+finalization and after claim is the multi-node evidence.
 
 ## Failure-mode reference
 

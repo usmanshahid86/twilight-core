@@ -4,10 +4,10 @@ title: Genesis
 
 # Genesis
 
-:::note Current status
-This page reflects the **Phase 10 validated** implementation. A production
-**zero-premine** monetary-genesis localnet drill remains a **Phase 11** item; the
-localnet fixtures described here fund accounts and are not production genesis.
+:::note Localnet vs production genesis
+The localnet fixtures described here fund accounts and are **not** a production
+genesis. A production zero-premine monetary genesis is a separate case — see
+[Status & Validation](status-and-validation.md).
 :::
 
 ## Module init order

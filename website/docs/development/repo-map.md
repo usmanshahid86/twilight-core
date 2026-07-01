@@ -12,9 +12,9 @@ Top-level layout of `twilight-core`.
 | `x/coreslot/` | CoreSlot PoA module (validator authority, slots, reward weights). |
 | `x/rewards/` | Rewards module (emission, epochs, distribution, claims, params, invariants, events, query/CLI). |
 | `cmd/twilightd/` | The `twilightd` binary and root command (`cmd/twilightd/cmd/root.go`). |
-| `scripts/localnet/` | Localnet `init`/`start`/`agree`/`stop` + `smoke.sh` + `rewards-smoke.sh`. |
+| `scripts/localnet/` | Localnet `init`/`start`/`agree`/`stop` + `smoke.sh` + `rewards-smoke.sh` + soak/drill scripts. |
 | `proto/` | Protobuf definitions (`twilight.coreslot.v1`, `twilight.rewards.v1`). |
-| `docs/` | Pre-rewards markdown (architecture/operators/security/testing) + `docs/research/` (local-only phase reports). |
+| `docs/` | Pre-rewards markdown (architecture/operators/security/testing) + `docs/research/` (local-only research notes). |
 | `website/` | This Docusaurus documentation site (isolated; does not affect Go builds). |
 | `Makefile` | `build`, `test`, `proto`, `localnet-smoke`, `localnet-rewards-smoke`, drills. |
 

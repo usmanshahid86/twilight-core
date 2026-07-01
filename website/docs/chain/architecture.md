@@ -75,5 +75,5 @@ proposal flow. Validator authority and emergency authority are CoreSlot concepts
 | `x/coreslot/` | CoreSlot module (PoA validator authority). |
 | `x/rewards/` | Rewards module (emission, epochs, claims, params, invariants). |
 | `cmd/twilightd/` | The `twilightd` node + CLI binary. |
-| `scripts/localnet/` | Localnet init/start/agree/stop + smoke scripts. |
-| `docs/research/` | Phase implementation + validation reports (summarized under [Status & Validation](status-and-validation.md)). |
+| `scripts/localnet/` | Localnet init/start/agree/stop + smoke, soak, and drill scripts. |
+| `docs/research/` | Local-only development and validation notes (summarized under [Status & Validation](status-and-validation.md)). |

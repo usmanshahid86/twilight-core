@@ -53,7 +53,7 @@ cd website && npm install && npm run build   # onBrokenLinks/onBrokenAnchors: th
 Documentation rules:
 
 - Trace every documented behavior to actual code, an actual CLI command, or an
-  actual report. Otherwise mark it `:::note Pending Phase 11 confirmation`.
+  actual report. Otherwise mark it `:::note Pending confirmation`.
 - No mainnet/production-ready claims. Distinguish production defaults from
   localnet/test settings. Keep the funded-fixture caveat where relevant.
 - Single-source numbers via `website/docs/_snippets/constants.mdx`.

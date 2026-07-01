@@ -26,7 +26,7 @@ Each epoch mints a **per-block** subsidy summed over the epoch's blocks, clipped
 by the supply cap. The minted amount depends on the number of blocks and the
 current subsidy tier — **not** on the number of active slots.
 
-> Example (Phase 10 localnet, `epoch_length_blocks = 10`):
+> Example (localnet, `epoch_length_blocks = 10`):
 > minted emission = `10 × 416,190 = 4,161,900{constants.nativeDenom}`.
 
 Distribution then allocates that minted pool among the active slots — see

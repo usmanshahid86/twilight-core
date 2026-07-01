@@ -19,12 +19,12 @@ target and the authority drill target listed under *Pending* do not exist yet.
 | `make localnet-rewards-smoke` | four-node rewards finalization, exact minting/distribution, a real claim, and cross-node app-hash agreement before/after finalization and after claim |
 | `make localnet-rewards-soak` | a long, continuous short-epoch run across many epoch boundaries; asserts carry-forward chaining, pending-param activation, pause/resume, and sustained multi-node agreement (basis of the 48 h endurance soak) |
 
-See [Localnet](../chain/localnet.md) for what each proves and the funded-fixture
+See [Localnet](../chain/localnet.md) for what each covers and the funded-fixture
 caveat.
 
-## Pending (Phase 11)
+## Planned
 
-:::warning Phase 11 pending
+:::warning Not yet implemented
 These targets are planned but **not implemented**:
 
 - `make localnet-rewards-zero-premine-smoke` — a *dedicated fast* smoke for

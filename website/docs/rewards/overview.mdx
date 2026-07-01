@@ -58,8 +58,9 @@ override the epoch length; such values are always labeled as test settings.
 ## Dependencies
 
 - **CoreSlot** (`x/coreslot`) — provides the active operator set, each slot's
-  operator/payout addresses, and reward weights. Rewards reads these through a
-  narrow read-only interface.
+  operator/payout addresses, and reward weights (metadata only — no payout effect
+  in v1). Rewards reads these through a narrow read-only interface; payout is by
+  active-block participation.
 - **Module accounts** — `{constants.rewardsModuleAccount}` (the `Minter`,
   holding minted emission and unclaimed rewards) and
   `{constants.feePoolModuleAccount}` (dormant fee plumbing, no permissions).
