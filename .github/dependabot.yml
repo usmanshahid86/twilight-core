@@ -40,3 +40,9 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # @mermaid-js/layout-elk is an optional peer of @docusaurus/theme-mermaid
+      # (pinned to ^0.1.9). 0.2.x breaks that peer (npm ci ERESOLVE) until a
+      # Docusaurus bump raises it, so keep it on 0.1.x patches only. A 0.x minor
+      # (0.1 -> 0.2) is a breaking change, hence ignoring minor here too.
+      - dependency-name: "@mermaid-js/layout-elk"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
