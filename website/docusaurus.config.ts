@@ -11,8 +11,10 @@ const config: Config = {
   tagline: "A CoreSlot Proof-of-Authority chain with utwlt rewards",
 
   // Pages target: project site under the current owner. After the repo moves to
-  // the twilight-project org, retarget url -> https://twilight-project.github.io
-  // and organizationName -> "twilight-project" (baseUrl stays /twilight-core/).
+  // the twilight-project org, retarget it in FOUR places: url ->
+  // https://twilight-project.github.io, organizationName -> "twilight-project",
+  // and the two github.com/usmanshahid86/twilight-core links below (the docs
+  // `editUrl` and the navbar `href`). baseUrl stays /twilight-core/.
   url: "https://usmanshahid86.github.io",
   baseUrl: "/twilight-core/",
   organizationName: "usmanshahid86",

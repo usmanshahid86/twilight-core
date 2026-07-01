@@ -5,8 +5,10 @@ title: Localnet Drills
 # Localnet Drills
 
 :::note Current status
-The smoke and soak targets below are implemented. The zero-premine and authority
-drill targets listed under *Pending* do not exist yet.
+The smoke and soak targets below are implemented. Zero-premine is already
+exercised today via the soak's `PREMINE=off` mode (it strips genesis balances and
+asserts supply rises only from emission); only the *dedicated* zero-premine smoke
+target and the authority drill target listed under *Pending* do not exist yet.
 :::
 
 ## Available now
@@ -25,9 +27,10 @@ caveat.
 :::warning Phase 11 pending
 These targets are planned but **not implemented**:
 
-- `make localnet-rewards-zero-premine-smoke` — finalization/claim determinism on a
-  true **zero-premine** genesis (`cumulative_emitted = 0`, no funded accounts);
-  asserts supply rises only from emission.
+- `make localnet-rewards-zero-premine-smoke` — a *dedicated fast* smoke for
+  finalization/claim determinism on a true **zero-premine** genesis
+  (`cumulative_emitted = 0`, no funded accounts). Zero-premine is already covered
+  today by the soak's `PREMINE=off` mode; this would be a quick standalone target.
 - `make localnet-rewards-authority-smoke` — exercises `update-params` / `pause` /
   `resume` through real network transactions.
 :::

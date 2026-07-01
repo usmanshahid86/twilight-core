@@ -9,7 +9,7 @@ detailed per-phase working notes live under `docs/research/` in the repository a
 local-only source material and are **summarized** here. Curated, sanitized
 evidence is published in the repository under `docs/testing/` — including the
 endurance soak, cross-host fault-tolerance, module-simulation, and branch-coverage
-reports, indexed by `validation-summary.md`.
+reports, indexed by `docs/testing/validation-summary.md`.
 
 :::note Current status
 All phases through Phase 10 are validated, and the Phase 11 launch-readiness work
