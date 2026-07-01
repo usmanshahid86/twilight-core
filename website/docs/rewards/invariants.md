@@ -7,8 +7,8 @@ title: Invariants
 The module defines five callable invariants in `x/rewards/keeper/invariants.go`.
 The chain does not run the `crisis` module, so they are **callable backstops**
 exercised in tests (and runnable by tooling) rather than auto-run on-chain. The
-multi-node localnet checks all five against a real bank after finalize and after
-claim.
+multi-node localnet smoke checks all five against a real bank after finalize and
+after claim.
 
 ## SupplyCapInvariant
 
