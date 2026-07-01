@@ -27,7 +27,7 @@ const sidebars: SidebarsConfig = {
         { type: "doc", id: "chain/genesis", label: "Genesis" },
         { type: "doc", id: "chain/lifecycle", label: "Block Lifecycle" },
         { type: "doc", id: "chain/localnet", label: "Localnet" },
-        { type: "doc", id: "chain/release-readiness", label: "Release Readiness" },
+        { type: "doc", id: "chain/status-and-validation", label: "Status & Validation" },
       ],
     },
     {
@@ -75,7 +75,6 @@ const sidebars: SidebarsConfig = {
         { type: "doc", id: "reference/genesis-reference", label: "Genesis Reference" },
         { type: "doc", id: "reference/params-reference", label: "Params Reference" },
         { type: "doc", id: "reference/module-accounts", label: "Module Accounts" },
-        { type: "doc", id: "reference/validation-reports", label: "Validation Reports" },
       ],
     },
     {

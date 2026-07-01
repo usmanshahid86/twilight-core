@@ -72,6 +72,20 @@ const config: Config = {
     ],
   ],
 
+  // Old maturity pages were merged into chain/status-and-validation; keep their
+  // URLs alive for existing bookmarks.
+  plugins: [
+    [
+      "@docusaurus/plugin-client-redirects",
+      {
+        redirects: [
+          { from: "/chain/release-readiness", to: "/chain/status-and-validation" },
+          { from: "/reference/validation-reports", to: "/chain/status-and-validation" },
+        ],
+      },
+    ],
+  ],
+
   themeConfig: {
     colorMode: { defaultMode: "dark", respectPrefersColorScheme: false },
     image: "img/twilight.png",

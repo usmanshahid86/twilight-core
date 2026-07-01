@@ -38,9 +38,9 @@ const cards: Card[] = [
   },
   {
     tag: "Auditors",
-    title: "Validation & safety",
-    desc: "What each phase proved, the five invariants, and fail-closed behavior.",
-    to: "/reference/validation-reports",
+    title: "Status & validation",
+    desc: "Current validation evidence, known limitations, and what has not yet been done.",
+    to: "/chain/status-and-validation",
   },
 ];
 
@@ -68,8 +68,9 @@ export default function Home(): React.ReactElement {
             </Link>
           </div>
           <p className={styles.statusNote}>
-            Validated through Phase 10. Production zero-premine genesis and longer
-            soak drills remain Phase 11 — not yet proven, not mainnet-ready.
+            Under active development — not yet mainnet-ready and not externally
+            audited.{" "}
+            <Link to="/chain/status-and-validation">Status &amp; validation</Link>.
           </p>
         </div>
       </header>

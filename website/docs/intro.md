@@ -8,20 +8,16 @@ slug: /intro
 Twilight is a [Cosmos SDK](https://docs.cosmos.network/) / CometBFT
 **Proof-of-Authority (PoA)** application chain. Validator admission and validator
 updates are owned exclusively by the **CoreSlot** module (`x/coreslot`); the
-standard staking, distribution, slashing, and governance modules are omitted.
+standard staking, distribution, mint, slashing, and governance modules are omitted.
 
 The chain mints scheduled block rewards through the **rewards** module
 (`x/rewards`): each epoch, a `utwlt` reward pool is minted and allocated to the
 active CoreSlot operators, then claimed to each operator's snapshotted payout
 address.
 
-:::note Current status
-This documentation reflects the **Phase 10 validated** implementation
-(app wiring, rewards economics, query/CLI, and a multi-node localnet finalization
-+ claim proof). **Production zero-premine genesis and longer multi-epoch soak
-drills remain Phase 11 items** and are not yet proven. Nothing here implies
-mainnet readiness.
-:::
+Twilight Core is under active development — it is not yet mainnet-ready and has not
+been externally audited. See [Status & Validation](chain/status-and-validation.md)
+for what has been validated and what has not.
 
 ## What `utwlt` is
 
@@ -29,31 +25,22 @@ mainnet readiness.
 minting, rewards, claims). `twlt` / `TWLT` / "Twilight" are **display metadata
 only** (6 decimals) and never appear in accounting state.
 
-## What is implemented today
+## Core capabilities
 
-- **CoreSlot PoA** — the sole authority over the validator set; the only module
-  that emits validator updates.
-- **x/rewards** — wired into the app runtime: supply-threshold block emission,
-  uniform active-block distribution, epoch finalization, carry-forward,
-  claim records, queued params updates, and emergency pause/resume.
-- **Query & CLI surfaces** — read-only `rewards-query` commands and `rewards`
-  transaction commands.
-- **Validated proofs** — multi-node localnet rewards finalization + real claim
-  transaction with cross-node app-hash agreement, full app export/import
-  round-trip, and fail-closed lifecycle behavior.
-
-## Still tracked for Phase 11
-
-- Production **zero-premine** monetary-genesis localnet drill (the Phase 10 proof
-  ran on a funded development fixture).
-- Longer **multi-epoch soak** testing.
-- Release-candidate operator drills and documentation hardening.
+- **CoreSlot** (`x/coreslot`) — the sole authority over validator admission,
+  lifecycle state, consensus keys, and validator-set updates.
+- **Rewards** (`x/rewards`) — supply-threshold block emission, active-block
+  participation allocation, epoch finalization, carry-forward remainder
+  accounting, claim records, queued parameter updates, and emergency
+  pause/resume.
+- **Query and transaction surfaces** — CLI and gRPC/query interfaces for reading
+  rewards state and submitting supported rewards transactions.
 
 ## Start here
 
+- **[Getting Started](getting-started/overview.md)** — install, run a localnet,
+  and query rewards.
 - **[Rewards overview](rewards/overview.mdx)** — how block rewards are minted,
   distributed, and claimed.
-- **Source:** the [`twilight-core` repository](https://github.com/twilight-project/twilight-core).
-
-More sections (Getting Started, Chain Architecture, Operators, Reference,
-Development) are being added; see the sidebar as it grows.
+- **[Chain architecture](chain/architecture.md)** — the PoA design and module
+  layout.

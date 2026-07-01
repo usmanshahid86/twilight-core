@@ -49,4 +49,4 @@ Rewards state transitions are integer-only: no wall-clock time, randomness,
 environment variables, or CometBFT-local config; finalization/claims iterate
 sorted collections. Cross-node app-hash agreement after finalize and after claim
 (Phase 10) is the multi-node evidence. See
-[Validation Reports](../reference/validation-reports.md).
+[Status & Validation](../chain/status-and-validation.md).
