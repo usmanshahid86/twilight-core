@@ -10,10 +10,12 @@ const config: Config = {
   title: "Twilight Chain Docs",
   tagline: "A CoreSlot Proof-of-Authority chain with utwlt rewards",
 
-  // Update url/baseUrl to the actual Pages target before publishing.
-  url: "https://twilight-project.github.io",
-  baseUrl: "/",
-  organizationName: "twilight-project",
+  // Pages target: project site under the current owner. After the repo moves to
+  // the twilight-project org, retarget url -> https://twilight-project.github.io
+  // and organizationName -> "twilight-project" (baseUrl stays /twilight-core/).
+  url: "https://usmanshahid86.github.io",
+  baseUrl: "/twilight-core/",
+  organizationName: "usmanshahid86",
   projectName: "twilight-core",
   favicon: "img/twilight.svg",
 
@@ -60,7 +62,7 @@ const config: Config = {
           routeBasePath: "/",
           sidebarPath: "./sidebars.ts",
           editUrl:
-            "https://github.com/twilight-project/twilight-core/tree/main/website/",
+            "https://github.com/usmanshahid86/twilight-core/tree/main/website/",
         },
         blog: false,
         theme: { customCss: "./src/css/custom.css" },
@@ -81,7 +83,7 @@ const config: Config = {
       items: [
         { type: "docSidebar", sidebarId: "docs", position: "left", label: "Docs" },
         {
-          href: "https://github.com/twilight-project/twilight-core",
+          href: "https://github.com/usmanshahid86/twilight-core",
           label: "GitHub",
           position: "right",
         },
