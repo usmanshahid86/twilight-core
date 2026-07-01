@@ -58,7 +58,7 @@ funds two accounts with `1,000,000,000,000utwlt` each, so total supply after
 finalization was `2,000,004,161,900utwlt`). It proves deterministic rewards
 behavior and exact supply accounting **under that fixture**. A production
 **zero-premine** monetary-genesis drill remains a Phase 11 item — see
-[Release Readiness](release-readiness.md).
+[Status & Validation](status-and-validation.md).
 :::
 
 ## Cross-node agreement check
