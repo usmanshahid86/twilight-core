@@ -26,10 +26,10 @@ make localnet-smoke
 ## `make localnet-rewards-smoke`
 
 Starts an **isolated** four-node network (`/tmp/twilight-rewards-localnet`) with a
-short rewards epoch and drives it through epoch finalization and a real claim.
+short rewards epoch and drives it through epoch finalization and a claim transaction.
 
-**Covers:** rewards finalization, exact minting, uniform distribution, a real
-claim transaction, and cross-node app-hash agreement before finalization, after
+**Covers:** rewards finalization, exact minting, active-block participation allocation, a claim
+transaction, and cross-node app-hash agreement before finalization, after
 finalization, and after the claim.
 
 ```bash

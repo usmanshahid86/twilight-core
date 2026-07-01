@@ -4,11 +4,10 @@ title: Genesis
 
 # Genesis
 
-:::note Localnet vs production genesis
-The localnet fixtures described here fund accounts and are **not** a production
-genesis. A production zero-premine monetary genesis is a separate case — see
-[Status & Validation](status-and-validation.md).
-:::
+The localnet fixtures described on this page fund accounts and are **not** a
+production genesis. Production monetary genesis is expected to be zero-premine —
+total supply rising only through epoch emission. See
+[Status & Validation](status-and-validation.md) for maturity status.
 
 ## Module init order
 
