@@ -18,9 +18,9 @@ are exercised in tests rather than auto-run on-chain.
 | `DenomCorrectnessInvariant` | native/fee denom = `utwlt`; no display metadata in amounts | a display denom leaked into accounting |
 | `ClosedEpochImmutabilityInvariant` | finalized epoch aggregates carry no claim markers | a closed epoch was mutated |
 
-By construction, after each finalization and claim the module-balance coverage
-holds exactly (`balance ≥ unclaimed + carry`). The multi-node localnet smoke
-checks all five against a real bank after finalize and after claim.
+After each finalization and claim, module-balance coverage is expected to hold:
+`balance ≥ unclaimed + carry`. These invariants are also checked in app and localnet validation against real
+bank state.
 
 ## Fail-closed lifecycle
 
@@ -32,8 +32,7 @@ the fault **halts the block rather than half-committing**.
 
 This is the intended safety posture for a monetary module: a halt is recoverable
 (the emergency authority can pause settlement; operators can patch), but a
-half-committed or silently-wrong mint is not. The multi-node smoke exercises this
-end-to-end — a forced finalization fault makes `FinalizeBlock` return an error and
+half-committed or silently-wrong mint is not. App-level validation covers this behavior: a forced finalization fault makes `FinalizeBlock` return an error and
 leaves the committed height unchanged with no finalized epoch written.
 
 :::warning Operator implication

@@ -8,7 +8,7 @@ All rewards queries are **read-only**. They follow the repository's top-level
 command convention: `twilightd rewards-query <command>` (not `query rewards`).
 Add `--node <rpc>` to target a specific node and `--output json` for machine
 output. Raw `--help` captures for every command live under
-`website/generated/cli/` (audit artifacts).
+`website/generated/cli/` (generated source material).
 
 ## Commands
 

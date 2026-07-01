@@ -34,9 +34,9 @@ the emission math (clipping) and the pre-mint assertion; this is the backstop.
 rewards module balance ≥ Σ(unclaimed claim record amounts) + carry_forward_remainder
 ```
 
-The module must always be able to cover everything it owes. By construction this
-holds exactly after each finalize and claim:
-`balance = priorUnclaimed + allocated + carryOut` on the credit side.
+By construction this is expected to hold after each finalize and claim: the
+rewards module balance must cover all unclaimed claim records plus the
+carry-forward remainder.
 
 ## DenomCorrectnessInvariant
 

@@ -64,5 +64,6 @@ See [Authority & Emergency Guide](../operators/authority-and-emergency-guide.md)
 ## Operator check
 
 > **Operator check:** after each epoch boundary, confirm `cumulative_emitted`
-> increased by the expected emission, `module-balances.rewards_balance` covers
-> unclaimed + carry, and (on a multi-node network) all nodes agree on app hash.
+> changed by the expected bounded emission for that epoch,
+> `module-balances.rewards_balance` covers unclaimed + carry, and (on a
+> multi-node network) all nodes agree on app hash.

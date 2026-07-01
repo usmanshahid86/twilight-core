@@ -44,7 +44,7 @@ twilightd rewards-query params --node <rpc> --output json > params.json
 `native_denom` and `max_supply` are **immutable** after genesis. The keeper
 rejects any update that changes them, and rejects enabling unsupported v1
 features (weighted rewards, fee collection/distribution, non-`NONE` fee mode,
-non-uniform distribution). Do not attempt to change the denom or cap via params.
+distribution methods other than `DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS`). Do not attempt to change the denom or cap via params.
 :::
 
 See [Parameters](params.md) for the full field list and mutability.
