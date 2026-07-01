@@ -6,10 +6,11 @@ title: Overview
 
 Twilight is a minimal Cosmos SDK / CometBFT **Proof-of-Authority** chain:
 
-- **CoreSlot** (`x/coreslot`) owns the validator set — the only module that emits
-  validator updates. There is no staking, delegation, or slashing.
-- **Rewards** (`x/rewards`) mints scheduled `utwlt` block rewards each epoch and
-  pays them to the active operators' snapshotted payout addresses.
+- **CoreSlot** (`x/coreslot`) owns validator admission, lifecycle state, and
+  validator-set updates. Validator membership is not token-staked: there is no
+  staking, delegation, or slashing path.
+- **Rewards** (`x/rewards`) mints a bounded `utwlt` reward pool each epoch and
+  pays finalized rewards to the active operators' snapshotted payout addresses.
 
 If you are new, read in this order:
 
@@ -22,8 +23,5 @@ Then dive into the [Rewards overview](../rewards/overview.mdx),
 [Chain architecture](../chain/architecture.md), or the
 [Operator guides](../operators/node-operator-guide.md).
 
-:::note Current status
-Implementation is validated through Phase 10 (including a multi-node localnet
-finalization + claim proof). Production zero-premine genesis and longer soak
-drills remain Phase 11 — see [Release Readiness](../chain/release-readiness.md).
-:::
+For current validation evidence and known limitations, see
+[Status & Validation](../chain/status-and-validation.md).
