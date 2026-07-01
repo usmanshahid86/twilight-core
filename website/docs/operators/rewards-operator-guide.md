@@ -22,7 +22,8 @@ After each epoch boundary:
 2. **Emission correct** — `epoch-reward <closed-epoch>` `minted_emission` matches
    the expected block subsidy × blocks, and `cumulative-emitted` advanced by that
    amount.
-3. **Allocation balances** — `allocated_amount + carry_out == reward_pool`.
+3. **Allocation balances** — operator allocation plus carry-out reconciles to the
+   finalized reward pool.
 4. **Coverage** — `module-balances.rewards_balance` ≥ unclaimed + carry.
 5. **Agreement** (multi-node) — all nodes agree on app hash (`agree.sh`).
 

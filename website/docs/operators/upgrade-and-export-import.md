@@ -53,5 +53,5 @@ coherently.
 A coordinated **on-chain upgrade** procedure (handler / store migration) is not
 part of the current implementation. The rewards store key and proto are stable;
 any future upgrade must preserve the immutable `native_denom` / `max_supply` and
-the finalized epoch/claim history. This tooling is planned but not yet available.
+the finalized epoch/claim history. This tooling is not available in the current implementation.
 :::

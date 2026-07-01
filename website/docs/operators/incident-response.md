@@ -16,9 +16,9 @@ A state fork. Highest severity.
 2. Identify the divergence height (`agree.sh` / block headers).
 3. Compare `app_state.rewards` and `app_state.coreslot` across nodes at that
    height (e.g. via `twilightd export`).
-4. Do not resume until the cause is understood. Determinism is enforced (no
-   time/rand/map-order in rewards), so divergence implies a real defect or a
-   non-identical binary/genesis across nodes — verify both are identical first.
+4. Do not resume until the cause is understood. The rewards path is designed and tested for deterministic execution, so
+   divergence suggests a real defect or a non-identical binary/genesis across nodes
+   — verify both are identical first.
 
 ## Repeated EndBlock error / chain halted
 
@@ -57,7 +57,7 @@ params apply only to the next epoch onward and can be re-queued.
 ## Module-balance coverage failure
 
 If `module-balances.rewards_balance` < unclaimed + carry, stop and investigate —
-this should be impossible by construction (the coverage invariant holds after
+this should not occur under the rewards accounting invariants (the coverage invariant holds after
 every finalize/claim). Treat as a critical accounting defect.
 
 ## Key compromise

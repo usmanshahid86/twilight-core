@@ -44,7 +44,7 @@ scripts/localnet/stop.sh
 ## Check status and agreement
 
 ```bash
-curl -s http://<node>/status | jq '.result.sync_info.latest_block_height'
+curl -s http://<rpc-host>:26657/status | jq '.result.sync_info.latest_block_height'
 # Cross-node hash agreement (localnet):
 scripts/localnet/agree.sh
 ```

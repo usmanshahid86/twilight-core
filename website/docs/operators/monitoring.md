@@ -14,7 +14,7 @@ node RPC; there is no separate metrics exporter in the current version.
 | `current_epoch` | `epoch-info` | advances by 1 each boundary |
 | `current_epoch_start_height` / `current_epoch_end_height` | `epoch-info` | end = start + epoch_length − 1 |
 | `cumulative_emitted` | `cumulative-emitted` | monotonic non-decreasing; ≤ `max_supply` |
-| `minted_emission` (per epoch) | `epoch-reward <e>` | matches subsidy × blocks for that epoch |
+| `minted_emission` (per epoch) | `epoch-reward <e>` | matches expected bounded emission for that epoch, including halving and cap behavior |
 | current subsidy / tier | `next-halving` | subsidy halves at each threshold; may reach 0 near cap |
 
 ## Balance / coverage signals
