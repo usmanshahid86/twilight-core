@@ -10,10 +10,10 @@ title: Glossary
 | **Active slot** | A slot with status `SLOT_STATUS_ACTIVE` — part of the validator set and eligible to earn rewards active-block credit. |
 | **Operator address** | The account that operates a slot. |
 | **Payout address** | The account that receives a slot's rewards. Snapshotted into each claim record at finalization. |
-| **Reward weight** | `OperatorRewardWeight.FinalWeight` — used for reward distribution only; never read by consensus. v1 uses `1.0` for all active slots. |
+| **Reward weight** | Operator reward-weight metadata snapshotted for forward compatibility. It is separate from consensus power and is not used for v1 reward allocation. |
 | **Consensus power** | A slot's CometBFT voting power; drives validator updates only; never used for reward accounting. |
 | **Epoch** | A fixed window of `epoch_length_blocks` blocks over which active blocks accumulate and at whose end rewards finalize. |
-| **Active block** | A per-`(epoch, slot)` counter incremented each block a slot is active; the basis for uniform distribution. |
+| **Active block** | A per-`(epoch, slot)` counter incremented each block a slot is active; the basis for active-block participation allocation. |
 | **Finalization** | The EndBlock step that mints the epoch emission, allocates the pool, and writes the epoch aggregate + claim records. |
 | **Epoch emission** | The `utwlt` minted for an epoch: the per-block subsidy summed over the epoch, clipped by the supply cap. |
 | **Subsidy** | The per-block reward before distribution: `initial_block_subsidy / 2^tier`. |

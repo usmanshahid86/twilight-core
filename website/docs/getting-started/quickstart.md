@@ -20,7 +20,7 @@ make localnet-rewards-smoke
 ```
 
 This starts a four-node network with a short rewards epoch, drives it through
-epoch finalization and a real claim, and asserts cross-node app-hash agreement.
+epoch finalization and a claim transaction, and asserts cross-node app-hash agreement.
 It prints a `PASS` summary with the minted emission, per-slot reward, and claim
 transaction hash. See [Localnet](../chain/localnet.md) for what it covers (and
 the funded-fixture caveat).
