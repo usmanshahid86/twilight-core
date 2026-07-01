@@ -4,11 +4,6 @@ title: Upgrade & Export/Import
 
 # Upgrade & Export/Import
 
-:::note Current status
-This page reflects the **Phase 10 validated** implementation. Production upgrade
-procedures and longer soak testing remain **Phase 11** items.
-:::
-
 ## Exporting state
 
 ```bash
@@ -31,16 +26,16 @@ A re-import (`InitChain` from exported state) must preserve, exactly:
 - every finalized epoch aggregate and claim record (including `claimed` flags);
 - the `rewards` module account balance and total `utwlt` supply.
 
-## What Phase 10 proved
+## What export/import covers
 
-Phase 10 includes a full app-level export/import test: it finalizes an epoch,
-exports via `App.ExportAppStateAndValidators`, `InitChain`s a **fresh app** from
-the exported state, **continues a block**, and asserts the rewards params, state,
-cumulative emitted, finalized epoch, claim record, module balance, native supply,
-and continued active-block accounting are all preserved — with no panic.
+A full app-level export/import test finalizes an epoch, exports via
+`App.ExportAppStateAndValidators`, `InitChain`s a **fresh app** from the exported
+state, **continues a block**, and asserts the rewards params, state, cumulative
+emitted, finalized epoch, claim record, module balance, native supply, and
+continued active-block accounting are all preserved — with no panic.
 
-This is a full app/module-manager export/import proof, not a keeper-only genesis
-round trip.
+This exercises the full app / module-manager export/import path, not a keeper-only
+genesis round trip.
 
 ## Verify after import
 
@@ -54,9 +49,9 @@ twilightd rewards-query slot-rewards <slot> --limit 50 --node <rpc>  # claimed f
 Then advance one block and confirm the chain continues to finalize epochs
 coherently.
 
-:::warning Phase 11 pending
-A coordinated **on-chain upgrade** procedure (handler/store migration) is not part
-of the current scope. The rewards store key and proto are stable; any future
-upgrade must preserve the immutable `native_denom`/`max_supply` and the finalized
-epoch/claim history. Treat upgrade tooling as Phase 11+.
+:::warning On-chain upgrades not yet supported
+A coordinated **on-chain upgrade** procedure (handler / store migration) is not
+part of the current implementation. The rewards store key and proto are stable;
+any future upgrade must preserve the immutable `native_denom` / `max_supply` and
+the finalized epoch/claim history. This tooling is not available in the current implementation.
 :::

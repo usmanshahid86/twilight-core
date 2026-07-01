@@ -16,8 +16,8 @@ CLIs (not the `query <module>` / `tx <module>` grouping):
 | `twilightd init`, `start`, `export`, `keys`, … | Standard Cosmos node/CLI commands |
 
 Raw `--help` output for every rewards command is captured under
-`website/generated/cli/` as audit artifacts and is the source for the reference
-tables. Regenerate from a built binary with the per-command `--help`.
+`website/generated/cli/` as generated source material and is the source for the
+reference tables. Regenerate from a built binary with the per-command `--help`.
 
 ## Common query flags
 

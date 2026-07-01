@@ -4,7 +4,7 @@ title: Testing
 
 # Testing
 
-What to run, and which layer proves which risk. The pre-rewards CoreSlot test plan
+What to run, and which layer covers which risk. The CoreSlot test plan
 is in the repository at `docs/testing/coreslot-test-plan.md`.
 
 ## Commands
@@ -14,6 +14,7 @@ go test ./x/rewards/keeper -count=1     # economics
 go test ./x/rewards/types -count=1      # params validation, genesis schema
 go test ./x/rewards/... -count=1        # incl. client/cli construction tests
 go test ./app -count=1                  # runtime wiring, export/import, fail-closed
+go test ./app -run Simulation -count=1  # randomized state-machine sims
 go test ./... -count=1                  # everything
 go vet ./...
 go build ./cmd/twilightd
@@ -22,19 +23,20 @@ make localnet-smoke                      # node startup + agreement (no epoch cl
 make localnet-rewards-smoke              # multi-node finalization + claim
 ```
 
-## Which test proves which risk
+## Which test covers which risk
 
 | Layer | Risk covered |
 |---|---|
-| `x/rewards/keeper` | emission math, active-block accounting, atomic finalization, distribution, claims, params, pause/resume, invariants |
+| `x/rewards/keeper` | emission math, active-block accounting, atomic finalization, active-block participation allocation, claims, params, pause/resume, invariants |
 | `x/rewards/types` | params validation, genesis round-trip |
 | `x/rewards/client/cli` | CLI request/message construction (incl. pagination) |
 | `app` | app/runtime wiring, `InitChain`+`FinalizeBlock` dispatch, export/import, fail-closed lifecycle |
 | `make localnet-rewards-smoke` | **multi-node** finalization/claim determinism + cross-node app-hash agreement |
+| randomized state-machine simulations | fixed-seed CoreSlot lifecycle and rewards accounting invariant coverage across long random operation sequences |
 
 ## Key app-level tests
 
-| Test | Proves |
+| Test | Covers |
 |---|---|
 | `TestRewardsRuntimeDispatchFinalizeBlock` | the runtime actually dispatches rewards BeginBlock/EndBlock; exact supply delta |
 | `TestRewardsInitChainGenesisAccounts` | genesis creates module accounts with correct permissions |
@@ -48,5 +50,5 @@ make localnet-rewards-smoke              # multi-node finalization + claim
 Rewards state transitions are integer-only: no wall-clock time, randomness,
 environment variables, or CometBFT-local config; finalization/claims iterate
 sorted collections. Cross-node app-hash agreement after finalize and after claim
-(Phase 10) is the multi-node evidence. See
+is the multi-node evidence. See
 [Status & Validation](../chain/status-and-validation.md).

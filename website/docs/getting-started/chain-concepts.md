@@ -9,7 +9,7 @@ A compact mental model of how Twilight fits together.
 ## Validators are slots, not stakers
 
 There is no staking. The validator set is a fixed-capacity set of **CoreSlots**.
-A CoreSlot is admitted/activated by the CoreSlot authority and carries an
+A CoreSlot is admitted and activated by the CoreSlot authority and carries an
 operator address, a payout address, a consensus key, and a reward weight. Only
 `ACTIVE` slots vote and earn rewards. CoreSlot is the **only** module that changes
 the validator set.
@@ -19,7 +19,7 @@ the validator set.
 Every block, the rewards module credits each active slot one **active block** for
 the open epoch. At the epoch boundary it **finalizes**: it mints the block
 subsidy summed over the epoch (clipped by the supply cap), builds a pool, and
-splits it uniformly across slots by active blocks. The minted amount depends on
+allocates it by each slot's active-block participation. The minted amount depends on
 blocks and the halving tier — not on the slot count.
 
 ## Rewards are claimed, not auto-paid

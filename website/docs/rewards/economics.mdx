@@ -26,11 +26,11 @@ Each epoch mints a **per-block** subsidy summed over the epoch's blocks, clipped
 by the supply cap. The minted amount depends on the number of blocks and the
 current subsidy tier — **not** on the number of active slots.
 
-> Example (Phase 10 localnet, `epoch_length_blocks = 10`):
+> Example (localnet, `epoch_length_blocks = 10`):
 > minted emission = `10 × 416,190 = 4,161,900{constants.nativeDenom}`.
 
-Distribution then allocates that minted pool among the active slots — see
-[Distribution](#distribution-uniform-active-blocks). Do not multiply the subsidy
+Allocation then splits that minted pool among eligible slots by active-block participation — see
+[Allocation](#distribution-uniform-active-blocks). Do not multiply the subsidy
 by the slot count.
 
 ## Halving and the supply cap
@@ -75,9 +75,9 @@ credit is still paid even if it is suspended or removed before the epoch closes
 Convention: reward credit for block N uses the active set observed at
 BeginBlock(N). A status change inside block N affects credit from block N+1.
 
-## Distribution (UNIFORM_ACTIVE_BLOCKS) {#distribution-uniform-active-blocks}
+## Allocation (UNIFORM_ACTIVE_BLOCKS) {#distribution-uniform-active-blocks}
 
-v1 uses uniform active-block distribution:
+v1 allocates rewards by active-block participation:
 
 ```text
 effectiveWeight(slot) = blocksActive(slot)
@@ -89,6 +89,9 @@ where `pool = mintedEmission + carryIn + distributableFees − treasuryAmount`.
 In v1 `distributableFees = 0` and the default `treasuryAmount = 0`, so
 `pool = mintedEmission + carryIn`.
 
+`treasuryAmount` is computed from the epoch's minted emission, not from
+carry-forward.
+
 > Example: `pool = 4,161,900`, 4 slots each active for all 10 blocks
 > (total weight 40), each slot = `floor(4,161,900 × 10 / 40) = 1,040,475`,
 > sum = `4,161,900`, carry out = `0`.
@@ -98,7 +101,7 @@ Properties:
 - a slot with zero active blocks gets no claim record;
 - if total weight is zero (no eligible slots), the **full pool carries forward**
   and emission is still minted/advanced;
-- weighted distribution and consensus power are **never** used in v1.
+- weighted rewards and consensus power are **never** used for v1 payout allocation.
 
 ## Carry-forward
 

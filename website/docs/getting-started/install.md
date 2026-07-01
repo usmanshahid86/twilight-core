@@ -39,7 +39,7 @@ make test           # or: go test ./... -count=1
 go vet ./...
 ```
 
-See [Testing](../development/testing.md) for which test layer proves which risk,
+See [Testing](../development/testing.md) for which test layer covers which risk,
 and [Localnet](../chain/localnet.md) to run a multi-node network.
 
 :::note

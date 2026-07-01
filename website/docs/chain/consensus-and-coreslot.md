@@ -56,21 +56,21 @@ is suspended or removed before the epoch closes — see
 ## Reward weight vs consensus power (frozen interface)
 
 This is the contract between validator selection (CoreSlot) and reward
-distribution (rewards). It is audit-critical:
+allocation (rewards). It is consensus-safety-critical:
 
 - **`CoreSlot.ConsensusPower` controls CometBFT validator power only.** It is the
   sole input to the `ValidatorUpdate` power that CoreSlot EndBlock returns. Active
   slots carry `Params.SlotVotingPower`; every non-active slot carries `0`.
-- **`OperatorRewardWeight.FinalWeight` controls reward distribution only** and is
-  never read by consensus.
+- **`OperatorRewardWeight` is snapshotted metadata for forward compatibility** and
+  is never read by consensus.
 - **CoreSlot EndBlock never derives validator updates from reward weight.** It
   reads only slot `Status` and `ConsensusPower` (`x/coreslot/keeper/endblock.go`).
 - **Rewards never reads `ConsensusPower` for accounting.** Reward eligibility and
-  amounts come from active-block counters and `OperatorRewardWeight`, not from the
+  amounts come from active-block participation, not from reward weight or the
   validator set.
-- In v1 (uniform distribution) every active slot has power `1` and weight `1.0`;
-  the two coincide numerically but are independent dimensions. Changing a reward
-  weight changes payout math only — it never changes a `ValidatorUpdate`.
+- **In v1, reward weight is not used for allocation.** v1 allocates strictly by
+  active-block participation, so changing a reward weight changes neither v1 payout
+  nor any `ValidatorUpdate`.
 
 CoreSlot emits lifecycle events (e.g. `coreslot_validator_update_emitted` with
 `slot_id`, `operator_address`, `consensus_address`, `power`, `height`) that

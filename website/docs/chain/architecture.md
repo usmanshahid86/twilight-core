@@ -16,7 +16,7 @@ and `mint` modules are **omitted**.
 |---|---|
 | `x/coreslot` | Owns the validator/operator slot set; the **only** module that emits validator updates. Stores each slot's operator address, payout address, reward weight, and status. Exposes a read-only interface to rewards. |
 | `x/rewards` | Reads the active CoreSlot set, counts active blocks per epoch, finalizes epochs, mints `utwlt`, creates claim records, and pays snapshotted payout addresses. Does **not** manage validators. |
-| `auth`, `bank`, `consensus` | Standard Cosmos SDK modules (accounts, balances/minting, consensus params). |
+| `auth`, `bank`, `consensus` | Standard Cosmos SDK modules (accounts, balances/supply, consensus params). |
 
 The runtime is wired via Cosmos SDK `depinject`; CoreSlot and rewards keepers are
 constructed manually in `app/app.go`, and module accounts + lifecycle order are
@@ -24,7 +24,7 @@ declared in `app/config.go`.
 
 ## Consensus and lifecycle interfaces
 
-This is the single most important architectural fact for auditors:
+This is the single most important architectural fact for anyone reasoning about consensus safety:
 
 - **CoreSlot uses the legacy ABCI EndBlock** interface
   (`module.HasABCIEndBlock`) and is the **sole emitter of validator updates**.
@@ -75,5 +75,4 @@ proposal flow. Validator authority and emergency authority are CoreSlot concepts
 | `x/coreslot/` | CoreSlot module (PoA validator authority). |
 | `x/rewards/` | Rewards module (emission, epochs, claims, params, invariants). |
 | `cmd/twilightd/` | The `twilightd` node + CLI binary. |
-| `scripts/localnet/` | Localnet init/start/agree/stop + smoke scripts. |
-| `docs/research/` | Phase implementation + validation reports (summarized under [Status & Validation](status-and-validation.md)). |
+| `scripts/localnet/` | Localnet init/start/agree/stop + smoke, soak, and drill scripts. |

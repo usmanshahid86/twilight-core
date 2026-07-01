@@ -34,8 +34,8 @@ the change applies to the next epoch. See [Parameters](../rewards/params.md).
 ## Pause / resume (emergency authority)
 
 ```bash
-twilightd rewards pause  --emissions --settlement --claims --from <emergency-authority> ...
-twilightd rewards resume --emissions --settlement --claims --from <emergency-authority> ...
+twilightd rewards pause  --emissions --settlement --claims --from <emergency-authority> --chain-id <chain-id> --node <rpc> --yes
+twilightd rewards resume --emissions --settlement --claims --from <emergency-authority> --chain-id <chain-id> --node <rpc> --yes
 ```
 
 | Flag | What pausing it does |

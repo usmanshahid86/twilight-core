@@ -4,7 +4,7 @@ title: Localnet
 
 # Localnet
 
-Two four-node localnet targets exist. They prove different things — do not
+Two four-node smoke targets exist. They cover different things — do not
 conflate them.
 
 ## `make localnet-smoke` (default)
@@ -12,10 +12,10 @@ conflate them.
 Starts a four-node network on the **production default** profile and checks that
 all nodes agree.
 
-**Proves:** node startup and basic cross-node agreement (app hash, validators
+**Covers:** node startup and basic cross-node agreement (app hash, validators
 hash, next-validators hash) at a common height.
 
-**Does not prove:** rewards finalization. The default rewards epoch is 17,280
+**Does not cover:** rewards finalization. The default rewards epoch is 17,280
 blocks, so the default smoke (which reaches a low height) never closes a rewards
 epoch.
 
@@ -26,10 +26,10 @@ make localnet-smoke
 ## `make localnet-rewards-smoke`
 
 Starts an **isolated** four-node network (`/tmp/twilight-rewards-localnet`) with a
-short rewards epoch and drives it through epoch finalization and a real claim.
+short rewards epoch and drives it through epoch finalization and a claim transaction.
 
-**Proves:** rewards finalization, exact minting, uniform distribution, a real
-claim transaction, and cross-node app-hash agreement before finalization, after
+**Covers:** rewards finalization, exact minting, active-block participation allocation, a claim
+transaction, and cross-node app-hash agreement before finalization, after
 finalization, and after the claim.
 
 ```bash
@@ -40,7 +40,7 @@ The script (`scripts/localnet/rewards-smoke.sh`) edits **only its own isolated
 generated genesis** to set `epoch_length_blocks = 10`; production defaults and the
 default smoke are untouched.
 
-### What it observed (Phase 10)
+### What a short-epoch run produces
 
 | Stage | Height | Result |
 |---|---|---|
@@ -53,11 +53,11 @@ slot — distribution then splits the minted pool across the 4 active slots. See
 [Rewards economics](../rewards/economics.mdx).
 
 :::warning Funded development fixture
-The Phase 10 rewards smoke ran on a **funded** development fixture (the localnet
-funds two accounts with `1,000,000,000,000utwlt` each, so total supply after
-finalization was `2,000,004,161,900utwlt`). It proves deterministic rewards
-behavior and exact supply accounting **under that fixture**. A production
-**zero-premine** monetary-genesis drill remains a Phase 11 item — see
+The rewards smoke runs on a **funded** development fixture (the localnet funds two
+accounts with `1,000,000,000,000utwlt` each, so total supply after finalization is
+`2,000,004,161,900utwlt`). It exercises deterministic rewards behavior and exact
+supply accounting **under that fixture**. A production **zero-premine**
+monetary-genesis run is a separate case — see
 [Status & Validation](status-and-validation.md).
 :::
 

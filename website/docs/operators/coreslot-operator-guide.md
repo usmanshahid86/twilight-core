@@ -5,9 +5,8 @@ title: CoreSlot Operator Guide
 # CoreSlot Operator Guide
 
 CoreSlot is the PoA validator authority. This guide covers what an operator needs
-to know about how their slot relates to rewards. The repository's
-`docs/operators/core-slot-operator-guide.md` holds the deeper lifecycle reference;
-the consensus model is in [Consensus & CoreSlot](../chain/consensus-and-coreslot.md).
+to know about how their slot relates to rewards; the consensus model is in
+[Consensus & CoreSlot](../chain/consensus-and-coreslot.md).
 
 ## A slot's reward-relevant fields
 
@@ -15,7 +14,7 @@ the consensus model is in [Consensus & CoreSlot](../chain/consensus-and-coreslot
 |---|---|---|
 | Operator address | rewards snapshot | Recorded into claim records |
 | **Payout address** | rewards payout | Where claims send funds; snapshotted at finalization |
-| Reward weight (`OperatorRewardWeight.FinalWeight`) | rewards distribution | `1.0` for all active slots in v1; never affects consensus |
+| Reward weight | rewards metadata | Snapshotted for forward compatibility; separate from consensus power and not used for v1 reward allocation |
 | Consensus power | consensus only | Validator voting power; never used for reward accounting |
 | Status | both | Only `ACTIVE` slots vote and earn active-block credit |
 
@@ -43,9 +42,9 @@ Suspending or removing a slot stops it from earning new active-block credit
   row on suspend and remove (it only changes status and zeroes consensus power),
   so rewards finalization can still snapshot a suspended/removed-but-credited slot.
 
-This is the snapshot-dependency contract: rewards finalization reads
-`GetSlot` and `GetRewardWeight` for credited slots — collections that suspend and
-remove retain — never the operator/consensus indexes that remove deletes.
+This is why earned rewards remain claimable after suspend or remove:
+finalization can still read the retained slot and reward metadata for any slot
+that already earned active-block credit.
 
 ## Reward snapshot dependencies (summary)
 

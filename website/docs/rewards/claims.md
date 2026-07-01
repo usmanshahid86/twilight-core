@@ -48,11 +48,11 @@ twilightd rewards claim 1 1 1 --from operator1 \
   --gas 600000 --fees 0utwlt --yes
 ```
 
-In the Phase 10 localnet, the signer (`operator1`) was deliberately different
-from slot 1's payout (`operator0`): the claim paid `operator0` exactly
-`1,040,475utwlt`, `operator1` received nothing, the rewards module balance dropped
-from `4,161,900` to `3,121,425utwlt`, total supply was unchanged, and a second
-claim failed.
+If the signer differs from the payout — e.g. `operator1` claims slot 1 whose
+payout is `operator0` — the funds go to `operator0` (`1,040,475utwlt`) and
+`operator1` receives nothing; the rewards module balance drops from `4,161,900` to
+`3,121,425utwlt`, total supply is unchanged, and a second claim of the same record
+fails.
 
 ## Failure cases
 

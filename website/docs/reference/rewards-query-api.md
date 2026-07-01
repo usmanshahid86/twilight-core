@@ -39,7 +39,7 @@ Claim records for a slot. Args: `slot-id` (uint, required, > 0).
 :::note
 `reward_weight` is the CoreSlot snapshot and is **metadata-only — it has no payout
 effect in v1**. The payout (`amount`) is driven by `effective_weight`, which equals
-`blocks_active` (uniform active-block participation). See [Rewards Economics](../rewards/economics.mdx).
+`blocks_active` for v1 active-block participation allocation. See [Rewards Economics](../rewards/economics.mdx).
 :::
 
 ## `claimable [slot-id] [start-epoch] [end-epoch]`

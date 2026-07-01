@@ -4,10 +4,10 @@ title: Rewards Overview
 
 import { constants } from '@site/docs/_snippets/constants.mdx';
 
-# x/rewards Overview
+# Rewards Overview
 
-`x/rewards` mints scheduled `{constants.nativeDenom}` block rewards and allocates
-each epoch's reward pool to the active CoreSlot operators, then lets those rewards
+`x/rewards` mints scheduled `{constants.nativeDenom}` block rewards, allocates
+each epoch's reward pool by active-block participation, and lets finalized rewards
 be claimed to each operator's snapshotted payout address. It depends on CoreSlot
 for the active operator set but **never** manages validators itself.
 
@@ -58,8 +58,9 @@ override the epoch length; such values are always labeled as test settings.
 ## Dependencies
 
 - **CoreSlot** (`x/coreslot`) — provides the active operator set, each slot's
-  operator/payout addresses, and reward weights. Rewards reads these through a
-  narrow read-only interface.
+  operator/payout addresses, and reward weights (metadata only — no payout effect
+  in v1). Rewards reads these through a narrow read-only interface; payout is by
+  active-block participation.
 - **Module accounts** — `{constants.rewardsModuleAccount}` (the `Minter`,
   holding minted emission and unclaimed rewards) and
   `{constants.feePoolModuleAccount}` (dormant fee plumbing, no permissions).
