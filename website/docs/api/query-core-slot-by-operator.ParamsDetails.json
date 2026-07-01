@@ -1,0 +1,1 @@
+{"parameters":[{"name":"operator_address","in":"path","required":true,"schema":{"type":"string"}}]}

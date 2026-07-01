@@ -1,4 +1,5 @@
 import type { SidebarsConfig } from "@docusaurus/plugin-content-docs";
+import apiSidebar from "./docs/api/sidebar";
 
 // Full chain documentation IA (Phases A–C).
 const sidebars: SidebarsConfig = {
@@ -88,6 +89,12 @@ const sidebars: SidebarsConfig = {
         { type: "doc", id: "development/localnet-drills", label: "Localnet Drills" },
         { type: "doc", id: "development/contributing", label: "Contributing" },
       ],
+    },
+    {
+      type: "category",
+      label: "API Reference",
+      collapsed: true,
+      items: apiSidebar,
     },
   ],
 };

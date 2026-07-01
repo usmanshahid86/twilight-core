@@ -31,7 +31,7 @@ const config: Config = {
     mermaid: true,
     hooks: { onBrokenMarkdownLinks: "throw" },
   },
-  themes: ["@docusaurus/theme-mermaid"],
+  themes: ["@docusaurus/theme-mermaid", "docusaurus-theme-openapi-docs"],
 
   // Brand fonts (Google Fonts for now; self-hosting tracked as later hardening).
   headTags: [
@@ -82,6 +82,20 @@ const config: Config = {
           { from: "/chain/release-readiness", to: "/chain/status-and-validation" },
           { from: "/reference/validation-reports", to: "/chain/status-and-validation" },
         ],
+      },
+    ],
+    [
+      "docusaurus-plugin-openapi-docs",
+      {
+        id: "api",
+        docsPluginId: "default",
+        config: {
+          twilight: {
+            specPath: "openapi/twilight.openapi.json",
+            outputDir: "docs/api",
+            sidebarOptions: { groupPathsBy: "tag", categoryLinkSource: "tag" },
+          },
+        },
       },
     ],
   ],

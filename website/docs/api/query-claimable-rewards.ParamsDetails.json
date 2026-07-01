@@ -1,0 +1,1 @@
+{"parameters":[{"name":"slot_id","in":"path","required":true,"schema":{"type":"string","format":"uint64"}},{"name":"start_epoch","in":"query","required":false,"schema":{"type":"string","format":"uint64"}},{"name":"end_epoch","in":"query","required":false,"schema":{"type":"string","format":"uint64"}}]}

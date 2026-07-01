@@ -1,0 +1,1 @@
+{"parameters":[{"name":"epoch_number","in":"path","required":true,"schema":{"type":"string","format":"uint64"}}]}
