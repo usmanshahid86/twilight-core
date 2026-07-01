@@ -111,7 +111,9 @@ names), and no **machine-specific** local paths (e.g. `/Users/…`, `/home/<user
 
 ## 7. Review gates — run before every docs PR
 
-**Gate 1 — development-phase vocabulary (must be ZERO across the whole site):**
+**Gate 1 — development-phase vocabulary.** During the de-phasing rollout, every PR
+must add **no new hits** and **clear all hits in the files it touches**. Once the
+sweep is complete, this must stay **ZERO across the whole site**.
 
 ```bash
 grep -RInE "[Pp]hase[- ]?[0-9]|validated through|reflects the .* implementation|pending [Pp]hase" website/docs website/src
