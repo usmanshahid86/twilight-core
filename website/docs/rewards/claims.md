@@ -6,8 +6,9 @@ title: Claims
 
 When an epoch finalizes, the module writes one **claim record** per eligible slot.
 Each record snapshots the slot's operator and **payout address**, the active
-blocks, the reward weight, and the reward amount. Records start unclaimed and are
-held indefinitely until claimed.
+blocks, the reward weight (metadata-only — no payout effect in v1), and the reward
+amount. The amount is derived from active blocks, not the reward weight. Records
+start unclaimed and are held indefinitely until claimed.
 
 ## The claim model
 

@@ -36,6 +36,12 @@ Claim records for a slot. Args: `slot-id` (uint, required, > 0).
 `operator_address`, `payout_address`, `blocks_active`, `reward_weight`,
 `effective_weight`, `amount`, `claimed`, `claimed_at_height`), `pagination`.
 
+:::note
+`reward_weight` is the CoreSlot snapshot and is **metadata-only — it has no payout
+effect in v1**. The payout (`amount`) is driven by `effective_weight`, which equals
+`blocks_active` (uniform active-block participation). See [Rewards Economics](../rewards/economics.mdx).
+:::
+
 ## `claimable [slot-id] [start-epoch] [end-epoch]`
 Unclaimed positive rewards in an inclusive range. Args all uint, required;
 `start ≤ end`. → `rewards[]`, `total_amount`.
