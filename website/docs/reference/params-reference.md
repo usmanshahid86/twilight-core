@@ -6,7 +6,7 @@ title: Params Reference
 
 The full field-by-field `Params` table (types, defaults, effects) lives in
 [Rewards → Parameters](../rewards/params.md). This page is the **mutability and
-guard** reference — the machine view an auditor or tooling author needs.
+guard** reference — the machine view a reviewer, integrator, or tooling author needs.
 
 ## Mutability classification
 

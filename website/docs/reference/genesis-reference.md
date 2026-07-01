@@ -69,5 +69,5 @@ jq '.app_state.rewards' ~/.twilightd/config/genesis.json
 - no duplicate finalized epoch or claim record;
 - standard `Params` validation ([params reference](params-reference.md)).
 
-No premine: a production-shaped default has `cumulative_emitted = 0` and no
-rewards balances. Localnet fixtures that fund accounts are development-only.
+No premine: default rewards genesis has `cumulative_emitted = 0` and no rewards
+balances. Localnet fixtures that fund accounts are development-only.

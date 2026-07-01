@@ -9,7 +9,7 @@ created at genesis. See also [Accounts & Denoms](../chain/accounts-and-denoms.md
 
 | Account | Permission | Holds | Used by |
 |---|---|---|---|
-| `rewards` | `Minter` | minted epoch emission + unclaimed rewards | mint at finalization; send on claim/treasury |
+| `rewards` | `Minter` | minted rewards before allocation; unclaimed rewards and carry-forward after finalization | mint at finalization; send on claim/treasury |
 | `rewards_fee_pool` | _(none)_ | nothing (dormant) | reserved for future fee plumbing |
 
 ## How each account is used
