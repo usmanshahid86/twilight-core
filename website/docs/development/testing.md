@@ -14,6 +14,7 @@ go test ./x/rewards/keeper -count=1     # economics
 go test ./x/rewards/types -count=1      # params validation, genesis schema
 go test ./x/rewards/... -count=1        # incl. client/cli construction tests
 go test ./app -count=1                  # runtime wiring, export/import, fail-closed
+go test ./app -run Simulation -count=1  # randomized state-machine sims
 go test ./... -count=1                  # everything
 go vet ./...
 go build ./cmd/twilightd
@@ -26,11 +27,12 @@ make localnet-rewards-smoke              # multi-node finalization + claim
 
 | Layer | Risk covered |
 |---|---|
-| `x/rewards/keeper` | emission math, active-block accounting, atomic finalization, distribution, claims, params, pause/resume, invariants |
+| `x/rewards/keeper` | emission math, active-block accounting, atomic finalization, active-block participation allocation, claims, params, pause/resume, invariants |
 | `x/rewards/types` | params validation, genesis round-trip |
 | `x/rewards/client/cli` | CLI request/message construction (incl. pagination) |
 | `app` | app/runtime wiring, `InitChain`+`FinalizeBlock` dispatch, export/import, fail-closed lifecycle |
 | `make localnet-rewards-smoke` | **multi-node** finalization/claim determinism + cross-node app-hash agreement |
+| randomized state-machine simulations | fixed-seed CoreSlot lifecycle and rewards accounting invariant coverage across long random operation sequences |
 
 ## Key app-level tests
 

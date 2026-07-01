@@ -21,7 +21,7 @@ Omitted: `staking`, `distribution`, `slashing`, `governance`, `mint`.
 
 ```mermaid
 graph LR
-    Rewards -->|reads active slots, payout, reward weight| CoreSlot
+    Rewards -->|reads active slots, payout, reward-weight metadata| CoreSlot
     Rewards -->|mint / send utwlt| Bank
     Rewards -->|module addresses| Auth
     CoreSlot -->|validator updates| Runtime

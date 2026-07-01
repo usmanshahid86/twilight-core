@@ -53,11 +53,13 @@ cd website && npm install && npm run build   # onBrokenLinks/onBrokenAnchors: th
 Documentation rules:
 
 - Trace every documented behavior to actual code, an actual CLI command, or an
-  actual report. Otherwise mark it `:::note Pending confirmation`.
+  actual report. Otherwise, do not document it as supported behavior. If it must
+  be mentioned, place it under a clearly labeled "Known limitations" or "Planned
+  work" section.
 - No mainnet/production-ready claims. Distinguish production defaults from
   localnet/test settings. Keep the funded-fixture caveat where relevant.
 - Single-source numbers via `website/docs/_snippets/constants.mdx`.
-- CLI help captures under `website/generated/cli/` are audit artifacts; write
+- CLI help captures under `website/generated/cli/` are generated source material; write
   clean reference tables, don't paste walls of `--help`.
 
 ## Commit / PR conventions

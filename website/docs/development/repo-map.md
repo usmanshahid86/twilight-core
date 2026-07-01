@@ -10,7 +10,7 @@ Top-level layout of `twilight-core`.
 |---|---|
 | `app/` | App wiring (`app.go`), module/account config (`config.go`), encoding, params (`params/`). |
 | `x/coreslot/` | CoreSlot PoA module (validator authority, slots, reward weights). |
-| `x/rewards/` | Rewards module (emission, epochs, distribution, claims, params, invariants, events, query/CLI). |
+| `x/rewards/` | Rewards module (emission, epochs, allocation, claims, params, invariants, events, query/CLI). |
 | `cmd/twilightd/` | The `twilightd` binary and root command (`cmd/twilightd/cmd/root.go`). |
 | `scripts/localnet/` | Localnet `init`/`start`/`agree`/`stop` + `smoke.sh` + `rewards-smoke.sh` + soak/drill scripts. |
 | `proto/` | Protobuf definitions (`twilight.coreslot.v1`, `twilight.rewards.v1`). |
@@ -25,7 +25,7 @@ Top-level layout of `twilight-core`.
 | `keeper/emission.go` | Pure halving/subsidy/emission math. |
 | `keeper/beginblock.go` / `epoch.go` | Active-block crediting; epoch-boundary helpers. |
 | `keeper/endblock.go` / `finalize.go` | EndBlock gate; atomic finalization. |
-| `keeper/distribution.go` | Uniform active-block allocation. |
+| `keeper/distribution.go` | Active-block participation allocation. |
 | `keeper/claims.go` | Claim execution (grouped payout, atomic). |
 | `keeper/msg_server.go` | Msg handlers (claim, update-params, pause/resume). |
 | `keeper/query_server.go` | Read-only query server. |

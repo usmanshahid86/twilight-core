@@ -16,7 +16,7 @@ target and the authority drill target listed under *Planned* do not exist yet.
 | Target | Covers |
 |---|---|
 | `make localnet-smoke` | four-node startup + app/validators/next-validators hash agreement (default profile; does **not** close a rewards epoch) |
-| `make localnet-rewards-smoke` | four-node rewards finalization, exact minting/distribution, a real claim, and cross-node app-hash agreement before/after finalization and after claim |
+| `make localnet-rewards-smoke` | four-node rewards finalization, exact minting/allocation, a claim transaction, and cross-node app-hash agreement before/after finalization and after claim |
 | `make localnet-rewards-soak` | a long, continuous short-epoch run across many epoch boundaries; asserts carry-forward chaining, pending-param activation, pause/resume, and sustained multi-node agreement (basis of the endurance soak) |
 
 See [Localnet](../chain/localnet.md) for what each covers and the funded-fixture
