@@ -22,7 +22,7 @@ make localnet-rewards-smoke
 This starts a four-node network with a short rewards epoch, drives it through
 epoch finalization and a real claim, and asserts cross-node app-hash agreement.
 It prints a `PASS` summary with the minted emission, per-slot reward, and claim
-transaction hash. See [Localnet](../chain/localnet.md) for what it proves (and
+transaction hash. See [Localnet](../chain/localnet.md) for what it covers (and
 the funded-fixture caveat).
 
 ## 3. Query rewards state
@@ -57,5 +57,5 @@ See [Claims](../rewards/claims.md).
 make localnet-smoke
 ```
 
-This proves node startup and agreement on the **production default** profile; it
+This confirms node startup and agreement on the **production default** profile; it
 does **not** close a rewards epoch (the default epoch is 17,280 blocks).

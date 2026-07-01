@@ -4,20 +4,20 @@ title: Localnet Drills
 
 # Localnet Drills
 
-:::note Current status
+:::note Target availability
 The smoke and soak targets below are implemented. Zero-premine is already
 exercised today via the soak's `PREMINE=off` mode (it strips genesis balances and
 asserts supply rises only from emission); only the *dedicated* zero-premine smoke
-target and the authority drill target listed under *Pending* do not exist yet.
+target and the authority drill target listed under *Planned* do not exist yet.
 :::
 
 ## Available now
 
-| Target | Proves |
+| Target | Covers |
 |---|---|
 | `make localnet-smoke` | four-node startup + app/validators/next-validators hash agreement (default profile; does **not** close a rewards epoch) |
 | `make localnet-rewards-smoke` | four-node rewards finalization, exact minting/distribution, a real claim, and cross-node app-hash agreement before/after finalization and after claim |
-| `make localnet-rewards-soak` | a long, continuous short-epoch run across many epoch boundaries; asserts carry-forward chaining, pending-param activation, pause/resume, and sustained multi-node agreement (basis of the 48 h endurance soak) |
+| `make localnet-rewards-soak` | a long, continuous short-epoch run across many epoch boundaries; asserts carry-forward chaining, pending-param activation, pause/resume, and sustained multi-node agreement (basis of the endurance soak) |
 
 See [Localnet](../chain/localnet.md) for what each covers and the funded-fixture
 caveat.

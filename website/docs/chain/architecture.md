@@ -24,7 +24,7 @@ declared in `app/config.go`.
 
 ## Consensus and lifecycle interfaces
 
-This is the single most important architectural fact for auditors:
+This is the single most important architectural fact for anyone reasoning about consensus safety:
 
 - **CoreSlot uses the legacy ABCI EndBlock** interface
   (`module.HasABCIEndBlock`) and is the **sole emitter of validator updates**.
@@ -76,4 +76,3 @@ proposal flow. Validator authority and emergency authority are CoreSlot concepts
 | `x/rewards/` | Rewards module (emission, epochs, claims, params, invariants). |
 | `cmd/twilightd/` | The `twilightd` node + CLI binary. |
 | `scripts/localnet/` | Localnet init/start/agree/stop + smoke, soak, and drill scripts. |
-| `docs/research/` | Local-only development and validation notes (summarized under [Status & Validation](status-and-validation.md)). |

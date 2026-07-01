@@ -14,7 +14,7 @@ Top-level layout of `twilight-core`.
 | `cmd/twilightd/` | The `twilightd` binary and root command (`cmd/twilightd/cmd/root.go`). |
 | `scripts/localnet/` | Localnet `init`/`start`/`agree`/`stop` + `smoke.sh` + `rewards-smoke.sh` + soak/drill scripts. |
 | `proto/` | Protobuf definitions (`twilight.coreslot.v1`, `twilight.rewards.v1`). |
-| `docs/` | Pre-rewards markdown (architecture/operators/security/testing) + `docs/research/` (local-only research notes). |
+| `docs/` | Architecture, operator, security, and testing markdown. |
 | `website/` | This Docusaurus documentation site (isolated; does not affect Go builds). |
 | `Makefile` | `build`, `test`, `proto`, `localnet-smoke`, `localnet-rewards-smoke`, drills. |
 

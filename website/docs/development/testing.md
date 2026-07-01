@@ -4,7 +4,7 @@ title: Testing
 
 # Testing
 
-What to run, and which layer proves which risk. The pre-rewards CoreSlot test plan
+What to run, and which layer covers which risk. The CoreSlot test plan
 is in the repository at `docs/testing/coreslot-test-plan.md`.
 
 ## Commands
@@ -22,7 +22,7 @@ make localnet-smoke                      # node startup + agreement (no epoch cl
 make localnet-rewards-smoke              # multi-node finalization + claim
 ```
 
-## Which test proves which risk
+## Which test covers which risk
 
 | Layer | Risk covered |
 |---|---|
@@ -34,7 +34,7 @@ make localnet-rewards-smoke              # multi-node finalization + claim
 
 ## Key app-level tests
 
-| Test | Proves |
+| Test | Covers |
 |---|---|
 | `TestRewardsRuntimeDispatchFinalizeBlock` | the runtime actually dispatches rewards BeginBlock/EndBlock; exact supply delta |
 | `TestRewardsInitChainGenesisAccounts` | genesis creates module accounts with correct permissions |

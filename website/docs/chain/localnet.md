@@ -12,10 +12,10 @@ conflate them.
 Starts a four-node network on the **production default** profile and checks that
 all nodes agree.
 
-**Proves:** node startup and basic cross-node agreement (app hash, validators
+**Covers:** node startup and basic cross-node agreement (app hash, validators
 hash, next-validators hash) at a common height.
 
-**Does not prove:** rewards finalization. The default rewards epoch is 17,280
+**Does not cover:** rewards finalization. The default rewards epoch is 17,280
 blocks, so the default smoke (which reaches a low height) never closes a rewards
 epoch.
 
@@ -28,7 +28,7 @@ make localnet-smoke
 Starts an **isolated** four-node network (`/tmp/twilight-rewards-localnet`) with a
 short rewards epoch and drives it through epoch finalization and a real claim.
 
-**Proves:** rewards finalization, exact minting, uniform distribution, a real
+**Covers:** rewards finalization, exact minting, uniform distribution, a real
 claim transaction, and cross-node app-hash agreement before finalization, after
 finalization, and after the claim.
 
@@ -40,7 +40,7 @@ The script (`scripts/localnet/rewards-smoke.sh`) edits **only its own isolated
 generated genesis** to set `epoch_length_blocks = 10`; production defaults and the
 default smoke are untouched.
 
-### What it observed
+### What a short-epoch run produces
 
 | Stage | Height | Result |
 |---|---|---|

@@ -49,7 +49,7 @@ curl -s http://<node>/status | jq '.result.sync_info.latest_block_height'
 scripts/localnet/agree.sh
 ```
 
-`agree.sh` proves all nodes agree on **app hash**, **validators hash**, and
+`agree.sh` confirms all nodes agree on **app hash**, **validators hash**, and
 **next-validators hash** at a common height. App-hash divergence is a state fork —
 treat as critical (see [Incident Response](incident-response.md)).
 
