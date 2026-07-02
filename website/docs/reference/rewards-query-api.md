@@ -4,69 +4,39 @@ title: Rewards Query API
 
 # Rewards Query API
 
-Authoritative per-command reference for `twilightd rewards-query`. All commands
-are read-only. Narrative usage is in [Queries](../rewards/queries.md). Raw
-`--help` captures: `website/generated/cli/rewards-query-*-help.txt`.
+The **authoritative, always-current reference** is auto-generated from the chain's
+protobuf definitions — this page is a map, not a hand-maintained schema:
 
-The underlying gRPC service is `twilight.rewards.v1.Query`.
+- **Swagger / OpenAPI UI** — served by any node's REST endpoint at `/swagger/`
+  (the REST / gRPC-gateway for `twilight.rewards.v1.Query`).
+- **Proto** — `proto/twilight/rewards/v1/query.proto`.
+- **CLI** — `twilightd rewards-query --help`.
 
-## `params`
-Current rewards parameters. → `params` ([field list](../rewards/params.md)).
+For **narrative usage** (what to call and why), see [Queries](../rewards/queries.md).
 
-## `epoch-info`
-Open-epoch state. → `state` (`current_epoch`, `current_epoch_start_height`,
-`cumulative_emitted`, `carry_forward_remainder`), `current_epoch_config`,
-`current_epoch_end_height`, `has_pending_params`, `pending_params`.
+## Endpoints
 
-## `next-halving`
-Halving view. → `info`: `current_tier`, `current_block_subsidy`, `next_threshold`,
-`remaining_until_next_halving`, `cumulative_emitted`, `max_supply`,
-`has_next_halving`.
+`twilightd rewards-query` — all read-only:
 
-## `epoch-reward [epoch]`
-Finalized epoch aggregate. Args: `epoch` (uint, required, > 0). Returns
-`NotFound` if the epoch is not finalized. → `epoch_reward`: `epoch_number`,
-`start_height`, `end_height`, `minted_emission`, `carry_in`,
-`distributable_fees`, `treasury_amount`, `reward_pool`, `allocated_amount`,
-`carry_out`, `cumulative_emitted_after_epoch`, `rewards[]`.
+| Command | REST path | Returns |
+|---|---|---|
+| `params` | `/twilight/rewards/v1/params` | current parameters |
+| `epoch-info` | `/twilight/rewards/v1/epoch-info` | open-epoch state |
+| `epoch-reward [epoch]` | `/twilight/rewards/v1/epochs/{epoch_number}` | finalized epoch aggregate (`NotFound` if not finalized) |
+| `slot-rewards [slot-id]` | `/twilight/rewards/v1/slots/{slot_id}/rewards` | claim records — **paginated** |
+| `claimable [slot-id] [start] [end]` | `/twilight/rewards/v1/slots/{slot_id}/claimable` | unclaimed positive rewards in range |
+| `cumulative-emitted` | `/twilight/rewards/v1/cumulative-emitted` | cumulative emitted + max supply |
+| `next-halving` / `supply-schedule` | `/twilight/rewards/v1/{next-halving,supply-schedule}` | halving / subsidy view |
+| `current-active-blocks` | `/twilight/rewards/v1/current-epoch/active-blocks` | open-epoch active-block counters — **paginated** |
+| `module-balances` | `/twilight/rewards/v1/module-balances` | module balances (`utwlt`) |
 
-## `slot-rewards [slot-id]`
-Claim records for a slot. Args: `slot-id` (uint, required, > 0).
-**Paginated** (ascending epoch). → `rewards[]` (`slot_id`, `epoch_number`,
-`operator_address`, `payout_address`, `blocks_active`, `reward_weight`,
-`effective_weight`, `amount`, `claimed`, `claimed_at_height`), `pagination`.
+Full request/response field types are in the Swagger UI / proto. Paginated
+endpoints take the standard `--limit` / `--offset` / `--page` / `--page-key` /
+`--count-total` / `--reverse` flags; use a response's `next_key` as the next
+`--page-key`.
 
 :::note
-`reward_weight` is the CoreSlot snapshot and is **metadata-only — it has no payout
-effect in v1**. The payout (`amount`) is driven by `effective_weight`, which equals
-`blocks_active` for v1 active-block participation allocation. See [Rewards Economics](../rewards/economics.mdx).
+`reward_weight` on a claim record is the CoreSlot snapshot and is **metadata-only —
+no payout effect in v1**; the payout (`amount`) is by active-block participation.
+See [Rewards Economics](../rewards/economics.mdx).
 :::
-
-## `claimable [slot-id] [start-epoch] [end-epoch]`
-Unclaimed positive rewards in an inclusive range. Args all uint, required;
-`start ≤ end`. → `rewards[]`, `total_amount`.
-
-## `cumulative-emitted`
-→ `cumulative_emitted`, `max_supply`.
-
-## `supply-schedule`
-→ `params`, `next_halving` (same `NextHalvingInfo` as `next-halving`).
-
-## `current-active-blocks`
-Active-block counters for the open epoch. **Paginated** (ascending slot id).
-→ `epoch_number`, `active_blocks[]` (`slot_id`, `blocks_active`), `pagination`.
-
-## `module-balances`
-→ `denom` (`utwlt`), `rewards_balance`, `fee_pool_balance`.
-
-## Pagination flags
-
-`slot-rewards` and `current-active-blocks` accept `--limit`, `--offset`,
-`--page`, `--page-key`, `--count-total`, `--reverse`. Use the `next_key` from a
-response as the next `--page-key`. Other commands take no pagination flags.
-
-## Errors
-
-- Missing/zero required id → `InvalidArgument`.
-- Invalid range (`start > end`) → `InvalidArgument`.
-- Non-finalized `epoch-reward` → `NotFound`.
