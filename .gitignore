@@ -54,6 +54,10 @@ go.work.sum
 # Delve debugger temporary binaries
 __debug_bin
 
+# Claude Code — commit the shared .claude/settings.json (team policy); keep
+# personal overrides local and untracked.
+.claude/settings.local.json
+
 # Local Environment Variables
 # ---------------------------
 # Never commit credentials or secrets
