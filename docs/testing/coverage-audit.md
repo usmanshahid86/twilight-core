@@ -27,7 +27,7 @@ handwritten coverage; they inflate line counts and are not hand-tested.
 | Layer | Statement coverage | Notes |
 |---|---|---|
 | Raw integrated total | ~26% | diluted by generated code, `cmd/`, `tools/` (untested) |
-| Handwritten module code (mean/func) | ~67% | 235 handwritten funcs |
+| Handwritten module code (unweighted mean/func) | ~67% | weak metric — an unweighted per-function mean (a 1-line and a 100-line func count equally); prefer the statement-weighted per-package rows below |
 | `x/rewards/keeper` | ~80% | finalize / emission / claims funcs ~90% |
 | `x/coreslot/keeper` — business logic | ~86% | lifecycle, validator-set diff |
 | `x/coreslot/keeper/query_server.go` | ~18% | gRPC query handlers largely untested |
@@ -45,8 +45,10 @@ boilerplate (`module.go`, `codec.go`), or CLI wiring.
   `CoreSlots`, `ActiveCoreSlots`, `CoreSlotByOperator`, `RewardWeight`, …) lack Go unit tests.
 - **CLI layer** — `x/coreslot/client/cli/*` (tx, query, genesis) and part of the rewards CLI
   are covered only indirectly by localnet drills, not by Go tests.
-- **`FinalizeEpoch` wrapper** (`x/rewards/keeper/finalize.go`) shows 0% while the inner
-  `finalizeEpoch` is ~75%; confirm the production finalization entrypoint is the tested path.
+- **Dead `FinalizeEpoch` wrapper** — the production path is `AppModule.EndBlock →
+  keeper.EndBlock → finalizeEpoch` (`endblock.go`), and the inner `finalizeEpoch` is tested
+  (~75%). The exported `FinalizeEpoch` (`finalize.go:12`) has **no callers anywhere** and is
+  effectively dead code (a redundant second cache-context wrap); it should be removed, not tested.
 - **Boilerplate** (`module.go`, `codec.go`) — low value, deliberately not chased.
 
 ## Negative tests
@@ -93,5 +95,5 @@ tests.
 3. **Widen the seeded sims** — many more seeds in a nightly long job; persist failing seeds as a
    regression corpus; consider a property library for auto-shrinking.
 4. **App-level import/export determinism test** (the PoA analog of `TestAppImportExport`).
-5. **Confirm the `FinalizeEpoch` entrypoint coverage**; set a CI coverage floor on the keeper
-   packages (e.g. ≥ 80%) rather than chasing 100%.
+5. **Remove the dead `FinalizeEpoch` wrapper** (unused; the production path is `finalizeEpoch`);
+   set a CI coverage floor on the keeper packages (e.g. ≥ 80%) rather than chasing 100%.
