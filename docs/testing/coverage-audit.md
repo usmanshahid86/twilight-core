@@ -17,10 +17,14 @@ go test ./... -covermode=atomic -coverprofile=cover.out
 # Integrated coverage of the custom modules from ALL tests (app-level + sims count too):
 go test ./... -coverpkg=./x/...,./app/...,./cmd/... -coverprofile=cover-int.out
 go tool cover -func=cover-int.out
+
+# Handwritten-only view: drop generated files from the per-func report.
+go tool cover -func=cover-int.out | grep -vE '\.pb\.go|\.pb\.gw\.go|\.pulsar\.go'
 ```
 
 Generated files (`*.pb.go`, `*.pb.gw.go`, `*.pulsar.go`) are excluded when judging
-handwritten coverage; they inflate line counts and are not hand-tested.
+handwritten coverage (the `grep -v` above); they inflate line counts and are not
+hand-tested.
 
 ## Measured coverage
 
