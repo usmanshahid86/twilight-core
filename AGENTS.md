@@ -25,17 +25,22 @@ Denominations: base **`utwlt`** (accounting), display **`twlt`** (`TWLT`, 6 deci
 
 ## Setup & verify
 
-Requires **Go 1.25.x** (see `go.mod`). Run these before pushing — they mirror CI:
+Requires **Go 1.25.x** (see `go.mod`). Run these before pushing — they run the same
+checks CI enforces (the `make` targets are the local shorthand; CI is the source of
+truth and differs in a few ways noted inline):
 
 ```bash
-make build     # go build ./cmd/twilightd
+make build     # go build ./cmd/twilightd  (CI builds all packages: go build ./...)
 make test      # go test ./...
 make fmt       # gofmt
-make lint      # golangci-lint (v2.x; matches CI)
+make lint      # golangci-lint             (CI pins v2.12.2, gates only-new-issues)
 make vet       # go vet ./...
-make vuln      # govulncheck (blocking in CI)
+make vuln      # govulncheck               (CI pins @v1.5.0 and is blocking)
 make tidy      # go mod tidy must leave go.mod/go.sum clean
 ```
+
+For exact CI-parity build/test locally, run `go build ./...` and `go test ./...`
+directly; the pinned tool versions live in `.github/workflows/ci.yml`.
 
 Consensus/economic changes must also pass the local end-to-end checks:
 
