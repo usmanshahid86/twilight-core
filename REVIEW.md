@@ -34,7 +34,8 @@ Every PR must pass [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 - **build & test** — `go build ./...`, `go test ./...`
 - **golangci-lint** — static analysis (`.golangci.yml`)
 - **gofmt & tidy** — formatting and a clean `go mod tidy`
-- **govulncheck** — dependency vulnerability scan (informational / non-blocking)
+- **govulncheck** — dependency vulnerability scan; **blocking** (a newly reachable
+  advisory fails CI; advisories in modules the code does not call do not)
 
 Consensus/economic changes should also be exercised by the relevant **drills**
 (`make drills`) and, as they land, the **module simulations**.
