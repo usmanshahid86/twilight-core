@@ -21,11 +21,11 @@ func FuzzPubKeyAny(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, value string) {
-		any, err := pubKeyAny(value)
+		packed, err := pubKeyAny(value)
 		if err != nil {
 			return
 		}
-		if any == nil || any.TypeUrl != "/cosmos.crypto.ed25519.PubKey" || len(any.Value) == 0 {
+		if packed == nil || packed.TypeUrl != "/cosmos.crypto.ed25519.PubKey" || len(packed.Value) == 0 {
 			t.Fatalf("pubKeyAny(%q) returned a malformed Any on success", value)
 		}
 	})

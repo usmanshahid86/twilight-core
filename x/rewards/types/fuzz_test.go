@@ -1,6 +1,11 @@
 package types
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cosmos/cosmos-sdk/codec"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+)
 
 // The rewards params/genesis validation runs on untrusted input at genesis
 // (InitChain) and on every MsgUpdateRewardsParams. A panic there halts the
@@ -64,5 +69,32 @@ func FuzzRewardsParamsValidate(f *testing.F) {
 		}
 		// Property: validation classifies input; it must never panic.
 		_ = p.Validate()
+	})
+}
+
+// FuzzRewardsGenesisJSON fuzzes the real genesis deserialization surface used by
+// InitGenesis (rewards/module.go): cdc.UnmarshalJSON(raw, &GenesisState) followed
+// by Validate. Property: neither the JSON decode nor Validate panics on arbitrary
+// bytes. Seeded with a marshaled DefaultGenesis so the fuzzer mutates near-valid
+// documents, not just random noise.
+func FuzzRewardsGenesisJSON(f *testing.F) {
+	registry := codectypes.NewInterfaceRegistry()
+	RegisterInterfaces(registry)
+	cdc := codec.NewProtoCodec(registry)
+
+	if seed, err := cdc.MarshalJSON(DefaultGenesis()); err == nil {
+		f.Add(seed)
+	}
+	f.Add([]byte("{}"))
+	f.Add([]byte(""))
+	f.Add([]byte(`{"params":null}`))
+	f.Add([]byte(`{"params":{"native_denom":"utwlt","max_supply":"-1"}}`))
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		var gs GenesisState
+		if err := cdc.UnmarshalJSON(raw, &gs); err != nil {
+			return // malformed JSON is expected; we only care that it doesn't panic
+		}
+		_ = gs.Validate()
 	})
 }

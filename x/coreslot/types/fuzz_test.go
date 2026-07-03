@@ -1,6 +1,12 @@
 package types
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cosmos/cosmos-sdk/codec"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+)
 
 // CoreSlot params validation runs on untrusted input at genesis and on authority
 // param updates. Fuzz property: never panic — in particular the
@@ -37,5 +43,34 @@ func FuzzCoreSlotValidateWeight(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, weight string) {
 		_ = ValidateWeight(weight)
+	})
+}
+
+// FuzzCoreSlotGenesisJSON fuzzes the real genesis deserialization surface used by
+// InitGenesis (coreslot/module.go): cdc.UnmarshalJSON(raw, &GenesisState) followed
+// by Validate. The codec registers the crypto interfaces, so the consensus-key
+// Any inside a slot is resolved during decode. Property: neither the JSON decode
+// nor Validate panics on arbitrary bytes.
+func FuzzCoreSlotGenesisJSON(f *testing.F) {
+	registry := codectypes.NewInterfaceRegistry()
+	RegisterInterfaces(registry)
+	cdc := codec.NewProtoCodec(registry)
+
+	a := sdk.AccAddress(make([]byte, 20)).String()
+	b := sdk.AccAddress(append([]byte{1}, make([]byte, 19)...)).String()
+	if seed, err := cdc.MarshalJSON(DefaultGenesis(a, b)); err == nil {
+		f.Add(seed)
+	}
+	f.Add([]byte("{}"))
+	f.Add([]byte(""))
+	f.Add([]byte(`{"next_slot_id":"1"}`))
+	f.Add([]byte(`{"params":{"min_active_slots":"0","max_active_slots":"0"}}`))
+
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		var gs GenesisState
+		if err := cdc.UnmarshalJSON(raw, &gs); err != nil {
+			return // malformed JSON is expected; we only care that it doesn't panic
+		}
+		_ = gs.Validate()
 	})
 }
