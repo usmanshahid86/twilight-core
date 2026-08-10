@@ -8,6 +8,7 @@ import (
 
 	sdked25519 "github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/query"
 
 	"github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
@@ -109,4 +110,108 @@ func TestReservedConsensusAddressQuery_RemovalLifecycle(t *testing.T) {
 	require.Equal(t, uint64(1), resp.Reservation.SlotId)
 	require.Equal(t, "decommission", resp.Reservation.Reason)
 	require.NotZero(t, resp.Reservation.ReservedUntil)
+}
+
+func TestCoreSlotsQueryPagination(t *testing.T) {
+	k, ctx, authority, emergency := setup(t)
+	params := types.DefaultParams(authority, emergency)
+	_, err := k.InitGenesis(ctx, &types.GenesisState{
+		Params: &params,
+		Slots: []*types.CoreSlot{
+			querySlot(t, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower),
+			querySlot(t, 2, types.SlotStatus_SLOT_STATUS_INACTIVE, 0),
+			querySlot(t, 3, types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower),
+			querySlot(t, 4, types.SlotStatus_SLOT_STATUS_SUSPENDED, 0),
+			querySlot(t, 5, types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower),
+		},
+		NextSlotId: 6,
+	})
+	require.NoError(t, err)
+
+	qs := keeper.NewQueryServer(k)
+
+	page1, err := qs.CoreSlots(ctx, &types.QueryCoreSlotsRequest{
+		Pagination: &query.PageRequest{Limit: 2, CountTotal: true},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1, 2}, querySlotIDs(page1.Slots))
+	require.NotNil(t, page1.Pagination)
+	require.NotEmpty(t, page1.Pagination.NextKey)
+	require.Equal(t, uint64(5), page1.Pagination.Total)
+
+	page2, err := qs.CoreSlots(ctx, &types.QueryCoreSlotsRequest{
+		Pagination: &query.PageRequest{Key: page1.Pagination.NextKey, Limit: 2},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{3, 4}, querySlotIDs(page2.Slots))
+	require.NotEmpty(t, page2.Pagination.NextKey)
+
+	page3, err := qs.CoreSlots(ctx, &types.QueryCoreSlotsRequest{
+		Pagination: &query.PageRequest{Key: page2.Pagination.NextKey, Limit: 2},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{5}, querySlotIDs(page3.Slots))
+	require.Empty(t, page3.Pagination.NextKey)
+
+	reverse, err := qs.CoreSlots(ctx, &types.QueryCoreSlotsRequest{
+		Pagination: &query.PageRequest{Limit: 2, Reverse: true},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{5, 4}, querySlotIDs(reverse.Slots))
+	require.NotEmpty(t, reverse.Pagination.NextKey)
+
+	activePage1, err := qs.CoreSlots(ctx, &types.QueryCoreSlotsRequest{
+		Status:     types.SlotStatus_SLOT_STATUS_ACTIVE,
+		Pagination: &query.PageRequest{Limit: 2},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1, 3}, querySlotIDs(activePage1.Slots))
+	require.NotEmpty(t, activePage1.Pagination.NextKey)
+	for _, slot := range activePage1.Slots {
+		require.Equal(t, types.SlotStatus_SLOT_STATUS_ACTIVE, slot.Status)
+	}
+
+	activePage2, err := qs.CoreSlots(ctx, &types.QueryCoreSlotsRequest{
+		Status:     types.SlotStatus_SLOT_STATUS_ACTIVE,
+		Pagination: &query.PageRequest{Key: activePage1.Pagination.NextKey, Limit: 2},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{5}, querySlotIDs(activePage2.Slots))
+	require.Empty(t, activePage2.Pagination.NextKey)
+	for _, slot := range activePage2.Slots {
+		require.Equal(t, types.SlotStatus_SLOT_STATUS_ACTIVE, slot.Status)
+	}
+
+	active, err := qs.ActiveCoreSlots(ctx, &types.QueryActiveCoreSlotsRequest{})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{1, 3, 5}, querySlotIDs(active.Slots))
+	require.Nil(t, active.Pagination)
+
+	emptyKeeper, emptyCtx, _, _ := setup(t)
+	empty, err := keeper.NewQueryServer(emptyKeeper).CoreSlots(emptyCtx, &types.QueryCoreSlotsRequest{
+		Pagination: &query.PageRequest{Limit: 2},
+	})
+	require.NoError(t, err)
+	require.Empty(t, empty.Slots)
+	require.NotNil(t, empty.Pagination)
+	require.Empty(t, empty.Pagination.NextKey)
+}
+
+func querySlot(t *testing.T, id uint64, status types.SlotStatus, power int64) *types.CoreSlot {
+	t.Helper()
+	return slot(t, id, queryOperator(byte(id+20)), byte(id), status, power)
+}
+
+func queryOperator(marker byte) string {
+	addr := make([]byte, 20)
+	addr[0] = marker
+	return sdk.AccAddress(addr).String()
+}
+
+func querySlotIDs(slots []*types.CoreSlot) []uint64 {
+	ids := make([]uint64, 0, len(slots))
+	for _, slot := range slots {
+		ids = append(ids, slot.SlotId)
+	}
+	return ids
 }
