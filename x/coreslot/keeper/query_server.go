@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/hex"
 
+	"github.com/cosmos/cosmos-sdk/types/query"
+
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
@@ -22,19 +24,41 @@ func (q queryServer) CoreSlot(ctx context.Context, req *types.QueryCoreSlotReque
 }
 
 func (q queryServer) CoreSlots(ctx context.Context, req *types.QueryCoreSlotsRequest) (*types.QueryCoreSlotsResponse, error) {
+	var pageReq *query.PageRequest
+	status := types.SlotStatus_SLOT_STATUS_UNSPECIFIED
+	if req != nil {
+		pageReq = req.Pagination
+		status = req.Status
+	}
+
+	slots, pageRes, err := query.CollectionFilteredPaginate(
+		ctx,
+		q.Slots,
+		pageReq,
+		func(_ uint64, slot types.CoreSlot) (bool, error) {
+			return status == types.SlotStatus_SLOT_STATUS_UNSPECIFIED || status == slot.Status, nil
+		},
+		func(_ uint64, slot types.CoreSlot) (*types.CoreSlot, error) {
+			slotCopy := slot
+			return &slotCopy, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryCoreSlotsResponse{Slots: slots, Pagination: pageRes}, nil
+}
+
+func (q queryServer) ActiveCoreSlots(ctx context.Context, _ *types.QueryActiveCoreSlotsRequest) (*types.QueryCoreSlotsResponse, error) {
 	resp := &types.QueryCoreSlotsResponse{}
 	err := q.Slots.Walk(ctx, nil, func(_ uint64, slot types.CoreSlot) (bool, error) {
-		if req.Status == types.SlotStatus_SLOT_STATUS_UNSPECIFIED || req.Status == slot.Status {
+		if slot.Status == types.SlotStatus_SLOT_STATUS_ACTIVE {
 			slotCopy := slot
 			resp.Slots = append(resp.Slots, &slotCopy)
 		}
 		return false, nil
 	})
 	return resp, err
-}
-
-func (q queryServer) ActiveCoreSlots(ctx context.Context, _ *types.QueryActiveCoreSlotsRequest) (*types.QueryCoreSlotsResponse, error) {
-	return q.CoreSlots(ctx, &types.QueryCoreSlotsRequest{Status: types.SlotStatus_SLOT_STATUS_ACTIVE})
 }
 
 func (q queryServer) CoreSlotByOperator(ctx context.Context, req *types.QueryCoreSlotByOperatorRequest) (*types.QueryCoreSlotResponse, error) {
