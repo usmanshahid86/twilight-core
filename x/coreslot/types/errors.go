@@ -20,4 +20,10 @@ var (
 	ErrCannotRemoveLastValidator = errorsmod.Register(ModuleName, 12, "operation would remove the last active validator")
 	// ErrInvalidGenesis is returned for genesis consistency violations (F7).
 	ErrInvalidGenesis = errorsmod.Register(ModuleName, 13, "invalid core slot genesis")
+	// ErrInvalidAddress is returned when an operator or payout address fails the
+	// canonical economic-address rule (§25) — malformed, empty, a module account,
+	// or a destination the bank module blocks. The specific cause is carried in
+	// the wrapped message; it is a distinct code from ErrInvalidParams because a
+	// rejected payee is an admission failure, not a parameter fault.
+	ErrInvalidAddress = errorsmod.Register(ModuleName, 14, "invalid economic address")
 )

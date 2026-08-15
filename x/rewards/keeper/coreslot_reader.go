@@ -8,6 +8,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
 type SlotRewardSnapshot struct {
@@ -46,13 +47,23 @@ func (k Keeper) GetSlotRewardSnapshot(ctx context.Context, slotID uint64) (SlotR
 }
 
 func (k Keeper) slotRewardSnapshot(ctx context.Context, slot coreslottypes.CoreSlot) (SlotRewardSnapshot, error) {
-	operator, err := sdk.AccAddressFromBech32(slot.OperatorAddress)
+	// This is the §25 entitlement payout-snapshot boundary: the point at which a
+	// stored CoreSlot address becomes a reward destination. CoreSlot admission
+	// should already have guaranteed these values, so the check is defensive —
+	// but a snapshot is exactly where a value that entered state before this rule
+	// existed, or through some future path, would otherwise be laundered into a
+	// payout.
+	//
+	// Only the payout address is a destination. The operator address is carried
+	// on the snapshot as identity and is parsed, not economically validated; the
+	// parsed forms are reused rather than decoded again.
+	operator, err := k.economicAddresses.ParseAccountAddress(slot.OperatorAddress)
 	if err != nil {
-		return SlotRewardSnapshot{}, err
+		return SlotRewardSnapshot{}, types.ErrInvalidAddress.Wrapf("slot %d operator address: %v", slot.SlotId, err)
 	}
-	payout, err := sdk.AccAddressFromBech32(slot.PayoutAddress)
+	payout, err := k.economicAddresses.Validate(slot.PayoutAddress)
 	if err != nil {
-		return SlotRewardSnapshot{}, err
+		return SlotRewardSnapshot{}, types.ErrInvalidAddress.Wrapf("slot %d payout address: %v", slot.SlotId, err)
 	}
 	weight, err := k.coreSlotKeeper.GetRewardWeight(ctx, slot.SlotId)
 	if err != nil {

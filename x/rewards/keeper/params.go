@@ -17,6 +17,9 @@ func (k Keeper) SetParams(ctx context.Context, params types.Params) error {
 	if err := params.Validate(); err != nil {
 		return err
 	}
+	if err := k.validateParamsTreasury("params", params); err != nil {
+		return err
+	}
 	return k.Params.Set(ctx, params)
 }
 
@@ -34,6 +37,9 @@ func (k Keeper) SetPendingParams(ctx context.Context, params types.Params) error
 		return err
 	}
 	if err := types.ValidateUpdate(current, params); err != nil {
+		return err
+	}
+	if err := k.validateParamsTreasury("pending params", params); err != nil {
 		return err
 	}
 	return k.PendingParams.Set(ctx, params)

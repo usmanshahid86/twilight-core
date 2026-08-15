@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"fmt"
 
 	"cosmossdk.io/collections"
 
@@ -10,6 +11,18 @@ import (
 
 func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) error {
 	if err := types.ValidateGenesis(genState); err != nil {
+		return err
+	}
+	// Canonical economic-address preflight (§25) over the COMPLETE input, before
+	// the first write.
+	//
+	// The writes below are sequential — params, state, epoch config, pending
+	// params, then every finalized epoch and claim record. Each individual setter
+	// now enforces the rule, so an invalid address is always caught; but caught in
+	// the loop it would be caught after params and the earlier records had already
+	// been persisted, leaving a partially imported module behind a returned error.
+	// Checking everything first makes rejection total.
+	if err := k.validateGenesisEconomicAddresses(genState); err != nil {
 		return err
 	}
 	if err := k.SetParams(ctx, *genState.Params); err != nil {
@@ -33,6 +46,54 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 	}
 	for _, reward := range genState.ClaimRecords {
 		if err := k.SetClaimRecord(ctx, *reward); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateGenesisEconomicAddresses applies the canonical rule to every economic
+// address the rewards genesis state would persist or later use.
+//
+// The inventory is the complete set of persisted address-bearing fields: the
+// treasury destination of the active params, of any pending params, and of the
+// current epoch configuration; and, for each finalized epoch, the treasury
+// destination inside its embedded configuration together with the operator and
+// payout addresses of every embedded reward — plus the same pair on every
+// standalone claim record.
+func (k Keeper) validateGenesisEconomicAddresses(genState types.GenesisState) error {
+	if genState.Params != nil {
+		if err := k.validateParamsTreasury("genesis params", *genState.Params); err != nil {
+			return err
+		}
+	}
+	if genState.HasPendingParams && genState.PendingParams != nil {
+		if err := k.validateParamsTreasury("genesis pending params", *genState.PendingParams); err != nil {
+			return err
+		}
+	}
+	if genState.CurrentEpochConfig != nil {
+		if err := k.validateSnapshotTreasury("genesis current epoch config", *genState.CurrentEpochConfig); err != nil {
+			return err
+		}
+	}
+	for _, epoch := range genState.FinalizedEpochs {
+		if epoch == nil {
+			continue
+		}
+		if err := k.validateFinalizedEpochAddresses(
+			fmt.Sprintf("genesis finalized epoch %d", epoch.EpochNumber), *epoch,
+		); err != nil {
+			return err
+		}
+	}
+	for _, reward := range genState.ClaimRecords {
+		if reward == nil {
+			continue
+		}
+		if err := k.validateRewardRecord(
+			fmt.Sprintf("genesis claim record slot %d epoch %d", reward.SlotId, reward.EpochNumber), reward,
+		); err != nil {
 			return err
 		}
 	}

@@ -25,6 +25,12 @@ func (k Keeper) claimRewards(ctx context.Context, msg *types.MsgClaimRewards) er
 	if msg == nil || msg.SlotId == 0 || msg.StartEpoch == 0 || msg.EndEpoch < msg.StartEpoch {
 		return types.ErrInvalidState.Wrap("invalid claim range")
 	}
+	// The signer is a CONTROL identity, not a value destination: rewards are sent
+	// to each record's stored payout address regardless of who submits the claim.
+	// It therefore keeps syntax-only validation. Applying the economic rule here
+	// would refuse a perfectly legitimate claim submitted on an operator's behalf
+	// by a relayer whose own address happened to be blocked, without protecting
+	// anything — no value reaches the signer.
 	if _, err := sdk.AccAddressFromBech32(msg.Signer); err != nil {
 		return types.ErrInvalidState.Wrapf("claim signer: %v", err)
 	}
@@ -66,8 +72,11 @@ func (k Keeper) claimRewards(ctx context.Context, msg *types.MsgClaimRewards) er
 		if err != nil || !amount.IsPositive() {
 			return types.ErrInvalidState.Wrapf("claim amount must be positive for epoch %d", epoch)
 		}
-		if _, err := sdk.AccAddressFromBech32(record.PayoutAddress); err != nil {
-			return types.ErrInvalidState.Wrapf("claim payout address: %v", err)
+		// Defensive revalidation immediately before money moves. The record was
+		// admitted canonically when written, but this is the last point at which a
+		// bad destination can still be refused.
+		if _, err := k.economicAddresses.Validate(record.PayoutAddress); err != nil {
+			return types.ErrInvalidAddress.Wrapf("claim payout address: %v", err)
 		}
 		groupAmount, found := groups[record.PayoutAddress]
 		if !found {
@@ -94,7 +103,13 @@ func (k Keeper) claimRewards(ctx context.Context, msg *types.MsgClaimRewards) er
 	}
 	sort.Strings(payouts)
 	for _, payout := range payouts {
-		address, _ := sdk.AccAddressFromBech32(payout)
+		// Reuse the canonical parse instead of a second, error-ignoring one. The
+		// discarded error in the previous form was the real hazard: a payout that
+		// failed to parse became the zero address and the transfer proceeded.
+		address, err := k.economicAddresses.Validate(payout)
+		if err != nil {
+			return types.ErrInvalidAddress.Wrapf("claim payout address: %v", err)
+		}
 		if err := k.bankKeeper.SendCoinsFromModuleToAccount(
 			ctx,
 			types.ModuleName,

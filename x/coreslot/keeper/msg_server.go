@@ -44,11 +44,20 @@ func (m msgServer) RegisterCoreSlot(ctx context.Context, msg *types.MsgRegisterC
 	if msg.Authority != params.Authority && !(params.AllowSelfRegistration && msg.Authority == msg.OperatorAddress) {
 		return nil, types.ErrUnauthorized
 	}
-	if _, err := sdk.AccAddressFromBech32(msg.OperatorAddress); err != nil {
-		return nil, err
+	// Address admission, after the authorization check so an unauthorized caller
+	// learns nothing about which addresses the chain would accept, and before any
+	// state is touched.
+	//
+	// The two fields are held to DIFFERENT rules on purpose. The operator address
+	// is a control identity: §18 requires it to be valid, but the protocol never
+	// sends to it, so refusing a bank-blocked operator would deny an operator the
+	// protocol permits. The payout address is where value actually goes and takes
+	// the full canonical economic rule (§25).
+	if _, err := m.economicAddresses.ParseAccountAddress(msg.OperatorAddress); err != nil {
+		return nil, types.ErrInvalidAddress.Wrapf("operator address: %v", err)
 	}
-	if _, err := sdk.AccAddressFromBech32(msg.PayoutAddress); err != nil {
-		return nil, err
+	if _, err := m.economicAddresses.Validate(msg.PayoutAddress); err != nil {
+		return nil, types.ErrInvalidAddress.Wrapf("payout address: %v", err)
 	}
 	if err := types.ValidateMetadata(msg.Metadata); err != nil {
 		return nil, err
@@ -328,8 +337,11 @@ func (m msgServer) UpdatePayoutAddress(ctx context.Context, msg *types.MsgUpdate
 	if msg.Operator != slot.OperatorAddress {
 		return nil, types.ErrUnauthorized
 	}
-	if _, err := sdk.AccAddressFromBech32(msg.NewPayoutAddress); err != nil {
-		return nil, err
+	// The stored operator identity was admitted canonically at registration and
+	// is the authorization subject here, not a value destination; only the new
+	// payout address is a fresh economic admission.
+	if _, err := m.economicAddresses.Validate(msg.NewPayoutAddress); err != nil {
+		return nil, types.ErrInvalidAddress.Wrapf("payout address: %v", err)
 	}
 	slot.PayoutAddress, slot.UpdatedHeight = msg.NewPayoutAddress, sdk.UnwrapSDKContext(ctx).BlockHeight()
 	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {

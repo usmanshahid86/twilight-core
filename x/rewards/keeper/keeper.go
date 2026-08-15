@@ -9,6 +9,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/twilight-project/twilight-core/internal/economicaddress"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
@@ -38,6 +39,12 @@ type Keeper struct {
 	bankKeeper     BankKeeper
 	coreSlotKeeper CoreSlotKeeper
 
+	// economicAddresses is the app-derived canonical rule for addresses that
+	// receive value (§25). It is the same value x/coreslot holds, injected rather
+	// than rebuilt, so the two modules cannot come to disagree about what a
+	// payable address is.
+	economicAddresses economicaddress.Validator
+
 	Schema             collections.Schema
 	Params             collections.Item[types.Params]
 	PendingParams      collections.Item[types.Params]
@@ -54,6 +61,7 @@ func NewKeeper(
 	accountKeeper AccountKeeper,
 	bankKeeper BankKeeper,
 	coreSlotKeeper CoreSlotKeeper,
+	economicAddresses economicaddress.Validator,
 ) Keeper {
 	sb := collections.NewSchemaBuilder(storeService)
 	pairKey := collections.PairKeyCodec(collections.Uint64Key, collections.Uint64Key)
@@ -62,6 +70,7 @@ func NewKeeper(
 		accountKeeper:      accountKeeper,
 		bankKeeper:         bankKeeper,
 		coreSlotKeeper:     coreSlotKeeper,
+		economicAddresses:  economicAddresses,
 		Params:             collections.NewItem(sb, types.ParamsKey, "params", codec.CollValue[types.Params](cdc)),
 		PendingParams:      collections.NewItem(sb, types.PendingParamsKey, "pending_params", codec.CollValue[types.Params](cdc)),
 		State:              collections.NewItem(sb, types.StateKey, "state", codec.CollValue[types.RewardsState](cdc)),

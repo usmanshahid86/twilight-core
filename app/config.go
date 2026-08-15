@@ -15,6 +15,37 @@ import (
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
+// moduleAccountPermissions is the single authoritative declaration of this
+// chain's module accounts.
+//
+// It feeds two consumers that must never disagree: the auth module's own
+// configuration below, and the economic-address validator, which has to know
+// which addresses are module accounts in order to refuse them as payees. A
+// second hand-maintained list would be a denylist that drifts the first time
+// someone adds a module account and updates only one of the two — which is
+// exactly what §25 forbids.
+var moduleAccountPermissions = []*authmodulev1.ModuleAccountPermission{
+	{Account: authtypes.FeeCollectorName},
+	{Account: AuthorityModuleName},
+	{Account: EmergencyAuthorityModuleName},
+	// rewards is the only minter; the fee pool holds no
+	// permissions and stays dormant in v1.
+	{Account: rewardstypes.ModuleName, Permissions: []string{authtypes.Minter}},
+	{Account: rewardstypes.FeePoolName},
+}
+
+// ModuleAccountNames returns the module-account names declared above, in
+// declaration order. It is derived from the same value the auth module is
+// configured with, so a module account cannot exist without the economic-address
+// validator knowing about it.
+func ModuleAccountNames() []string {
+	names := make([]string, 0, len(moduleAccountPermissions))
+	for _, permission := range moduleAccountPermissions {
+		names = append(names, permission.Account)
+	}
+	return names
+}
+
 var AppConfig = depinject.Configs(
 	appconfig.Compose(&appv1alpha1.Config{
 		Modules: []*appv1alpha1.ModuleConfig{
@@ -37,17 +68,9 @@ var AppConfig = depinject.Configs(
 			{
 				Name: "auth",
 				Config: appconfig.WrapAny(&authmodulev1.Module{
-					Bech32Prefix: AccountPrefix,
-					ModuleAccountPermissions: []*authmodulev1.ModuleAccountPermission{
-						{Account: authtypes.FeeCollectorName},
-						{Account: AuthorityModuleName},
-						{Account: EmergencyAuthorityModuleName},
-						// rewards is the only minter; the fee pool holds no
-						// permissions and stays dormant in v1.
-						{Account: rewardstypes.ModuleName, Permissions: []string{authtypes.Minter}},
-						{Account: rewardstypes.FeePoolName},
-					},
-					Authority: AuthorityModuleName,
+					Bech32Prefix:             AccountPrefix,
+					ModuleAccountPermissions: moduleAccountPermissions,
+					Authority:                AuthorityModuleName,
 				}),
 			},
 			{Name: "bank", Config: appconfig.WrapAny(&bankmodulev1.Module{Authority: AuthorityModuleName})},

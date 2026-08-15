@@ -14,11 +14,18 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	gogoproto "github.com/cosmos/gogoproto/proto"
 
+	"github.com/twilight-project/twilight-core/internal/economicaddress"
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 type Keeper struct {
 	cdc codec.Codec
+
+	// economicAddresses is the app-derived canonical rule for addresses that
+	// receive value (§25). It is a plain value, not a keeper: x/coreslot must
+	// gain no dependency on bank, auth, x/rewards or a future x/mining, and the
+	// keeper DAG is unchanged by holding it.
+	economicAddresses economicaddress.Validator
 
 	Schema        collections.Schema
 	Params        collections.Item[types.Params]
@@ -32,19 +39,24 @@ type Keeper struct {
 	NextSlotID    collections.Item[uint64]
 }
 
-func NewKeeper(cdc codec.Codec, storeService storetypes.KVStoreService) Keeper {
+// NewKeeper builds the CoreSlot keeper. economicAddresses is required: an
+// unconfigured validator rejects every address, so a caller that omits it fails
+// loudly at the first registration rather than silently admitting module
+// accounts as payees.
+func NewKeeper(cdc codec.Codec, storeService storetypes.KVStoreService, economicAddresses economicaddress.Validator) Keeper {
 	sb := collections.NewSchemaBuilder(storeService)
 	k := Keeper{
-		cdc:           cdc,
-		Params:        collections.NewItem(sb, collections.NewPrefix(types.ParamsKey), "params", codec.CollValue[types.Params](cdc)),
-		Slots:         collections.NewMap(sb, collections.NewPrefix(types.SlotsPrefix), "slots", collections.Uint64Key, codec.CollValue[types.CoreSlot](cdc)),
-		ByOperator:    collections.NewMap(sb, collections.NewPrefix(types.OperatorPrefix), "slot_by_operator", collections.StringKey, collections.Uint64Value),
-		ByConsensus:   collections.NewMap(sb, collections.NewPrefix(types.ConsensusPrefix), "slot_by_consensus", collections.StringKey, collections.Uint64Value),
-		Reserved:      collections.NewMap(sb, collections.NewPrefix(types.ReservedPrefix), "reserved_consensus", collections.StringKey, codec.CollValue[types.ReservedConsensusAddress](cdc)),
-		Rotations:     collections.NewMap(sb, collections.NewPrefix(types.RotationsPrefix), "pending_rotations", collections.Uint64Key, codec.CollValue[types.PendingKeyRotation](cdc)),
-		LastApplied:   collections.NewMap(sb, collections.NewPrefix(types.LastPrefix), "last_applied", collections.StringKey, codec.CollValue[types.LastAppliedValidator](cdc)),
-		RewardWeights: collections.NewMap(sb, collections.NewPrefix(types.RewardsPrefix), "reward_weights", collections.Uint64Key, codec.CollValue[types.OperatorRewardWeight](cdc)),
-		NextSlotID:    collections.NewItem(sb, collections.NewPrefix(types.NextSlotIDKey), "next_slot_id", collections.Uint64Value),
+		cdc:               cdc,
+		economicAddresses: economicAddresses,
+		Params:            collections.NewItem(sb, collections.NewPrefix(types.ParamsKey), "params", codec.CollValue[types.Params](cdc)),
+		Slots:             collections.NewMap(sb, collections.NewPrefix(types.SlotsPrefix), "slots", collections.Uint64Key, codec.CollValue[types.CoreSlot](cdc)),
+		ByOperator:        collections.NewMap(sb, collections.NewPrefix(types.OperatorPrefix), "slot_by_operator", collections.StringKey, collections.Uint64Value),
+		ByConsensus:       collections.NewMap(sb, collections.NewPrefix(types.ConsensusPrefix), "slot_by_consensus", collections.StringKey, collections.Uint64Value),
+		Reserved:          collections.NewMap(sb, collections.NewPrefix(types.ReservedPrefix), "reserved_consensus", collections.StringKey, codec.CollValue[types.ReservedConsensusAddress](cdc)),
+		Rotations:         collections.NewMap(sb, collections.NewPrefix(types.RotationsPrefix), "pending_rotations", collections.Uint64Key, codec.CollValue[types.PendingKeyRotation](cdc)),
+		LastApplied:       collections.NewMap(sb, collections.NewPrefix(types.LastPrefix), "last_applied", collections.StringKey, codec.CollValue[types.LastAppliedValidator](cdc)),
+		RewardWeights:     collections.NewMap(sb, collections.NewPrefix(types.RewardsPrefix), "reward_weights", collections.Uint64Key, codec.CollValue[types.OperatorRewardWeight](cdc)),
+		NextSlotID:        collections.NewItem(sb, collections.NewPrefix(types.NextSlotIDKey), "next_slot_id", collections.Uint64Value),
 	}
 	schema, err := sb.Build()
 	if err != nil {

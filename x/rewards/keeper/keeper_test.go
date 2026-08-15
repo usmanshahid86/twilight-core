@@ -121,7 +121,7 @@ func setupKeeper(t *testing.T, coreSlotKeeper keeper.CoreSlotKeeper) (keeper.Kee
 	cms := integration.CreateMultiStore(keys, log.NewNopLogger())
 	ctx := sdk.NewContext(cms, cmtproto.Header{Height: 1}, false, log.NewNopLogger())
 	bank := &bankKeeperMock{}
-	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(keys[types.StoreKey]), accountKeeperMock{}, bank, coreSlotKeeper)
+	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(keys[types.StoreKey]), accountKeeperMock{}, bank, coreSlotKeeper, testEconomicAddresses(t))
 	return k, ctx, bank
 }
 
