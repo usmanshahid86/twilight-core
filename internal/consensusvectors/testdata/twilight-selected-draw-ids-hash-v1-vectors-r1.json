@@ -1,0 +1,93 @@
+{
+  "artifact": "twilight-selected-draw-ids-hash-v1-vectors",
+  "version": 1,
+  "revision": 1,
+  "normative": true,
+  "domain": "TWILIGHT/PARTICIPANT-SELECTION/SELECTED-DRAW-IDS/V1",
+  "encoding": "SHA256(domain || ChainIDEncoding || U64BE(slot_id) || U64BE(target_epoch) || U64BE(n) || ordered raw 32-byte ids)",
+  "vectors": [
+    {
+      "name": "empty",
+      "chain_id": "twilight-1",
+      "slot_id": "7",
+      "target_epoch": "1042",
+      "selected_draw_ids": [],
+      "expected_hash": "a40037c6b3be1fbf4b13842d194b47e568e2e33cfdb4410be530d1d6dd5d2f3c"
+    },
+    {
+      "name": "single",
+      "chain_id": "twilight-1",
+      "slot_id": "7",
+      "target_epoch": "1042",
+      "selected_draw_ids": [
+        "0000000000000000000000000000000000000000000000000000000000000001"
+      ],
+      "expected_hash": "c09e41ff18754175b6170e795d50514d20c6dc881e813fb37eac553c8d5a121c"
+    },
+    {
+      "name": "ordered-three",
+      "chain_id": "twilight-1",
+      "slot_id": "7",
+      "target_epoch": "1042",
+      "selected_draw_ids": [
+        "0000000000000000000000000000000000000000000000000000000000000001",
+        "1111111111111111111111111111111111111111111111111111111111111111",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "expected_hash": "da04eabeecf184aa407488c6048e09dc5be562e12a01caed7c6a8d2105e54b36"
+    },
+    {
+      "name": "epoch-domain-separation",
+      "chain_id": "twilight-1",
+      "slot_id": "7",
+      "target_epoch": "1043",
+      "selected_draw_ids": [
+        "0000000000000000000000000000000000000000000000000000000000000001",
+        "1111111111111111111111111111111111111111111111111111111111111111",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "expected_hash": "205b7c43306d2210456f8a53ccaa696b612bd4a1cb0bc50250b301a10e2e0b65"
+    },
+    {
+      "name": "slot-domain-separation",
+      "chain_id": "twilight-1",
+      "slot_id": "8",
+      "target_epoch": "1042",
+      "selected_draw_ids": [
+        "0000000000000000000000000000000000000000000000000000000000000001",
+        "1111111111111111111111111111111111111111111111111111111111111111",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "expected_hash": "54f632174f6866b2fbf8b53b0d075cee0db4533373702a1fb5c09f3873dddb38"
+    },
+    {
+      "name": "reordered-three",
+      "chain_id": "twilight-1",
+      "slot_id": "7",
+      "target_epoch": "1042",
+      "selected_draw_ids": [
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "1111111111111111111111111111111111111111111111111111111111111111",
+        "0000000000000000000000000000000000000000000000000000000000000001"
+      ],
+      "expected_hash": "a474f5ec61c43a088617f7f21796829884739239d57dd3b0b3fbb7d0c22c353b"
+    },
+    {
+      "name": "chain-id-domain-separation",
+      "chain_id": "twilight-2",
+      "slot_id": "7",
+      "target_epoch": "1042",
+      "selected_draw_ids": [
+        "0000000000000000000000000000000000000000000000000000000000000001",
+        "1111111111111111111111111111111111111111111111111111111111111111",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "expected_hash": "7318ff5dc420cc78ada4fc15593b059a44f34d03d7c76fc50413a8db412e7e04"
+    }
+  ],
+  "negative_requirements": [
+    "reordering selected ids changes the hash",
+    "count is derived from exact list length",
+    "every selected id is exactly 32 raw bytes"
+  ]
+}

@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -26,6 +26,14 @@ vuln:
 
 tidy:
 	go mod tidy
+
+# Protocol-vector conformance. Runs the tracked normative vector packs
+# (internal/consensusvectors/testdata) against the production and
+# production-intended functions that implement them. Runs the same script as CI,
+# so the two cannot drift. Nothing is downloaded at run time; the gate executes
+# the repository's own committed bytes.
+consensus-vectors:
+	./scripts/consensus-vectors.sh
 
 proto:
 	PATH="$${PATH}:$$(go env GOPATH)/bin" ./scripts/protocgen.sh

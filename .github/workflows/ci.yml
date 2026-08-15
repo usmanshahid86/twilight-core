@@ -28,6 +28,30 @@ jobs:
       - name: Test
         run: go test -count=1 ./...
 
+  consensus-vectors:
+    name: consensus vectors
+    runs-on: ubuntu-latest
+    # Blocking, and deliberately a separate job from build & test. The normative
+    # vector packs are the executable form of frozen protocol behaviour, so a
+    # conformance failure must be visible as its own red check rather than as one
+    # line inside a general test run.
+    #
+    # The packs are tracked bytes under internal/consensusvectors/testdata and are
+    # never fetched at run time: a gate that downloads its own fixtures certifies
+    # whatever it was served, not what the repository contains.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run protocol-vector conformance
+        # Same script as `make consensus-vectors`, so local and CI results cannot
+        # diverge. The script confirms every required conformance test exists
+        # before running it, because `go test -run` exits 0 on a regex that
+        # matches nothing.
+        run: ./scripts/consensus-vectors.sh
+
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest
