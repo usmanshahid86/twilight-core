@@ -44,11 +44,19 @@ type SelectedDrawIDsVector struct {
 // LoadSelectedDrawIDsPack returns the r1 pack, verifying its declared identity
 // and its mandatory structure.
 func LoadSelectedDrawIDsPack() (SelectedDrawIDsPack, error) {
+	return loadSelectedDrawIDsPack(selectedDrawIDsPackBytes)
+}
+
+// loadSelectedDrawIDsPack is the whole load sequence over supplied bytes; see
+// loadDrawPack for why it is separated.
+func loadSelectedDrawIDsPack(data []byte) (SelectedDrawIDsPack, error) {
 	var pack SelectedDrawIDsPack
-	if err := decodePack(SelectedDrawIDsPackFilename, selectedDrawIDsPackBytes, &pack); err != nil {
+	if err := decodePack(SelectedDrawIDsPackFilename, data, &pack); err != nil {
 		return SelectedDrawIDsPack{}, err
 	}
-	if err := requireMetadataPresence(SelectedDrawIDsPackFilename, pack.Version, pack.Revision, pack.Normative); err != nil {
+	if err := requireMetadataPresence(
+		SelectedDrawIDsPackFilename, "artifact", pack.Artifact, pack.Version, pack.Revision, pack.Normative,
+	); err != nil {
 		return SelectedDrawIDsPack{}, err
 	}
 	if err := assertMetadata(

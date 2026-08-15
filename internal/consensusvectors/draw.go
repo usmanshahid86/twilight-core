@@ -318,11 +318,21 @@ type DrawNegativeVector struct {
 // LoadDrawPack returns the r2 draw pack, verifying its declared identity and its
 // mandatory structure.
 func LoadDrawPack() (DrawPack, error) {
+	return loadDrawPack(drawPackBytes)
+}
+
+// loadDrawPack is the whole load sequence over supplied bytes. LoadDrawPack is
+// the only production caller; tests use it so a strictness regression is
+// exercised against the real order of checks rather than a second copy of it
+// that could drift out of step.
+func loadDrawPack(data []byte) (DrawPack, error) {
 	var pack DrawPack
-	if err := decodePack(DrawPackFilename, drawPackBytes, &pack); err != nil {
+	if err := decodePack(DrawPackFilename, data, &pack); err != nil {
 		return DrawPack{}, err
 	}
-	if err := requireMetadataPresence(DrawPackFilename, pack.Version, pack.Revision, pack.Normative); err != nil {
+	if err := requireMetadataPresence(
+		DrawPackFilename, "format", pack.Format, pack.Version, pack.Revision, pack.Normative,
+	); err != nil {
 		return DrawPack{}, err
 	}
 	if err := assertMetadata(
@@ -656,6 +666,7 @@ func (e DrawEndToEnd) validate(filename string) error {
 			requireContext(filename, tc.prefix, tc.value.ChainID, tc.value.SlotID, tc.value.TargetEpoch),
 			requireHex32(filename, tc.prefix+".expected_candidate_set_hash_hex", tc.value.ExpectedCandidateSetHashHex),
 			requireSet(filename, tc.prefix+".expected_k", tc.value.ExpectedK),
+			requireText(filename, tc.prefix+".expected_outcome", tc.value.ExpectedOutcome),
 			requireBoolSet(filename, tc.prefix+".beacon_required", tc.value.BeaconRequired),
 		); err != nil {
 			return err
@@ -683,6 +694,7 @@ func (e DrawEndToEnd) validate(filename string) error {
 			requireNonEmptySlice(filename, tc.prefix+".observed_beacon_window", len(tc.value.ObservedBeaconWindow)),
 			requireSet(filename, tc.prefix+".expected_usable_block_count", tc.value.ExpectedUsableBlockCount),
 			requireSet(filename, tc.prefix+".expected_distinct_external_proposers", tc.value.ExpectedDistinctExternalProposers),
+			requireText(filename, tc.prefix+".expected_outcome", tc.value.ExpectedOutcome),
 			requireBoolSet(filename, tc.prefix+".beacon_hash_defined", tc.value.BeaconHashDefined),
 		); err != nil {
 			return err

@@ -48,28 +48,35 @@ func firstElem(t *testing.T, doc map[string]any, key string) map[string]any {
 	return elem
 }
 
+// The three helpers run the REAL load sequence over mutated bytes — decode,
+// identity presence, identity comparison, then structure — rather than a
+// reimplementation of it. A second copy of that sequence in the test file could
+// drift out of step with the loader, and a strictness test that exercises a
+// drifted copy proves nothing about what LoadDrawPack actually does.
+
 func loadDrawFrom(data []byte) error {
-	var pack DrawPack
-	if err := decodePack(DrawPackFilename, data, &pack); err != nil {
-		return err
-	}
-	return pack.validate(DrawPackFilename)
+	_, err := loadDrawPack(data)
+	return err
 }
 
 func loadSelectedFrom(data []byte) error {
-	var pack SelectedDrawIDsPack
-	if err := decodePack(SelectedDrawIDsPackFilename, data, &pack); err != nil {
-		return err
-	}
-	return pack.validate(SelectedDrawIDsPackFilename)
+	_, err := loadSelectedDrawIDsPack(data)
+	return err
 }
 
 func loadRewardFrom(data []byte) error {
-	var pack RewardPack
-	if err := decodePack(RewardPackFilename, data, &pack); err != nil {
-		return err
+	_, err := loadRewardPack(data)
+	return err
+}
+
+func requireMetadataMismatch(t *testing.T, err error, what string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s was accepted", what)
 	}
-	return pack.validate(RewardPackFilename)
+	if !errors.Is(err, ErrPackMetadataMismatch) {
+		t.Fatalf("%s: err = %v, want ErrPackMetadataMismatch", what, err)
+	}
 }
 
 func requireMalformed(t *testing.T, err error, what string) {
@@ -524,12 +531,91 @@ func TestMetadataPresenceIsRequired(t *testing.T) {
 	for _, key := range []string{"version", "revision", "normative"} {
 		t.Run("missing "+key, func(t *testing.T) {
 			data := mutateJSON(t, rewardPackBytes, func(doc map[string]any) { delete(doc, key) })
-			var pack RewardPack
-			if err := decodePack(RewardPackFilename, data, &pack); err != nil {
-				t.Fatalf("decode: %v", err)
-			}
-			err := requireMetadataPresence(RewardPackFilename, pack.Version, pack.Revision, pack.Normative)
-			requireMalformed(t, err, "reward pack without "+key)
+			requireMalformed(t, loadRewardFrom(data), "reward pack without "+key)
+		})
+	}
+}
+
+// TestArtifactIdentityPresenceIsRequired separates a pack that declares the
+// wrong artifact from one that declares none.
+//
+// Both are rejected, but only under the right class does the error describe what
+// happened: an absent identifier is missing mandatory structure, while a
+// metadata mismatch means the file names an artifact this code does not support.
+// Reporting an absent name as `declares artifact ""` describes the file as
+// saying something it does not say.
+func TestArtifactIdentityPresenceIsRequired(t *testing.T) {
+	cases := []struct {
+		pack  string
+		key   string
+		bytes []byte
+		load  func([]byte) error
+		wrong string
+	}{
+		{"draw", "format", drawPackBytes, loadDrawFrom, "some-other-artifact"},
+		{"selected-draw-ids", "artifact", selectedDrawIDsPackBytes, loadSelectedFrom, "some-other-artifact"},
+		{"reward", "artifact", rewardPackBytes, loadRewardFrom, "some-other-artifact"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.pack+" pack without "+tc.key, func(t *testing.T) {
+			data := mutateJSON(t, tc.bytes, func(doc map[string]any) { delete(doc, tc.key) })
+			requireMalformed(t, tc.load(data), tc.pack+" pack without "+tc.key)
+		})
+
+		// Positive control for the other half of the taxonomy: a PRESENT but wrong
+		// identifier must still report as a metadata mismatch, not as malformed.
+		t.Run(tc.pack+" pack with the wrong "+tc.key, func(t *testing.T) {
+			data := mutateJSON(t, tc.bytes, func(doc map[string]any) { doc[tc.key] = tc.wrong })
+			requireMetadataMismatch(t, tc.load(data), tc.pack+" pack with a wrong "+tc.key)
+		})
+
+		// An empty string is present-but-blank rather than absent. It is treated as
+		// missing, because a blank name identifies nothing.
+		t.Run(tc.pack+" pack with a blank "+tc.key, func(t *testing.T) {
+			data := mutateJSON(t, tc.bytes, func(doc map[string]any) { doc[tc.key] = "" })
+			requireMalformed(t, tc.load(data), tc.pack+" pack with a blank "+tc.key)
+		})
+	}
+
+	// The version and revision halves of the taxonomy, for completeness.
+	t.Run("wrong revision is a metadata mismatch", func(t *testing.T) {
+		data := mutateJSON(t, rewardPackBytes, func(doc map[string]any) { doc["revision"] = 999 })
+		requireMetadataMismatch(t, loadRewardFrom(data), "reward pack with revision 999")
+	})
+}
+
+// TestEndToEndCasesRequireExpectedOutcome restores coverage for a check that was
+// removed by accident while the boolean-presence checks were added.
+//
+// Without it a case can lose the outcome it exists to assert, decode as "", and
+// still load. The conformance comparison would then fail rather than pass, so
+// nothing goes silently green — but the loader would no longer honor the
+// contract that every mandatory field is detected at load time.
+func TestEndToEndCasesRequireExpectedOutcome(t *testing.T) {
+	cases := []struct {
+		name string
+		path []string
+	}{
+		{"no_candidates", []string{"end_to_end", "no_candidates"}},
+		{"single_candidate", []string{"end_to_end", "single_candidate"}},
+		{
+			"no_valid_beacon_insufficient_usable_blocks",
+			[]string{"end_to_end", "no_valid_beacon_insufficient_usable_blocks"},
+		},
+		{
+			"no_valid_beacon_insufficient_distinct_proposers",
+			[]string{"end_to_end", "no_valid_beacon_insufficient_distinct_proposers"},
+		},
+		{"success_with_target_slot_exclusion", []string{"end_to_end", "success_with_target_slot_exclusion"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+				delete(nested(t, doc, tc.path...), "expected_outcome")
+			})
+			requireMalformed(t, loadDrawFrom(data), tc.name+" without expected_outcome")
 		})
 	}
 }

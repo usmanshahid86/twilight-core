@@ -99,11 +99,19 @@ type NegativeDiscriminator struct {
 // LoadRewardPack returns the r1 pack, verifying its declared identity and its
 // mandatory structure.
 func LoadRewardPack() (RewardPack, error) {
+	return loadRewardPack(rewardPackBytes)
+}
+
+// loadRewardPack is the whole load sequence over supplied bytes; see
+// loadDrawPack for why it is separated.
+func loadRewardPack(data []byte) (RewardPack, error) {
 	var pack RewardPack
-	if err := decodePack(RewardPackFilename, rewardPackBytes, &pack); err != nil {
+	if err := decodePack(RewardPackFilename, data, &pack); err != nil {
 		return RewardPack{}, err
 	}
-	if err := requireMetadataPresence(RewardPackFilename, pack.Version, pack.Revision, pack.Normative); err != nil {
+	if err := requireMetadataPresence(
+		RewardPackFilename, "artifact", pack.Artifact, pack.Version, pack.Revision, pack.Normative,
+	); err != nil {
 		return RewardPack{}, err
 	}
 	if err := assertMetadata(

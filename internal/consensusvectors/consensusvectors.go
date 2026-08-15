@@ -383,9 +383,20 @@ func requireIntSet(filename, field string, value Int) error {
 
 // requireMetadataPresence checks that a pack declares its own identity fields at
 // all, before their values are compared. Without it an absent version reports as
-// "declares version 0", which describes a file that says something it does not.
-func requireMetadataPresence(filename string, version, revision Int, normative Bool) error {
+// "declares version 0", and an absent artifact name as "declares artifact """ —
+// both of which describe a file as saying something it does not say.
+//
+// This is what keeps the two error classes meaning what they claim. An ABSENT
+// identity field is missing mandatory structure and belongs to ErrMalformedPack;
+// ErrPackMetadataMismatch is reserved for a field that is present and states the
+// wrong artifact, version or revision.
+//
+// The artifact name is carried under different keys by different packs — the
+// draw pack calls it "format", the other two "artifact" — so the caller passes
+// both the key and the value rather than this function guessing.
+func requireMetadataPresence(filename, artifactField, artifact string, version, revision Int, normative Bool) error {
 	return firstError(
+		requireText(filename, artifactField, artifact),
 		requireIntSet(filename, "version", version),
 		requireIntSet(filename, "revision", revision),
 		requireBoolSet(filename, "normative", normative),
