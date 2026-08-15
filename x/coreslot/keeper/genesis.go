@@ -12,6 +12,21 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) ([
 	if err := genesis.Validate(); err != nil {
 		return nil, err
 	}
+	// Canonical economic-address preflight (§25), over the COMPLETE input and
+	// before the first write.
+	//
+	// GenesisState.Validate is a pure types-level check with no access to the
+	// injected app-derived capability, so it can only confirm syntax. Enforcing
+	// the economic rule here is what stops a genesis file from admitting a payee
+	// that runtime registration would refuse.
+	//
+	// It runs as a separate pass rather than inside the write loop deliberately:
+	// a check interleaved with writes would persist params and the first few
+	// slots before discovering a blocked address in a later one, leaving a
+	// partially imported chain behind a returned error.
+	if err := k.validateGenesisEconomicAddresses(genesis); err != nil {
+		return nil, err
+	}
 	if err := k.Params.Set(ctx, *genesis.Params); err != nil {
 		return nil, err
 	}
@@ -59,6 +74,26 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) ([
 		return nil, err
 	}
 	return k.diffAndPersist(ctx)
+}
+
+// validateGenesisEconomicAddresses applies the canonical rule to every economic
+// address the genesis state would persist. Params.Authority and
+// Params.EmergencyAuthority are deliberately absent: they are control-plane
+// identities and are module accounts by design, so the economic rule would
+// reject the chain's own governance.
+func (k Keeper) validateGenesisEconomicAddresses(genesis *types.GenesisState) error {
+	for _, slot := range genesis.Slots {
+		if slot == nil {
+			continue
+		}
+		if _, err := k.economicAddresses.Validate(slot.OperatorAddress); err != nil {
+			return types.ErrInvalidAddress.Wrapf("slot %d operator address: %v", slot.SlotId, err)
+		}
+		if _, err := k.economicAddresses.Validate(slot.PayoutAddress); err != nil {
+			return types.ErrInvalidAddress.Wrapf("slot %d payout address: %v", slot.SlotId, err)
+		}
+	}
+	return nil
 }
 
 func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) {

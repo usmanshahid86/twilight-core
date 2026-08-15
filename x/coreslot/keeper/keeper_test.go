@@ -24,7 +24,7 @@ import (
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
-func setup(t *testing.T) (keeper.Keeper, sdk.Context, string, string) {
+func setup(t *testing.T, blocked ...string) (keeper.Keeper, sdk.Context, string, string) {
 	t.Helper()
 	registry := codectypes.NewInterfaceRegistry()
 	types.RegisterInterfaces(registry)
@@ -33,7 +33,7 @@ func setup(t *testing.T) (keeper.Keeper, sdk.Context, string, string) {
 	key := keys[types.StoreKey]
 	cms := integration.CreateMultiStore(keys, log.NewNopLogger())
 	ctx := sdk.NewContext(cms, cmtproto.Header{Height: 1}, false, log.NewNopLogger())
-	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(key))
+	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(key), testEconomicAddresses(t, blocked...))
 	authority := sdk.AccAddress(make([]byte, 20)).String()
 	emergency := sdk.AccAddress(append([]byte{1}, make([]byte, 19)...)).String()
 	return k, ctx, authority, emergency

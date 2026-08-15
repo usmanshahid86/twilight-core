@@ -44,6 +44,9 @@ func (k Keeper) SetCurrentEpochConfig(ctx context.Context, cfg types.EpochConfig
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if err := k.validateSnapshotTreasury("current epoch config", cfg); err != nil {
+		return err
+	}
 	return k.CurrentEpochConfig.Set(ctx, cfg)
 }
 
@@ -113,6 +116,11 @@ func (k Keeper) SetFinalizedEpoch(ctx context.Context, epoch types.EpochReward) 
 	if exists {
 		return types.ErrInvalidState.Wrapf("finalized epoch %d is immutable", epoch.EpochNumber)
 	}
+	// A finalized epoch is permanent and carries economic addresses in both its
+	// embedded configuration and its embedded reward records.
+	if err := k.validateFinalizedEpochAddresses("finalized epoch", epoch); err != nil {
+		return err
+	}
 	return k.FinalizedEpochs.Set(ctx, epoch.EpochNumber, epoch)
 }
 
@@ -127,6 +135,9 @@ func (k Keeper) GetClaimRecord(ctx context.Context, slotID, epoch uint64) (types
 func (k Keeper) SetClaimRecord(ctx context.Context, reward types.EligibleSlotReward) error {
 	if reward.SlotId == 0 || reward.EpochNumber == 0 {
 		return types.ErrInvalidState.Wrap("claim record requires nonzero slot and epoch")
+	}
+	if err := k.validateRewardAddresses("claim record", &reward); err != nil {
+		return err
 	}
 	return k.ClaimRecords.Set(ctx, collections.Join(reward.SlotId, reward.EpochNumber), reward)
 }

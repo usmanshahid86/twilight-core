@@ -36,6 +36,7 @@ import (
 
 	"github.com/twilight-project/twilight-core/app/openapi"
 	"github.com/twilight-project/twilight-core/app/params"
+	"github.com/twilight-project/twilight-core/internal/economicaddress"
 	"github.com/twilight-project/twilight-core/x/coreslot"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
@@ -117,11 +118,25 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ 
 	}
 	runtimeApp := builder.Build(db, traceStore, baseAppOptions...)
 
+	// The one canonical economic-address rule (§25), derived here from the two
+	// authorities that own the answer: the auth configuration's module-account
+	// declaration, and the bank module's own blocked-destination set. It is
+	// injected into both custom modules as a plain value, so neither gains a
+	// keeper edge and neither has to import this package.
+	economicAddresses, err := economicaddress.New(
+		accountKeeper.AddressCodec(),
+		ModuleAccountNames(),
+		bankKeeper.GetBlockedAddresses(),
+	)
+	if err != nil {
+		panic(err)
+	}
+
 	// CoreSlot keeper must be constructed before the rewards keeper: rewards
 	// depends on CoreSlot's read-only interface and must never depend on the
 	// reverse.
 	coreSlotKey := storetypes.NewKVStoreKey(coreslottypes.StoreKey)
-	coreSlotKeeper := coreslotkeeper.NewKeeper(cdc, runtime.NewKVStoreService(coreSlotKey))
+	coreSlotKeeper := coreslotkeeper.NewKeeper(cdc, runtime.NewKVStoreService(coreSlotKey), economicAddresses)
 	coreSlotModule := coreslot.NewAppModule(coreSlotKeeper, AuthorityAddress(), EmergencyAuthorityAddress())
 
 	rewardsKey := storetypes.NewKVStoreKey(rewardstypes.StoreKey)
@@ -131,6 +146,7 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ 
 		accountKeeper,
 		bankKeeper,
 		coreSlotKeeper,
+		economicAddresses,
 	)
 	rewardsModule := rewards.NewAppModule(rewardsKeeper)
 

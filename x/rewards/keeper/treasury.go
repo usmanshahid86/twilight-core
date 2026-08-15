@@ -23,9 +23,11 @@ func (k Keeper) PayTreasury(ctx context.Context, address string, amount math.Int
 	if amount.IsZero() {
 		return nil
 	}
-	recipient, err := sdk.AccAddressFromBech32(address)
+	// Revalidated immediately before transfer, per the architecture, and the
+	// parsed address is reused rather than decoded a second time.
+	recipient, err := k.economicAddresses.Validate(address)
 	if err != nil {
-		return types.ErrInvalidParams.Wrapf("treasury address: %v", err)
+		return types.ErrInvalidAddress.Wrapf("treasury address: %v", err)
 	}
 	return k.bankKeeper.SendCoinsFromModuleToAccount(
 		ctx,
