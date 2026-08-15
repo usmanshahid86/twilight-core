@@ -37,6 +37,15 @@ Every PR must pass [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 - **govulncheck** — dependency vulnerability scan; **blocking** (a newly reachable
   advisory fails CI; advisories in modules the code does not call do not)
 
+An advisory that is reachable but has **no available fix** — for example one in an
+unmaintained upstream package pulled in transitively — would otherwise leave the gate with no
+achievable green state. Such advisories are accepted explicitly in
+[`.govulncheck-allow.json`](.govulncheck-allow.json), each with its reachability path, the
+reason it cannot be fixed, and a **`review_by` date**. Anything reachable and not listed there
+still fails, and an acceptance that passes its `review_by` date also fails, so an exception
+cannot outlive its review. `make vuln` and CI run the same script
+([`scripts/vulncheck.sh`](scripts/vulncheck.sh)), so local and CI results cannot drift.
+
 Consensus/economic changes should also be exercised by the relevant **drills**
 (`make drills`) and, as they land, the **module simulations**.
 

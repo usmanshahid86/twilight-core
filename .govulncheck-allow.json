@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "Reachable advisories explicitly accepted by the vulnerability gate (scripts/vulncheck.sh).",
+    "An entry belongs here only when the advisory is reachable AND has no available fix.",
+    "Every entry expires on its review_by date, after which the gate fails until the entry",
+    "is re-justified or removed. Advisories not listed here still fail the gate. See REVIEW.md."
+  ],
+  "allow": [
+    {
+      "id": "GO-2026-5932",
+      "module": "golang.org/x/crypto",
+      "package": "golang.org/x/crypto/openpgp/armor",
+      "no_fix_available": true,
+      "reachable_via": "app -> cosmos-sdk/client -> cosmos-sdk/crypto/keyring -> cosmos-sdk/crypto -> golang.org/x/crypto/openpgp/armor",
+      "reason": "golang.org/x/crypto/openpgp is unmaintained by design and has no fixed version. It is reached only through the Cosmos SDK keyring's armored key encoding, never from twilight-core code, and cannot be removed while on cosmos-sdk v0.53.x.",
+      "tracking": "Expected to clear via the deferred cosmos-sdk upgrade; re-check at review time whether a newer SDK drops the openpgp dependency.",
+      "review_by": "2026-11-15"
+    }
+  ]
+}
