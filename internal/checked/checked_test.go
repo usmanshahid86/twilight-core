@@ -144,6 +144,9 @@ func TestSubInt64(t *testing.T) {
 		{name: "exact lower boundary", a: -1, b: math.MaxInt64, want: math.MinInt64},
 		{name: "exact upper boundary", a: 0, b: -math.MaxInt64, want: math.MaxInt64},
 		{name: "min minus negative one", a: math.MinInt64, b: -1, want: math.MinInt64 + 1},
+		// Regression: subtracting the most negative value reaches the top of the
+		// range exactly. Guards a future refactor of the b < 0 branch.
+		{name: "negative one minus min reaches max exactly", a: -1, b: math.MinInt64, want: math.MaxInt64},
 		{name: "one past lower boundary underflows", a: -2, b: math.MaxInt64, wantErr: checked.ErrUnderflow},
 		{name: "one past upper boundary overflows", a: math.MaxInt64, b: -1, wantErr: checked.ErrOverflow},
 		{name: "negating min overflows", a: 0, b: math.MinInt64, wantErr: checked.ErrOverflow},
@@ -181,6 +184,11 @@ func TestMulInt64(t *testing.T) {
 		{name: "mixed signs", a: -3, b: 3, want: -9},
 		{name: "exact upper boundary", a: 2, b: halfMax, want: math.MaxInt64 - 1},
 		{name: "one past upper boundary overflows", a: 2, b: halfMax + 1, wantErr: checked.ErrOverflow},
+
+		// Regression: the negative range reaches its limit exactly, in both
+		// operand orders. Guards a future refactor of the sign-branch selection.
+		{name: "exact lower boundary", a: 2, b: -(1 << 62), want: math.MinInt64},
+		{name: "exact lower boundary with operands reversed", a: -(1 << 62), b: 2, want: math.MinInt64},
 
 		// math.MinInt64 * -1 is the case a division round-trip cannot detect:
 		// the wrapped product is math.MinInt64 and Go defines

@@ -18,9 +18,13 @@ package params
 // Like the rest of this package this file stays dependency-neutral. Its only
 // repository import is internal/checked, which itself imports nothing beyond the
 // standard library, so no module can create an import cycle through it.
+// cosmossdk.io/math is an external module dependency already used across the
+// repository and cannot create a repository cycle.
 
 import (
 	"fmt"
+
+	sdkmath "cosmossdk.io/math"
 
 	"github.com/twilight-project/twilight-core/internal/checked"
 )
@@ -106,12 +110,34 @@ func ValidateMaxSelectedParticipants(value, hardMax uint64) error {
 
 // ValidateMinRecipientPayoutAmount enforces
 //
-//	value >= hardMin > 0
+//	amount >= hardMin > 0
 //
 // The positive floor is what stops settlement creating dust payouts, and with
 // them cheap accounts, on a feeless chain.
-func ValidateMinRecipientPayoutAmount(value, hardMin uint64) error {
-	return requirePositiveAtLeast("min recipient payout amount", value, hardMin)
+//
+// Both operands are arbitrary-precision base-denom integers. Settlement amounts
+// are canonical monetary values and are never narrowed through a fixed-width
+// type: a payout above math.MaxUint64 is a legitimate value, not an overflow.
+//
+// The zero value of sdkmath.Int carries a nil big.Int and panics on any
+// comparison or sign query, so both operands are checked with IsNil first;
+// IsNil is the only method safe to call on it. Note that a positive amount
+// follows from the relation itself: hardMin is required positive and amount is
+// required to be at least hardMin.
+func ValidateMinRecipientPayoutAmount(amount, hardMin sdkmath.Int) error {
+	if amount.IsNil() {
+		return fmt.Errorf("min recipient payout amount is uninitialized")
+	}
+	if hardMin.IsNil() {
+		return fmt.Errorf("hard min settlement payout amount is uninitialized")
+	}
+	if !hardMin.IsPositive() {
+		return fmt.Errorf("hard min settlement payout amount is %s, must be positive", hardMin)
+	}
+	if amount.LT(hardMin) {
+		return fmt.Errorf("min recipient payout amount is %s, below hard min %s", amount, hardMin)
+	}
+	return nil
 }
 
 // ValidateSelectionPolicyUpdateCooldownBlocks enforces
@@ -220,6 +246,17 @@ func (p SelectionParams) Validate(hardMinEpochLengthBlocks uint64) error {
 //   - No maximum for the initial block subsidy is defined.
 //   - The finite block gas and execution budget is a deployment gate rather than
 //     a compile-time constant, so it is not represented here.
+//
+// Several of these bounds interact, and their combined workload is NOT validated
+// here. MaxActiveCoreSlots together with MaxEpochLengthBlocks bounds per-epoch
+// participation work, and MaxRecipientsPerChunk together with
+// MaxChunksPerSettlement bounds settlement fan-out. Both pairings remain
+// mandatory pre-genesis calibration and load-test gates. No numeric combined-work
+// ceiling is invented here, and no representability requirement is imposed on
+// those conceptual products: fitting a fixed-width type would not demonstrate
+// that a configuration is operationally safe. Where future runtime code performs
+// an actual fixed-width multiplication, that computation must use checked
+// arithmetic suited to it.
 type CalibratedBounds struct {
 	MaxActiveCoreSlots                     uint64
 	MinEpochLengthBlocks                   uint64
@@ -228,19 +265,38 @@ type CalibratedBounds struct {
 	MaxCandidatesPerSelection              uint64
 	MaxRecipientsPerChunk                  uint64
 	MaxChunksPerSettlement                 uint64
-	MinSettlementPayoutAmount              uint64
 	MinSelectionPolicyUpdateCooldownBlocks uint64
 	MaxEmissionTreasuryShareBps            uint64
 	MaxCoreSlotMetadataBytes               uint64
 	MaxTxMessageBytes                      uint64
+
+	// MinSettlementPayoutAmount is a base-denom monetary value and is therefore
+	// arbitrary-precision, not fixed-width: a legitimate floor may exceed
+	// math.MaxUint64.
+	MinSettlementPayoutAmount sdkmath.Int
 }
 
-// Validate enforces the structural relations every calibrated bound set must
-// satisfy regardless of the values chosen: each bound is positive, because a
-// zero bound would silently disable the path it governs; the epoch-length window
-// is non-empty; and the treasury share ceiling stays strictly below the
-// basis-point denominator.
-func (b CalibratedBounds) Validate() error {
+// ValidateStructural enforces only those relations that hold regardless of the
+// values eventually ratified. It deliberately does not certify that a bound set
+// is operationally safe: the combined workload gates described on CalibratedBounds
+// remain pre-genesis calibration and load-test work, and nothing here substitutes
+// for them. The name states that limit so a caller cannot read a passing result
+// as a completeness guarantee.
+//
+// Checked here: bounds whose zero value would disable the path they govern are
+// positive; the epoch-length window is non-empty; the settlement payout floor is
+// initialized and positive; and the treasury share ceiling stays strictly below
+// the basis-point denominator.
+//
+// MaxEmissionTreasuryShareBps is deliberately exempt from the positivity rule. The
+// normative relation is
+//
+//	0 <= emission_treasury_share_bps <= HARD_MAX_EMISSION_TREASURY_SHARE_BPS < 10_000
+//
+// which places no lower bound on the ceiling. A ceiling of zero is legal and means
+// treasury diversion is permanently disabled, so rejecting it would impose a
+// constraint the protocol does not state.
+func (b CalibratedBounds) ValidateStructural() error {
 	// Ordered slice rather than a map: error reporting must be deterministic.
 	positive := []struct {
 		name  string
@@ -253,9 +309,7 @@ func (b CalibratedBounds) Validate() error {
 		{"MaxCandidatesPerSelection", b.MaxCandidatesPerSelection},
 		{"MaxRecipientsPerChunk", b.MaxRecipientsPerChunk},
 		{"MaxChunksPerSettlement", b.MaxChunksPerSettlement},
-		{"MinSettlementPayoutAmount", b.MinSettlementPayoutAmount},
 		{"MinSelectionPolicyUpdateCooldownBlocks", b.MinSelectionPolicyUpdateCooldownBlocks},
-		{"MaxEmissionTreasuryShareBps", b.MaxEmissionTreasuryShareBps},
 		{"MaxCoreSlotMetadataBytes", b.MaxCoreSlotMetadataBytes},
 		{"MaxTxMessageBytes", b.MaxTxMessageBytes},
 	}
@@ -263,6 +317,17 @@ func (b CalibratedBounds) Validate() error {
 		if field.value == 0 {
 			return fmt.Errorf("calibrated bound %s must be positive", field.name)
 		}
+	}
+
+	// IsNil is the only method safe to call on an uninitialized sdkmath.Int.
+	if b.MinSettlementPayoutAmount.IsNil() {
+		return fmt.Errorf("calibrated bound MinSettlementPayoutAmount is uninitialized")
+	}
+	if !b.MinSettlementPayoutAmount.IsPositive() {
+		return fmt.Errorf(
+			"calibrated bound MinSettlementPayoutAmount is %s, must be positive",
+			b.MinSettlementPayoutAmount,
+		)
 	}
 
 	if b.MinEpochLengthBlocks > b.MaxEpochLengthBlocks {

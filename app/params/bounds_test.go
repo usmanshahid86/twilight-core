@@ -3,6 +3,8 @@ package params
 import (
 	"math"
 	"testing"
+
+	sdkmath "cosmossdk.io/math"
 )
 
 // TestProtocolFixedValuesLocked freezes the values the protocol fixes, so a
@@ -32,6 +34,10 @@ func TestValidateEmissionTreasuryShareBps(t *testing.T) {
 		wantErr        bool
 	}{
 		{name: "zero share is allowed", share: 0, hardMax: 2_000},
+		// A zero ceiling permanently disables treasury diversion. It is legal,
+		// and a zero share still satisfies it.
+		{name: "zero share under a zero ceiling is allowed", share: 0, hardMax: 0},
+		{name: "positive share under a zero ceiling is rejected", share: 1, hardMax: 0, wantErr: true},
 		{name: "share below hard max", share: 1_999, hardMax: 2_000},
 		{name: "share exactly at hard max", share: 2_000, hardMax: 2_000},
 		{name: "share one past hard max", share: 2_001, hardMax: 2_000, wantErr: true},
@@ -106,21 +112,61 @@ func TestValidateMaxSelectedParticipants(t *testing.T) {
 	}
 }
 
+// mustInt parses a decimal string into an arbitrary-precision Int, so test cases
+// can express monetary values that do not fit a fixed-width type.
+func mustInt(t *testing.T, s string) sdkmath.Int {
+	t.Helper()
+	v, ok := sdkmath.NewIntFromString(s)
+	if !ok {
+		t.Fatalf("could not parse %q as sdkmath.Int", s)
+	}
+	return v
+}
+
 func TestValidateMinRecipientPayoutAmount(t *testing.T) {
+	const (
+		maxUint64 = "18446744073709551615" // 2^64 - 1
+		twoPow64  = "18446744073709551616" // 2^64, one past uint64
+		twoPow128 = "340282366920938463463374607431768211456"
+	)
+
 	cases := []struct {
-		name           string
-		value, hardMin uint64
-		wantErr        bool
+		name            string
+		amount, hardMin sdkmath.Int
+		wantErr         bool
 	}{
-		{name: "above hard min", value: 1_001, hardMin: 1_000},
-		{name: "exactly at hard min", value: 1_000, hardMin: 1_000},
-		{name: "one below hard min", value: 999, hardMin: 1_000, wantErr: true},
-		{name: "zero value is rejected", value: 0, hardMin: 1_000, wantErr: true},
-		{name: "zero hard min is rejected", value: 1, hardMin: 0, wantErr: true},
+		{name: "above hard min", amount: sdkmath.NewInt(1_001), hardMin: sdkmath.NewInt(1_000)},
+		{name: "exactly at hard min", amount: sdkmath.NewInt(1_000), hardMin: sdkmath.NewInt(1_000)},
+		{name: "one below hard min", amount: sdkmath.NewInt(999), hardMin: sdkmath.NewInt(1_000), wantErr: true},
+		{name: "zero amount is below a positive floor", amount: sdkmath.NewInt(0), hardMin: sdkmath.NewInt(1_000), wantErr: true},
+		{name: "negative amount is rejected", amount: sdkmath.NewInt(-1), hardMin: sdkmath.NewInt(1_000), wantErr: true},
+		{name: "zero hard min is rejected", amount: sdkmath.NewInt(1), hardMin: sdkmath.NewInt(0), wantErr: true},
+		{name: "negative hard min is rejected", amount: sdkmath.NewInt(1), hardMin: sdkmath.NewInt(-1), wantErr: true},
+
+		// The zero value of sdkmath.Int panics on every comparison and sign
+		// query, so both operands must be rejected rather than dereferenced.
+		{name: "uninitialized amount is rejected, not panicked on", amount: sdkmath.Int{}, hardMin: sdkmath.NewInt(1), wantErr: true},
+		{name: "uninitialized hard min is rejected, not panicked on", amount: sdkmath.NewInt(1), hardMin: sdkmath.Int{}, wantErr: true},
+		{name: "both operands uninitialized", amount: sdkmath.Int{}, hardMin: sdkmath.Int{}, wantErr: true},
+
+		// Settlement amounts are arbitrary-precision base-denom values. A payout
+		// above math.MaxUint64 is legitimate, not an overflow.
+		//
+		// The three passing cases below are the discriminators against narrowing:
+		// 2^64 truncates to 0 through uint64, so each would flip from passing to
+		// failing if either operand were narrowed.
+		{name: "amount above max uint64 clears a small floor", amount: mustInt(t, twoPow64), hardMin: sdkmath.NewInt(1)},
+		{name: "amount far above max uint64", amount: mustInt(t, twoPow128), hardMin: mustInt(t, twoPow64)},
+		{name: "equal operands both above max uint64", amount: mustInt(t, twoPow64), hardMin: mustInt(t, twoPow64)},
+
+		// Boundary either side of the fixed-width limit. This case is not a
+		// narrowing discriminator: it fails under both a correct and a narrowed
+		// implementation, for different reasons.
+		{name: "max uint64 is below a floor of two-to-the-64", amount: mustInt(t, maxUint64), hardMin: mustInt(t, twoPow64), wantErr: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := ValidateMinRecipientPayoutAmount(c.value, c.hardMin)
+			err := ValidateMinRecipientPayoutAmount(c.amount, c.hardMin)
 			if c.wantErr && err == nil {
 				t.Fatalf("expected error, got nil")
 			}
@@ -233,10 +279,10 @@ func TestSelectionParamsValidate(t *testing.T) {
 	}
 }
 
-func TestCalibratedBoundsValidate(t *testing.T) {
-	// nonZero is structurally sound. Every number here is a test fixture with no
+func TestCalibratedBoundsValidateStructural(t *testing.T) {
+	// sound is structurally valid. Every number here is a test fixture with no
 	// protocol meaning: this package deliberately ships no calibrated values.
-	nonZero := CalibratedBounds{
+	sound := CalibratedBounds{
 		MaxActiveCoreSlots:                     1,
 		MinEpochLengthBlocks:                   1,
 		MaxEpochLengthBlocks:                   2,
@@ -244,19 +290,20 @@ func TestCalibratedBoundsValidate(t *testing.T) {
 		MaxCandidatesPerSelection:              1,
 		MaxRecipientsPerChunk:                  1,
 		MaxChunksPerSettlement:                 1,
-		MinSettlementPayoutAmount:              1,
 		MinSelectionPolicyUpdateCooldownBlocks: 1,
 		MaxEmissionTreasuryShareBps:            1,
 		MaxCoreSlotMetadataBytes:               1,
 		MaxTxMessageBytes:                      1,
+		MinSettlementPayoutAmount:              sdkmath.NewInt(1),
 	}
 
-	if err := nonZero.Validate(); err != nil {
+	if err := sound.ValidateStructural(); err != nil {
 		t.Fatalf("structurally sound bounds rejected: %v", err)
 	}
 
-	// A zero bound silently disables the path it governs, so every field must be
-	// rejected at zero. Table-driven over each field individually.
+	// A zero value disables the path these bounds govern, so each is rejected at
+	// zero. MaxEmissionTreasuryShareBps is deliberately absent: a zero ceiling is
+	// legal and means treasury diversion is permanently disabled.
 	zeroing := []struct {
 		name string
 		zero func(*CalibratedBounds)
@@ -268,59 +315,102 @@ func TestCalibratedBoundsValidate(t *testing.T) {
 		{"MaxCandidatesPerSelection", func(b *CalibratedBounds) { b.MaxCandidatesPerSelection = 0 }},
 		{"MaxRecipientsPerChunk", func(b *CalibratedBounds) { b.MaxRecipientsPerChunk = 0 }},
 		{"MaxChunksPerSettlement", func(b *CalibratedBounds) { b.MaxChunksPerSettlement = 0 }},
-		{"MinSettlementPayoutAmount", func(b *CalibratedBounds) { b.MinSettlementPayoutAmount = 0 }},
 		{"MinSelectionPolicyUpdateCooldownBlocks", func(b *CalibratedBounds) { b.MinSelectionPolicyUpdateCooldownBlocks = 0 }},
-		{"MaxEmissionTreasuryShareBps", func(b *CalibratedBounds) { b.MaxEmissionTreasuryShareBps = 0 }},
 		{"MaxCoreSlotMetadataBytes", func(b *CalibratedBounds) { b.MaxCoreSlotMetadataBytes = 0 }},
 		{"MaxTxMessageBytes", func(b *CalibratedBounds) { b.MaxTxMessageBytes = 0 }},
 	}
 	for _, c := range zeroing {
 		t.Run("zero "+c.name, func(t *testing.T) {
-			b := nonZero
+			b := sound
 			c.zero(&b)
-			if err := b.Validate(); err == nil {
+			if err := b.ValidateStructural(); err == nil {
 				t.Fatalf("expected zero %s to be rejected", c.name)
 			}
 		})
 	}
 
 	t.Run("empty bounds are rejected", func(t *testing.T) {
-		if err := (CalibratedBounds{}).Validate(); err == nil {
+		if err := (CalibratedBounds{}).ValidateStructural(); err == nil {
 			t.Fatalf("expected the zero value to be rejected")
 		}
 	})
 
 	t.Run("epoch length window may be a single value", func(t *testing.T) {
-		b := nonZero
+		b := sound
 		b.MinEpochLengthBlocks = 7
 		b.MaxEpochLengthBlocks = 7
-		if err := b.Validate(); err != nil {
+		if err := b.ValidateStructural(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("inverted epoch length window is rejected", func(t *testing.T) {
-		b := nonZero
+		b := sound
 		b.MinEpochLengthBlocks = 8
 		b.MaxEpochLengthBlocks = 7
-		if err := b.Validate(); err == nil {
+		if err := b.ValidateStructural(); err == nil {
 			t.Fatalf("expected inverted epoch length window to be rejected")
 		}
 	})
 
-	t.Run("treasury share ceiling at the denominator is rejected", func(t *testing.T) {
-		b := nonZero
-		b.MaxEmissionTreasuryShareBps = BasisPointsDenominator
-		if err := b.Validate(); err == nil {
-			t.Fatalf("expected a treasury ceiling equal to the denominator to be rejected")
+	// The normative relation places no lower bound on the treasury ceiling:
+	// 0 <= share <= HARD_MAX < 10_000. Rejecting a zero ceiling would impose a
+	// constraint the protocol does not state.
+	t.Run("treasury share ceiling of zero is accepted", func(t *testing.T) {
+		b := sound
+		b.MaxEmissionTreasuryShareBps = 0
+		if err := b.ValidateStructural(); err != nil {
+			t.Fatalf("a zero treasury ceiling is legal, got: %v", err)
 		}
 	})
 
 	t.Run("treasury share ceiling just below the denominator is accepted", func(t *testing.T) {
-		b := nonZero
+		b := sound
 		b.MaxEmissionTreasuryShareBps = BasisPointsDenominator - 1
-		if err := b.Validate(); err != nil {
+		if err := b.ValidateStructural(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("treasury share ceiling at the denominator is rejected", func(t *testing.T) {
+		b := sound
+		b.MaxEmissionTreasuryShareBps = BasisPointsDenominator
+		if err := b.ValidateStructural(); err == nil {
+			t.Fatalf("expected a treasury ceiling equal to the denominator to be rejected")
+		}
+	})
+
+	// The settlement payout floor is arbitrary-precision and must not be
+	// dereferenced while uninitialized.
+	t.Run("uninitialized settlement payout floor is rejected", func(t *testing.T) {
+		b := sound
+		b.MinSettlementPayoutAmount = sdkmath.Int{}
+		if err := b.ValidateStructural(); err == nil {
+			t.Fatalf("expected an uninitialized payout floor to be rejected")
+		}
+	})
+
+	t.Run("zero settlement payout floor is rejected", func(t *testing.T) {
+		b := sound
+		b.MinSettlementPayoutAmount = sdkmath.NewInt(0)
+		if err := b.ValidateStructural(); err == nil {
+			t.Fatalf("expected a zero payout floor to be rejected")
+		}
+	})
+
+	t.Run("negative settlement payout floor is rejected", func(t *testing.T) {
+		b := sound
+		b.MinSettlementPayoutAmount = sdkmath.NewInt(-1)
+		if err := b.ValidateStructural(); err == nil {
+			t.Fatalf("expected a negative payout floor to be rejected")
+		}
+	})
+
+	t.Run("settlement payout floor above max uint64 is accepted", func(t *testing.T) {
+		b := sound
+		b.MinSettlementPayoutAmount = mustInt(t, "18446744073709551616") // 2^64
+		if err := b.ValidateStructural(); err != nil {
+			t.Fatalf("an arbitrary-precision floor is legal, got: %v", err)
 		}
 	})
 }
