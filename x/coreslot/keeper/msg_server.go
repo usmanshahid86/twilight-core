@@ -44,10 +44,16 @@ func (m msgServer) RegisterCoreSlot(ctx context.Context, msg *types.MsgRegisterC
 	if msg.Authority != params.Authority && !(params.AllowSelfRegistration && msg.Authority == msg.OperatorAddress) {
 		return nil, types.ErrUnauthorized
 	}
-	// Canonical economic-address admission (§25), after the authorization check
-	// so an unauthorized caller learns nothing about which addresses the chain
-	// would accept, and before any state is touched.
-	if _, err := m.economicAddresses.Validate(msg.OperatorAddress); err != nil {
+	// Address admission, after the authorization check so an unauthorized caller
+	// learns nothing about which addresses the chain would accept, and before any
+	// state is touched.
+	//
+	// The two fields are held to DIFFERENT rules on purpose. The operator address
+	// is a control identity: §18 requires it to be valid, but the protocol never
+	// sends to it, so refusing a bank-blocked operator would deny an operator the
+	// protocol permits. The payout address is where value actually goes and takes
+	// the full canonical economic rule (§25).
+	if _, err := m.economicAddresses.ParseAccountAddress(msg.OperatorAddress); err != nil {
 		return nil, types.ErrInvalidAddress.Wrapf("operator address: %v", err)
 	}
 	if _, err := m.economicAddresses.Validate(msg.PayoutAddress); err != nil {

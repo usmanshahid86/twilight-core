@@ -38,6 +38,13 @@ func testAccount(marker byte) string {
 	return sdk.AccAddress(raw).String()
 }
 
+// zeroAddress is the all-zero account address: a well-formed encoding that no
+// key controls. §25 requires an economic address to be non-zero, so it must be
+// refused as a destination.
+func zeroAddress() string {
+	return sdk.AccAddress(make([]byte, 20)).String()
+}
+
 func testEconomicAddresses(t *testing.T, blocked ...string) economicaddress.Validator {
 	t.Helper()
 	blockedSet := make(map[string]bool, len(blocked))

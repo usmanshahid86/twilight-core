@@ -27,59 +27,78 @@ func registerMsg(t *testing.T, authority, operator, payout string, marker byte) 
 	}
 }
 
-func TestRegisterCoreSlotRejectsModuleAccountAddresses(t *testing.T) {
-	good := testAccount(9)
-	moduleAccount := testModuleAddress(testModuleAccountName)
-
-	cases := []struct {
-		name     string
-		operator string
-		payout   string
-	}{
-		{"operator is a module account", moduleAccount, good},
-		{"payout is a module account", good, moduleAccount},
-		{"both are module accounts", moduleAccount, moduleAccount},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			k, ctx, authority, emergency := setup(t)
-			oneActiveGenesis(t, k, ctx, authority, emergency)
-			msgs := keeper.NewMsgServer(k)
-
-			_, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, tc.operator, tc.payout, 2))
-			require.ErrorIs(t, err, types.ErrInvalidAddress)
-			require.Contains(t, err.Error(), "module account")
-		})
-	}
-}
-
-func TestRegisterCoreSlotRejectsBankBlockedAddresses(t *testing.T) {
-	good := testAccount(9)
+// TestRegisterCoreSlotPayoutTakesTheEconomicRule covers the value destination.
+func TestRegisterCoreSlotPayoutTakesTheEconomicRule(t *testing.T) {
 	blocked := testAccount(77)
 
 	cases := []struct {
-		name     string
-		operator string
-		payout   string
+		name   string
+		payout string
+		reason string
 	}{
-		{"operator is bank-blocked", blocked, good},
-		{"payout is bank-blocked", good, blocked},
+		{"module account", testModuleAddress(testModuleAccountName), "module account"},
+		{"bank-blocked", blocked, "blocked"},
+		{"all-zero", zeroAddress(), "all zero"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// blocked is an ordinary account that only bank prohibits, so this
-			// exercises the bank branch independently of module exclusion.
 			k, ctx, authority, emergency := setup(t, blocked)
 			oneActiveGenesis(t, k, ctx, authority, emergency)
 			msgs := keeper.NewMsgServer(k)
 
-			_, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, tc.operator, tc.payout, 2))
+			_, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, testAccount(9), tc.payout, 2))
 			require.ErrorIs(t, err, types.ErrInvalidAddress)
-			require.Contains(t, err.Error(), "blocked")
+			require.Contains(t, err.Error(), tc.reason)
 		})
 	}
+}
+
+// TestRegisterCoreSlotOperatorIsAnIdentityNotADestination is the load-bearing
+// counterexample for the operator/payout split.
+//
+// A valid, non-module, bank-blocked account is a legitimate OPERATOR: §18 asks
+// only that the operator address be valid, and the protocol never sends there —
+// rewards go to the payout address. The same address used as a PAYOUT must be
+// refused. Both halves are asserted together so the distinction cannot silently
+// collapse in either direction.
+func TestRegisterCoreSlotOperatorIsAnIdentityNotADestination(t *testing.T) {
+	blocked := testAccount(77)
+
+	t.Run("bank-blocked operator with an ordinary payout is accepted", func(t *testing.T) {
+		k, ctx, authority, emergency := setup(t, blocked)
+		oneActiveGenesis(t, k, ctx, authority, emergency)
+		msgs := keeper.NewMsgServer(k)
+
+		res, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, blocked, testAccount(10), 2))
+		require.NoError(t, err, "a bank-blocked address is a legitimate operator identity")
+
+		slot, err := k.GetSlot(ctx, res.SlotId)
+		require.NoError(t, err)
+		require.Equal(t, blocked, slot.OperatorAddress)
+	})
+
+	t.Run("the same address as payout is rejected", func(t *testing.T) {
+		k, ctx, authority, emergency := setup(t, blocked)
+		oneActiveGenesis(t, k, ctx, authority, emergency)
+		msgs := keeper.NewMsgServer(k)
+
+		_, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, testAccount(9), blocked, 2))
+		require.ErrorIs(t, err, types.ErrInvalidAddress)
+		require.Contains(t, err.Error(), "blocked")
+	})
+
+	// The operator address must still be a valid account address (§18).
+	t.Run("a malformed operator is still rejected", func(t *testing.T) {
+		k, ctx, authority, emergency := setup(t)
+		oneActiveGenesis(t, k, ctx, authority, emergency)
+		msgs := keeper.NewMsgServer(k)
+
+		for _, bad := range []string{"", "not-an-address"} {
+			_, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, bad, testAccount(10), 2))
+			require.ErrorIsf(t, err, types.ErrInvalidAddress, "operator %q", bad)
+		}
+	})
 }
 
 // TestRegisterCoreSlotStillAcceptsOrdinaryAddresses guards against the rule
@@ -111,7 +130,7 @@ func TestRegisterCoreSlotRejectsBeforeAnyStateWrite(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = msgs.RegisterCoreSlot(ctx,
-		registerMsg(t, authority, testModuleAddress(testModuleAccountName), testAccount(9), 2))
+		registerMsg(t, authority, testAccount(9), testModuleAddress(testModuleAccountName), 2))
 	require.Error(t, err)
 
 	after, err := k.NextSlotID.Get(ctx)
@@ -132,7 +151,7 @@ func TestRegisterCoreSlotChecksAuthorizationFirst(t *testing.T) {
 	msgs := keeper.NewMsgServer(k)
 
 	_, err := msgs.RegisterCoreSlot(ctx, registerMsg(
-		t, testAccount(66), testModuleAddress(testModuleAccountName), testAccount(9), 2,
+		t, testAccount(66), testAccount(9), testModuleAddress(testModuleAccountName), 2,
 	))
 	require.ErrorIs(t, err, types.ErrUnauthorized)
 	require.NotErrorIs(t, err, types.ErrInvalidAddress)
@@ -150,6 +169,7 @@ func TestUpdatePayoutAddressRejectsInadmissibleDestinations(t *testing.T) {
 		{"bank-blocked", blocked, "blocked"},
 		{"malformed", "not-an-address", "not a valid account address"},
 		{"empty", "", "empty"},
+		{"all-zero", zeroAddress(), "all zero"},
 	}
 
 	for _, tc := range cases {
@@ -232,9 +252,9 @@ func TestInitGenesisRejectsInadmissibleSlotAddresses(t *testing.T) {
 		payout   string
 		reason   string
 	}{
-		{"module-account operator", testModuleAddress(testModuleAccountName), testAccount(3), "module account"},
 		{"module-account payout", testAccount(2), testModuleAddress(testModuleAccountName), "module account"},
 		{"bank-blocked payout", testAccount(2), blocked, "blocked"},
+		{"all-zero payout", testAccount(2), zeroAddress(), "all zero"},
 	}
 
 	for _, tc := range cases {
@@ -252,6 +272,28 @@ func TestInitGenesisRejectsInadmissibleSlotAddresses(t *testing.T) {
 			require.Contains(t, err.Error(), tc.reason)
 		})
 	}
+}
+
+// TestInitGenesisAcceptsBankBlockedOperator is the genesis half of the
+// operator/payout split: a bank-blocked address is a legitimate operator
+// identity and must import, while the same address as a payout must not.
+func TestInitGenesisAcceptsBankBlockedOperator(t *testing.T) {
+	blocked := testAccount(77)
+
+	k, ctx, authority, emergency := setup(t, blocked)
+	params := types.DefaultParams(authority, emergency)
+
+	imported := slot(t, 1, blocked, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1)
+	imported.PayoutAddress = testAccount(10)
+
+	_, err := k.InitGenesis(ctx, &types.GenesisState{
+		Params: &params, Slots: []*types.CoreSlot{imported}, NextSlotId: 2,
+	})
+	require.NoError(t, err, "a bank-blocked operator identity must import")
+
+	stored, err := k.GetSlot(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, blocked, stored.OperatorAddress)
 }
 
 // TestInitGenesisRejectsBeforeAnyWrite is the preflight property: a genesis

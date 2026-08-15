@@ -1,12 +1,29 @@
 // Package economicaddress holds the one canonical rule deciding whether an
 // address may receive or hold protocol value.
 //
-// An economic address is an operator, payout, treasury, entitlement or
-// settlement-recipient address — anywhere the protocol directs value. It is NOT
-// a control-plane identity: a governance authority, an emergency authority or a
-// transaction signer is an authorization, and several of those are deliberately
-// module accounts. Applying this rule to them would break the chain's own
-// control plane, so callers must classify a field before validating it.
+// An economic address is a payout, settlement, treasury or settlement-recipient
+// address — anywhere the protocol DIRECTS VALUE. It is not merely any address
+// the protocol stores.
+//
+// # Destinations versus identities
+//
+// Chain architecture V2.2 §25 scopes the economic rule to value destinations:
+// payout_address, settlement_address, treasury destinations when enabled, and
+// settlement recipients. Several other fields are addresses without being
+// destinations, and applying the economic rule to them is a bug in the other
+// direction:
+//
+//   - A governance authority and an emergency authority are module accounts by
+//     design. Refusing them would leave the chain unable to govern itself.
+//   - A transaction signer submits a claim; the value goes to each record's
+//     stored payout address regardless of who submitted it.
+//   - An operator address is required by §18 to be VALID, and is persisted
+//     alongside a payout address, but the protocol never sends to it. Refusing a
+//     bank-blocked operator would deny an operator the protocol permits.
+//
+// The package therefore offers two levels, and callers must classify a field
+// before choosing one. ParseAccountAddress answers "is this an address on this
+// chain"; Validate answers "may this address receive protocol value".
 //
 // # Why one rule, and why here
 //
@@ -33,6 +50,7 @@ package economicaddress
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"cosmossdk.io/core/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -50,8 +68,11 @@ var (
 	// ErrEmptyAddress reports an address that is absent where one is required.
 	ErrEmptyAddress = errors.New("economicaddress: address is empty")
 
-	// ErrInvalidAddress reports a value that is not a valid account address for
-	// this chain, including one carrying another chain's prefix.
+	// ErrInvalidAddress reports a value that cannot serve as an economic address:
+	// one that is not a valid account address for this chain, including one
+	// carrying another chain's prefix, and one whose bytes are entirely zero.
+	// §25 requires an economic address to be both non-empty and non-zero, and the
+	// all-zero address is a well-formed encoding that nobody controls.
 	ErrInvalidAddress = errors.New("economicaddress: not a valid account address for this chain")
 
 	// ErrModuleAccount reports a module account. Module accounts hold protocol
@@ -112,8 +133,24 @@ func New(codec address.Codec, moduleAccountNames []string, blocked map[string]bo
 		moduleAccounts[string(authtypes.NewModuleAddress(name))] = struct{}{}
 	}
 
-	blockedSet := make(map[string]struct{}, len(blocked))
-	for encoded := range blocked {
+	// The bank set is boolean-VALUED, not merely keyed: an entry mapped to false
+	// is a key that is explicitly NOT prohibited. Treating every key as blocked
+	// would refuse destinations bank permits, so only true-valued entries are
+	// taken. False-valued entries are not decoded at all — they are not part of
+	// the prohibited set, so a malformed one is not this rule's business.
+	prohibited := make([]string, 0, len(blocked))
+	for encoded, isBlocked := range blocked {
+		if isBlocked {
+			prohibited = append(prohibited, encoded)
+		}
+	}
+	// Sorted before decoding so that which malformed entry is reported does not
+	// depend on Go's map iteration order. Construction failure must be the same
+	// failure every run.
+	sort.Strings(prohibited)
+
+	blockedSet := make(map[string]struct{}, len(prohibited))
+	for _, encoded := range prohibited {
 		raw, err := codec.StringToBytes(encoded)
 		if err != nil {
 			// The bank set is authoritative; if this chain's own codec cannot read
@@ -130,13 +167,16 @@ func New(codec address.Codec, moduleAccountNames []string, blocked map[string]bo
 // IsConfigured reports whether the validator was built by New.
 func (v Validator) IsConfigured() bool { return v.codec != nil }
 
-// Validate reports whether address may hold protocol value, returning the parsed
-// address so a caller needing bytes for a transfer does not parse a second time.
+// ParseAccountAddress decodes an address using the chain's account codec and
+// nothing more. It answers "is this an address on this chain", which is what
+// §18 asks of an operator address and what any control identity needs.
 //
-// A second independent parse is not merely wasteful: it is where the two copies
-// of a rule start to differ, and where an ignored error turns a rejected address
-// into a zero-value one.
-func (v Validator) Validate(address string) (sdk.AccAddress, error) {
+// It deliberately performs NO economic checks: no module-account exclusion, no
+// bank-blocked exclusion, no non-zero requirement. Those belong to value
+// destinations, and imposing them here would refuse identities the protocol
+// permits. There is still exactly one economic rule — this is only the
+// account-syntax primitive it is built on.
+func (v Validator) ParseAccountAddress(address string) (sdk.AccAddress, error) {
 	if !v.IsConfigured() {
 		return nil, ErrUnconfigured
 	}
@@ -151,6 +191,33 @@ func (v Validator) Validate(address string) (sdk.AccAddress, error) {
 	if len(raw) == 0 {
 		return nil, ErrEmptyAddress
 	}
+	return sdk.AccAddress(raw), nil
+}
+
+// Validate reports whether address may RECEIVE PROTOCOL VALUE, returning the
+// parsed address so a caller needing bytes for a transfer does not parse a
+// second time.
+//
+// A second independent parse is not merely wasteful: it is where the two copies
+// of a rule start to differ, and where an ignored error turns a rejected address
+// into a zero-value one.
+//
+// The rule is account syntax, plus §25's three additional requirements: the
+// address must be non-zero, must not be a module account, and must not be
+// bank-blocked. Use ParseAccountAddress instead for an identity that is stored
+// but never sent to.
+func (v Validator) Validate(address string) (sdk.AccAddress, error) {
+	raw, err := v.ParseAccountAddress(address)
+	if err != nil {
+		return nil, err
+	}
+
+	// §25 requires an economic address to be non-empty AND non-zero. The all-zero
+	// address of otherwise normal length is a well-formed encoding that no key
+	// controls, so value sent there is destroyed as surely as if it were burned.
+	if isZero(raw) {
+		return nil, fmt.Errorf("%w: %s: address is all zero", ErrInvalidAddress, address)
+	}
 
 	// Module accounts are checked before the bank set so an address that is both
 	// reports the same reason every time. A module account must be refused even
@@ -163,7 +230,17 @@ func (v Validator) Validate(address string) (sdk.AccAddress, error) {
 		return nil, fmt.Errorf("%w: %s", ErrBlockedAddress, address)
 	}
 
-	return sdk.AccAddress(raw), nil
+	return raw, nil
+}
+
+// isZero reports whether every byte of a decoded address is zero.
+func isZero(raw []byte) bool {
+	for _, b := range raw {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateOptional applies the rule only when an address is present. It exists

@@ -76,17 +76,21 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) ([
 	return k.diffAndPersist(ctx)
 }
 
-// validateGenesisEconomicAddresses applies the canonical rule to every economic
-// address the genesis state would persist. Params.Authority and
-// Params.EmergencyAuthority are deliberately absent: they are control-plane
-// identities and are module accounts by design, so the economic rule would
-// reject the chain's own governance.
+// validateGenesisEconomicAddresses applies address admission to every slot the
+// genesis state would persist, at the level each field warrants: the operator
+// address is a control identity and is only required to be a valid account
+// address (§18), while the payout address is a value destination and takes the
+// full canonical economic rule (§25).
+//
+// Params.Authority and Params.EmergencyAuthority are deliberately absent: they
+// are control-plane identities and are module accounts by design, so the
+// economic rule would reject the chain's own governance.
 func (k Keeper) validateGenesisEconomicAddresses(genesis *types.GenesisState) error {
 	for _, slot := range genesis.Slots {
 		if slot == nil {
 			continue
 		}
-		if _, err := k.economicAddresses.Validate(slot.OperatorAddress); err != nil {
+		if _, err := k.economicAddresses.ParseAccountAddress(slot.OperatorAddress); err != nil {
 			return types.ErrInvalidAddress.Wrapf("slot %d operator address: %v", slot.SlotId, err)
 		}
 		if _, err := k.economicAddresses.Validate(slot.PayoutAddress); err != nil {

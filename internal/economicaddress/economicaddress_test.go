@@ -104,6 +104,129 @@ func TestBlockedAccountRejectedWithoutBeingModule(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestAllZeroAddressRejected covers §25's non-zero requirement. The all-zero
+// address of otherwise normal length is a well-formed encoding that no key
+// controls, so value sent there is destroyed.
+func TestAllZeroAddressRejected(t *testing.T) {
+	validator := newValidator(t, nil)
+	zero := encode(t, make([]byte, 20))
+
+	// Constructed through the codec, not as a literal string.
+	err := errOf(validator.Validate(zero))
+	require.ErrorIs(t, err, economicaddress.ErrInvalidAddress)
+	require.Contains(t, err.Error(), "all zero")
+
+	// The uppercase bech32 spelling of the same value is the same address.
+	require.ErrorIs(t, errOf(validator.Validate(strings.ToUpper(zero))), economicaddress.ErrInvalidAddress)
+
+	// The optional form must refuse it too — present but null is not absent.
+	require.ErrorIs(t, errOf(validator.ValidateOptional(zero)), economicaddress.ErrInvalidAddress)
+
+	// An ordinary non-zero address is unaffected, including one whose leading
+	// bytes are zero.
+	_, err = validator.Validate(account(t, 3))
+	require.NoError(t, err)
+	trailing := make([]byte, 20)
+	trailing[19] = 1
+	_, err = validator.Validate(encode(t, trailing))
+	require.NoError(t, err, "only an entirely zero address is refused")
+}
+
+// TestAllZeroIsAnEconomicRuleOnly pins the scope of the non-zero requirement:
+// it belongs to value destinations, not to the account-syntax primitive that
+// control identities use.
+func TestAllZeroIsAnEconomicRuleOnly(t *testing.T) {
+	validator := newValidator(t, nil)
+	zero := encode(t, make([]byte, 20))
+
+	parsed, err := validator.ParseAccountAddress(zero)
+	require.NoError(t, err, "the zero address is syntactically a valid account address")
+	require.Equal(t, zero, encode(t, parsed))
+}
+
+// TestParseAccountAddressAppliesNoEconomicExclusion is the primitive behind the
+// operator/payout split: it answers only "is this an address on this chain".
+func TestParseAccountAddressAppliesNoEconomicExclusion(t *testing.T) {
+	blockedAddress := account(t, 61)
+	validator := newValidator(t, map[string]bool{blockedAddress: true})
+
+	// Neither a module account nor a bank-blocked destination is excluded here.
+	for _, address := range []string{blockedAddress, moduleAddress(t, moduleName)} {
+		parsed, err := validator.ParseAccountAddress(address)
+		require.NoErrorf(t, err, "address %s must parse as an identity", address)
+		require.Equal(t, address, encode(t, parsed))
+
+		// The same address is refused as a value destination.
+		require.Errorf(t, errOf(validator.Validate(address)), "address %s must fail as a destination", address)
+	}
+
+	// It still rejects what is not an address at all.
+	require.ErrorIs(t, errOf(validator.ParseAccountAddress("")), economicaddress.ErrEmptyAddress)
+	require.ErrorIs(t, errOf(validator.ParseAccountAddress("not-an-address")), economicaddress.ErrInvalidAddress)
+
+	var zero economicaddress.Validator
+	require.ErrorIs(t, errOf(zero.ParseAccountAddress(account(t, 1))), economicaddress.ErrUnconfigured)
+}
+
+// TestBlockedMapFollowsItsBooleanValue covers the bank contract exactly. The
+// blocked set is boolean-VALUED: a key mapped to false is explicitly permitted,
+// and treating every key as prohibited would refuse destinations bank allows.
+func TestBlockedMapFollowsItsBooleanValue(t *testing.T) {
+	permitted := account(t, 71)
+	prohibited := account(t, 72)
+
+	t.Run("false-valued entry is not blocked", func(t *testing.T) {
+		validator := newValidator(t, map[string]bool{permitted: false})
+		_, err := validator.Validate(permitted)
+		require.NoError(t, err, "an entry mapped to false is not a prohibited destination")
+	})
+
+	t.Run("true-valued entry is blocked", func(t *testing.T) {
+		validator := newValidator(t, map[string]bool{prohibited: true})
+		require.ErrorIs(t, errOf(validator.Validate(prohibited)), economicaddress.ErrBlockedAddress)
+	})
+
+	t.Run("both in one map, each follows its own boolean", func(t *testing.T) {
+		validator := newValidator(t, map[string]bool{permitted: false, prohibited: true})
+
+		_, err := validator.Validate(permitted)
+		require.NoError(t, err)
+		require.ErrorIs(t, errOf(validator.Validate(prohibited)), economicaddress.ErrBlockedAddress)
+	})
+}
+
+// TestMalformedBlockedEntriesAreDeterministic covers the diagnostic. Which
+// malformed entry gets reported must not depend on Go's map iteration order, or
+// the same configuration would fail differently between runs.
+func TestMalformedBlockedEntriesAreDeterministic(t *testing.T) {
+	t.Run("two malformed true entries give a stable result", func(t *testing.T) {
+		blocked := map[string]bool{"aaa-not-an-address": true, "zzz-not-an-address": true}
+
+		_, first := economicaddress.New(codec(), []string{moduleName}, blocked)
+		require.Error(t, first)
+		for i := 0; i < 20; i++ {
+			_, again := economicaddress.New(codec(), []string{moduleName}, blocked)
+			require.Error(t, again)
+			require.Equal(t, first.Error(), again.Error(),
+				"construction must fail identically every run")
+		}
+		// Sorted order decides, so the lexicographically first entry is reported.
+		require.Contains(t, first.Error(), "aaa-not-an-address")
+	})
+
+	t.Run("a malformed false entry does not fail construction", func(t *testing.T) {
+		// A false-valued key is not part of the prohibited set, so it is never
+		// decoded and cannot make the validator unbuildable.
+		validator, err := economicaddress.New(
+			codec(), []string{moduleName}, map[string]bool{"not-an-address": false},
+		)
+		require.NoError(t, err)
+
+		_, err = validator.Validate(account(t, 73))
+		require.NoError(t, err)
+	})
+}
+
 // TestUnconfiguredValidatorFailsClosed is the property that makes a forgotten
 // injection loud instead of silently permissive.
 func TestUnconfiguredValidatorFailsClosed(t *testing.T) {

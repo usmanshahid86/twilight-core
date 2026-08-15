@@ -91,7 +91,7 @@ func (k Keeper) validateGenesisEconomicAddresses(genState types.GenesisState) er
 		if reward == nil {
 			continue
 		}
-		if err := k.validateRewardAddresses(
+		if err := k.validateRewardRecord(
 			fmt.Sprintf("genesis claim record slot %d epoch %d", reward.SlotId, reward.EpochNumber), reward,
 		); err != nil {
 			return err

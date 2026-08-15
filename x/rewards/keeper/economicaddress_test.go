@@ -141,10 +141,10 @@ func TestSetClaimRecordRejectsInadmissibleAddresses(t *testing.T) {
 		operator string
 		payout   string
 	}{
-		{"module-account operator", moduleAccount, good},
 		{"module-account payout", good, moduleAccount},
 		{"bank-blocked payout", good, blocked},
-		{"bank-blocked operator", blocked, good},
+		{"all-zero payout", good, zeroAddress()},
+		{"malformed operator", "not-an-address", good},
 	}
 
 	for _, tc := range cases {
@@ -159,6 +159,81 @@ func TestSetClaimRecordRejectsInadmissibleAddresses(t *testing.T) {
 			require.False(t, found, "a rejected claim record must not be persisted")
 		})
 	}
+}
+
+// TestRewardRecordOperatorIsAnIdentityNotADestination is the rewards half of the
+// operator/payout split. A bank-blocked address is legitimate as the persisted
+// operator identity and inadmissible as the payout destination — the same
+// address, two different answers, decided by which field it occupies.
+func TestRewardRecordOperatorIsAnIdentityNotADestination(t *testing.T) {
+	blocked := testAccount(77)
+
+	t.Run("claim record with a blocked operator and ordinary payout is accepted", func(t *testing.T) {
+		k, ctx, _ := setupKeeperWithBlocked(t, &coreSlotKeeperMock{}, blocked)
+		require.NoError(t, k.SetClaimRecord(ctx, reward(1, 1, blocked, testAccount(10))))
+
+		stored, found, err := k.GetClaimRecord(ctx, 1, 1)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, blocked, stored.OperatorAddress)
+	})
+
+	t.Run("the same address as payout is rejected", func(t *testing.T) {
+		k, ctx, _ := setupKeeperWithBlocked(t, &coreSlotKeeperMock{}, blocked)
+		require.ErrorIs(t,
+			k.SetClaimRecord(ctx, reward(1, 1, testAccount(9), blocked)),
+			types.ErrInvalidAddress)
+	})
+
+	t.Run("finalized epoch with a blocked embedded operator is accepted", func(t *testing.T) {
+		k, ctx, _ := setupKeeperWithBlocked(t, &coreSlotKeeperMock{}, blocked)
+		good := reward(1, 1, blocked, testAccount(10))
+		config := types.DefaultEpochConfigSnapshot(types.DefaultParams())
+		require.NoError(t, k.SetFinalizedEpoch(ctx, finalizedEpoch(1, &config, &good)))
+	})
+
+	t.Run("payout snapshot with a blocked operator is accepted", func(t *testing.T) {
+		stored := coreslottypes.CoreSlot{
+			SlotId:          1,
+			OperatorAddress: blocked,
+			PayoutAddress:   testAccount(10),
+			Status:          coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
+			RewardWeight:    coreslottypes.DefaultRewardWeight,
+		}
+		coreSlots := &coreSlotKeeperMock{
+			active:  []coreslottypes.CoreSlot{stored},
+			slots:   map[uint64]coreslottypes.CoreSlot{1: stored},
+			weights: map[uint64]coreslottypes.OperatorRewardWeight{1: {SlotId: 1, FinalWeight: "1"}},
+		}
+		k, ctx, _ := setupKeeperWithBlocked(t, coreSlots, blocked)
+
+		snapshots, err := k.GetActiveSlotSnapshots(ctx)
+		require.NoError(t, err, "a bank-blocked operator identity must not block a payout snapshot")
+		require.Len(t, snapshots, 1)
+		require.Equal(t, testAccount(10), snapshots[0].PayoutAddress.String())
+	})
+
+	t.Run("genesis with a blocked operator is accepted", func(t *testing.T) {
+		k, ctx, _ := setupKeeperWithBlocked(t, &coreSlotKeeperMock{}, blocked)
+		genesis := genesisWith(t, func(g *types.GenesisState) {
+			record := reward(1, 1, blocked, testAccount(10))
+			g.ClaimRecords = []*types.EligibleSlotReward{&record}
+		})
+		require.NoError(t, k.InitGenesis(ctx, genesis))
+	})
+}
+
+// TestAllZeroTreasuryAddressRejected exercises §25's non-zero requirement
+// through a real economic admission path rather than only the helper.
+func TestAllZeroTreasuryAddressRejected(t *testing.T) {
+	k, ctx, _ := setupKeeper(t, &coreSlotKeeperMock{})
+
+	err := k.SetParams(ctx, paramsWithTreasury(zeroAddress(), 100, 0))
+	require.ErrorIs(t, err, types.ErrInvalidAddress)
+	require.Contains(t, err.Error(), "all zero")
+
+	// And at transfer time.
+	require.ErrorIs(t, k.PayTreasury(ctx, zeroAddress(), math.NewInt(10), "utwlt"), types.ErrInvalidAddress)
 }
 
 func TestSetClaimRecordAcceptsOrdinaryAddresses(t *testing.T) {
@@ -236,7 +311,7 @@ func TestSlotRewardSnapshotRejectsInadmissibleStoredAddresses(t *testing.T) {
 		operator string
 		payout   string
 	}{
-		{"module-account operator", moduleAccount, testAccount(10)},
+		{"module-account payout", testAccount(9), moduleAccount},
 		{"bank-blocked payout", testAccount(9), blocked},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -336,8 +411,8 @@ func TestInitGenesisRejectsInadmissibleEconomicAddresses(t *testing.T) {
 			record := reward(1, 1, testAccount(9), blocked)
 			g.ClaimRecords = []*types.EligibleSlotReward{&record}
 		}},
-		{"finalized epoch reward operator", func(g *types.GenesisState) {
-			bad := reward(1, 1, moduleAccount, testAccount(10))
+		{"finalized epoch reward payout", func(g *types.GenesisState) {
+			bad := reward(1, 1, testAccount(9), moduleAccount)
 			config := types.DefaultEpochConfigSnapshot(types.DefaultParams())
 			epoch := finalizedEpoch(1, &config, &bad)
 			g.FinalizedEpochs = []*types.EpochReward{&epoch}

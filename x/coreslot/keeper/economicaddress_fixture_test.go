@@ -65,6 +65,13 @@ func setupWithoutEconomicAddresses(t *testing.T) (keeper.Keeper, sdk.Context, st
 // testEconomicAddresses builds a real validator through the real constructor.
 // The codec follows whatever account prefix the test environment is configured
 // with, so the fixture cannot drift from the addresses the tests generate.
+// zeroAddress is the all-zero account address: a well-formed encoding that no
+// key controls. §25 requires an economic address to be non-zero, so it must be
+// refused as a destination.
+func zeroAddress() string {
+	return sdk.AccAddress(make([]byte, 20)).String()
+}
+
 func testEconomicAddresses(t *testing.T, blocked ...string) economicaddress.Validator {
 	t.Helper()
 	blockedSet := make(map[string]bool, len(blocked))

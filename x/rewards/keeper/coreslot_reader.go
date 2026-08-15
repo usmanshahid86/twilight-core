@@ -52,8 +52,12 @@ func (k Keeper) slotRewardSnapshot(ctx context.Context, slot coreslottypes.CoreS
 	// should already have guaranteed these values, so the check is defensive —
 	// but a snapshot is exactly where a value that entered state before this rule
 	// existed, or through some future path, would otherwise be laundered into a
-	// payout. The parsed addresses are reused rather than decoded again below.
-	operator, err := k.economicAddresses.Validate(slot.OperatorAddress)
+	// payout.
+	//
+	// Only the payout address is a destination. The operator address is carried
+	// on the snapshot as identity and is parsed, not economically validated; the
+	// parsed forms are reused rather than decoded again.
+	operator, err := k.economicAddresses.ParseAccountAddress(slot.OperatorAddress)
 	if err != nil {
 		return SlotRewardSnapshot{}, types.ErrInvalidAddress.Wrapf("slot %d operator address: %v", slot.SlotId, err)
 	}

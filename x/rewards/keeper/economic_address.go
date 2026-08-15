@@ -61,20 +61,40 @@ func (k Keeper) validateSnapshotTreasury(label string, snapshot types.EpochConfi
 	)
 }
 
-// validateRewardAddresses applies the canonical rule to the operator and payout
-// addresses carried by a reward record. Both are persisted economic state and
-// the payout address is a value destination at claim time.
-func (k Keeper) validateRewardAddresses(label string, reward *types.EligibleSlotReward) error {
-	if reward == nil {
-		return types.ErrInvalidState.Wrapf("%s: reward record is nil", label)
-	}
-	if _, err := k.economicAddresses.Validate(reward.OperatorAddress); err != nil {
+// validateOperatorIdentity requires an operator address to be a valid account
+// address and nothing more.
+//
+// An operator address is stored identity, not a destination: §18 requires it to
+// be valid, and §25's destination list does not include it. Refusing a
+// bank-blocked operator would deny an operator the protocol permits, while
+// protecting nothing — the protocol never sends there.
+func (k Keeper) validateOperatorIdentity(label, address string) error {
+	if _, err := k.economicAddresses.ParseAccountAddress(address); err != nil {
 		return types.ErrInvalidAddress.Wrapf("%s operator address: %v", label, err)
 	}
-	if _, err := k.economicAddresses.Validate(reward.PayoutAddress); err != nil {
+	return nil
+}
+
+// validatePayoutDestination applies the full canonical economic rule to a payout
+// address, which is where value actually goes.
+func (k Keeper) validatePayoutDestination(label, address string) error {
+	if _, err := k.economicAddresses.Validate(address); err != nil {
 		return types.ErrInvalidAddress.Wrapf("%s payout address: %v", label, err)
 	}
 	return nil
+}
+
+// validateRewardRecord admits the two addresses a reward record carries at the
+// level each warrants: the operator address as an identity, the payout address
+// as a value destination. The two are deliberately NOT held to the same rule.
+func (k Keeper) validateRewardRecord(label string, reward *types.EligibleSlotReward) error {
+	if reward == nil {
+		return types.ErrInvalidState.Wrapf("%s: reward record is nil", label)
+	}
+	if err := k.validateOperatorIdentity(label, reward.OperatorAddress); err != nil {
+		return err
+	}
+	return k.validatePayoutDestination(label, reward.PayoutAddress)
 }
 
 // validateFinalizedEpochAddresses applies the canonical rule to every economic
@@ -87,7 +107,7 @@ func (k Keeper) validateFinalizedEpochAddresses(label string, epoch types.EpochR
 		}
 	}
 	for _, reward := range epoch.Rewards {
-		if err := k.validateRewardAddresses(label, reward); err != nil {
+		if err := k.validateRewardRecord(label, reward); err != nil {
 			return err
 		}
 	}

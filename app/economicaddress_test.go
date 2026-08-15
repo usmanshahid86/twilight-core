@@ -78,16 +78,18 @@ func TestRealModuleAccountsRejectedAsEconomicAddresses(t *testing.T) {
 	for _, name := range app.ModuleAccountNames() {
 		moduleAddress := authtypes.NewModuleAddress(name).String()
 
-		t.Run("coreslot registration rejects "+name, func(t *testing.T) {
+		t.Run("coreslot payout rejects "+name, func(t *testing.T) {
 			a := newApp(t)
 			ctx := appContext(t, a)
 			seedCoreSlotParams(t, a, ctx)
 
+			// The PAYOUT address is the value destination. The operator address is
+			// an identity and is deliberately not subject to this exclusion.
 			msgs := coreslotkeeper.NewMsgServer(a.CoreSlotKeeper)
 			_, err := msgs.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
 				Authority:       app.AuthorityAddress(),
-				OperatorAddress: moduleAddress,
-				PayoutAddress:   ordinaryAccount(9),
+				OperatorAddress: ordinaryAccount(9),
+				PayoutAddress:   moduleAddress,
 				ConsensusPubkey: appPubkey(t, 2),
 			})
 			require.ErrorIs(t, err, coreslottypes.ErrInvalidAddress)

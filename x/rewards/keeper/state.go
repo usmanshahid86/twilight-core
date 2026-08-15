@@ -136,7 +136,7 @@ func (k Keeper) SetClaimRecord(ctx context.Context, reward types.EligibleSlotRew
 	if reward.SlotId == 0 || reward.EpochNumber == 0 {
 		return types.ErrInvalidState.Wrap("claim record requires nonzero slot and epoch")
 	}
-	if err := k.validateRewardAddresses("claim record", &reward); err != nil {
+	if err := k.validateRewardRecord("claim record", &reward); err != nil {
 		return err
 	}
 	return k.ClaimRecords.Set(ctx, collections.Join(reward.SlotId, reward.EpochNumber), reward)
