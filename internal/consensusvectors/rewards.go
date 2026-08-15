@@ -24,9 +24,9 @@ const (
 // cosmossdk.io/math.Int, never narrowed through a fixed-width type.
 type RewardPack struct {
 	Artifact                 string                  `json:"artifact"`
-	Version                  int                     `json:"version"`
-	Revision                 int                     `json:"revision"`
-	Normative                bool                    `json:"normative"`
+	Version                  Int                     `json:"version"`
+	Revision                 Int                     `json:"revision"`
+	Normative                Bool                    `json:"normative"`
 	EmissionReference        string                  `json:"emission_reference"`
 	EmissionVectors          []EmissionVector        `json:"emission_vectors"`
 	AllocationVectors        []AllocationVector      `json:"allocation_vectors"`
@@ -59,7 +59,7 @@ type AllocationVector struct {
 	Entitlements []string `json:"entitlements"`
 	CarryOut     string   `json:"carry_out"`
 	Allocated    string   `json:"allocated"`
-	NPos         int      `json:"n_pos"`
+	NPos         Int      `json:"n_pos"`
 }
 
 // PoolVector is one reward-pool relation case:
@@ -103,12 +103,15 @@ func LoadRewardPack() (RewardPack, error) {
 	if err := decodePack(RewardPackFilename, rewardPackBytes, &pack); err != nil {
 		return RewardPack{}, err
 	}
+	if err := requireMetadataPresence(RewardPackFilename, pack.Version, pack.Revision, pack.Normative); err != nil {
+		return RewardPack{}, err
+	}
 	if err := assertMetadata(
 		RewardPackFilename,
 		pack.Artifact, rewardPackArtifact,
-		pack.Version, rewardPackVersion,
-		pack.Revision, rewardPackRevision,
-		pack.Normative,
+		pack.Version.Value(), rewardPackVersion,
+		pack.Revision.Value(), rewardPackRevision,
+		pack.Normative.Bool(),
 	); err != nil {
 		return RewardPack{}, err
 	}
@@ -170,6 +173,7 @@ func (p RewardPack) validate(filename string) error {
 			requireNonEmptySlice(filename, prefix+".entitlements", len(v.Entitlements)),
 			requireAmount(filename, prefix+".carry_out", v.CarryOut),
 			requireAmount(filename, prefix+".allocated", v.Allocated),
+			requireIntSet(filename, prefix+".n_pos", v.NPos),
 		); err != nil {
 			return err
 		}

@@ -16,13 +16,13 @@ func TestLoadDrawPack(t *testing.T) {
 	if got, want := pack.Format, drawPackArtifact; got != want {
 		t.Errorf("format = %q, want %q", got, want)
 	}
-	if got, want := pack.Version, drawPackVersion; got != want {
+	if got, want := pack.Version.Value(), drawPackVersion; got != want {
 		t.Errorf("version = %d, want %d", got, want)
 	}
-	if got, want := pack.Revision, drawPackRevision; got != want {
+	if got, want := pack.Revision.Value(), drawPackRevision; got != want {
 		t.Errorf("revision = %d, want %d", got, want)
 	}
-	if !pack.Normative {
+	if !pack.Normative.Bool() {
 		t.Error("pack does not declare itself normative")
 	}
 
@@ -52,10 +52,10 @@ func TestLoadSelectedDrawIDsPack(t *testing.T) {
 	if got, want := pack.Artifact, selectedDrawIDsArtifact; got != want {
 		t.Errorf("artifact = %q, want %q", got, want)
 	}
-	if got, want := pack.Version, selectedDrawIDsVersion; got != want {
+	if got, want := pack.Version.Value(), selectedDrawIDsVersion; got != want {
 		t.Errorf("version = %d, want %d", got, want)
 	}
-	if got, want := pack.Revision, selectedDrawIDsRevision; got != want {
+	if got, want := pack.Revision.Value(), selectedDrawIDsRevision; got != want {
 		t.Errorf("revision = %d, want %d", got, want)
 	}
 	if len(pack.Vectors) != ExpectedSelectedDrawIDsVectors {
@@ -74,10 +74,10 @@ func TestLoadRewardPack(t *testing.T) {
 	if got, want := pack.Artifact, rewardPackArtifact; got != want {
 		t.Errorf("artifact = %q, want %q", got, want)
 	}
-	if got, want := pack.Version, rewardPackVersion; got != want {
+	if got, want := pack.Version.Value(), rewardPackVersion; got != want {
 		t.Errorf("version = %d, want %d", got, want)
 	}
-	if got, want := pack.Revision, rewardPackRevision; got != want {
+	if got, want := pack.Revision.Value(), rewardPackRevision; got != want {
 		t.Errorf("revision = %d, want %d", got, want)
 	}
 

@@ -246,15 +246,15 @@ func runRequiredAssertions(t *testing.T, pack consensusvectors.RewardPack, ledge
 			// The bound follows from flooring once per participating Slot: each
 			// division discards strictly less than one unit.
 			for _, v := range pack.AllocationVectors {
-				if v.NPos == 0 {
+				if v.NPos.Value() == 0 {
 					continue
 				}
 				pool := mustAmount(t, v.Pool)
 				rows, snapshots := allocationRows(v.BlocksActive)
 				_, _, carryOut, err := keeper.AllocateUniformActiveBlocks(1, pool, rows, snapshots)
 				require.NoError(t, err)
-				require.Truef(t, carryOut.LTE(math.NewInt(int64(v.NPos-1))),
-					"%s: carry %s exceeds n_pos-1 = %d", v.Name, carryOut, v.NPos-1)
+				require.Truef(t, carryOut.LTE(math.NewInt(int64(v.NPos.Value()-1))),
+					"%s: carry %s exceeds n_pos-1 = %d", v.Name, carryOut, v.NPos.Value()-1)
 			}
 		},
 		"cumulative_after <= max_supply": func(t *testing.T) {

@@ -24,9 +24,9 @@ const (
 // the pack, because these types mirror an artifact whose bytes are frozen.
 type DrawPack struct {
 	Format               string               `json:"format"`
-	Version              int                  `json:"version"`
-	Revision             int                  `json:"revision"`
-	Normative            bool                 `json:"normative"`
+	Version              Int                  `json:"version"`
+	Revision             Int                  `json:"revision"`
+	Normative            Bool                 `json:"normative"`
 	SpecStatus           string               `json:"spec_status"`
 	EncodingNotes        DrawEncodingNotes    `json:"encoding_notes"`
 	GenerationProvenance DrawProvenance       `json:"generation_provenance"`
@@ -53,7 +53,7 @@ type DrawEncodingNotes struct {
 type DrawProvenance struct {
 	GeneratedWith           string `json:"generated_with"`
 	BlockHashFixtureRule    string `json:"block_hash_fixture_rule"`
-	IndependentCheckRequire bool   `json:"independent_check_required"`
+	IndependentCheckRequire Bool   `json:"independent_check_required"`
 	Note                    string `json:"note"`
 }
 
@@ -94,7 +94,7 @@ type BeaconHashVector struct {
 	BeaconEndHeight                U64           `json:"beacon_end_height"`
 	IncludedEntries                []BeaconEntry `json:"included_entries"`
 	ExpectedBeaconHashHex          string        `json:"expected_beacon_hash_hex"`
-	CommittedHeightIntentionallyNo bool          `json:"committed_height_intentionally_absent"`
+	CommittedHeightIntentionallyNo Bool          `json:"committed_height_intentionally_absent"`
 }
 
 // BeaconEntry is one included beacon entry.
@@ -119,14 +119,14 @@ type TicketVector struct {
 // zero- and one-candidate short circuits, where the rate arithmetic is not
 // evaluated at all.
 type WinnerCountVector struct {
-	CandidateCount            U64  `json:"candidate_count"`
-	SelectionRateBps          U64  `json:"selection_rate_bps"`
-	SlotMaxWinners            U64  `json:"slot_max_winners"`
-	ProtocolMaxWinnersPerDraw U64  `json:"protocol_max_winners_per_draw"`
-	QuotientQ                 U64  `json:"quotient_q"`
-	RemainderRem              U64  `json:"remainder_rem"`
-	RateK                     *U64 `json:"rate_k"`
-	ExpectedK                 U64  `json:"expected_k"`
+	CandidateCount            U64         `json:"candidate_count"`
+	SelectionRateBps          U64         `json:"selection_rate_bps"`
+	SlotMaxWinners            U64         `json:"slot_max_winners"`
+	ProtocolMaxWinnersPerDraw U64         `json:"protocol_max_winners_per_draw"`
+	QuotientQ                 U64         `json:"quotient_q"`
+	RemainderRem              U64         `json:"remainder_rem"`
+	RateK                     NullableU64 `json:"rate_k"`
+	ExpectedK                 U64         `json:"expected_k"`
 }
 
 // DrawEndToEnd holds the six end-to-end Selection cases.
@@ -216,7 +216,7 @@ type SmallCandidateCase struct {
 	CandidateListDrawIDsHex     []string `json:"candidate_list_draw_ids_hex"`
 	ExpectedCandidateSetHashHex string   `json:"expected_candidate_set_hash_hex"`
 	ExpectedK                   U64      `json:"expected_k"`
-	BeaconRequired              bool     `json:"beacon_required"`
+	BeaconRequired              Bool     `json:"beacon_required"`
 	ExpectedOutcome             string   `json:"expected_outcome"`
 	ExpectedWinnerDrawIDsHex    []string `json:"expected_winner_draw_ids_hex"`
 }
@@ -231,7 +231,7 @@ type InvalidBeaconCase struct {
 	ExpectedUsableBlockCount          U64             `json:"expected_usable_block_count"`
 	ExpectedDistinctExternalProposers U64             `json:"expected_distinct_external_proposers"`
 	ExpectedOutcome                   string          `json:"expected_outcome"`
-	BeaconHashDefined                 bool            `json:"beacon_hash_defined"`
+	BeaconHashDefined                 Bool            `json:"beacon_hash_defined"`
 }
 
 // ProposerResVector is a historical proposer-attribution fixture. Executing one
@@ -289,7 +289,7 @@ type EmptySetCrossCheck struct {
 	InputB           CandidateSetHashVector `json:"input_b"`
 	ExpectedHashAHex string                 `json:"expected_hash_a_hex"`
 	ExpectedHashBHex string                 `json:"expected_hash_b_hex"`
-	ExpectedEqual    bool                   `json:"expected_equal"`
+	ExpectedEqual    Bool                   `json:"expected_equal"`
 	Note             string                 `json:"note"`
 }
 
@@ -322,12 +322,15 @@ func LoadDrawPack() (DrawPack, error) {
 	if err := decodePack(DrawPackFilename, drawPackBytes, &pack); err != nil {
 		return DrawPack{}, err
 	}
+	if err := requireMetadataPresence(DrawPackFilename, pack.Version, pack.Revision, pack.Normative); err != nil {
+		return DrawPack{}, err
+	}
 	if err := assertMetadata(
 		DrawPackFilename,
 		pack.Format, drawPackArtifact,
-		pack.Version, drawPackVersion,
-		pack.Revision, drawPackRevision,
-		pack.Normative,
+		pack.Version.Value(), drawPackVersion,
+		pack.Revision.Value(), drawPackRevision,
+		pack.Normative.Bool(),
 	); err != nil {
 		return DrawPack{}, err
 	}
@@ -366,6 +369,7 @@ func (p DrawPack) validate(filename string) error {
 		requireText(filename, "generation_provenance.generated_with", p.GenerationProvenance.GeneratedWith),
 		requireText(filename, "generation_provenance.block_hash_fixture_rule", p.GenerationProvenance.BlockHashFixtureRule),
 		requireText(filename, "generation_provenance.note", p.GenerationProvenance.Note),
+		requireBoolSet(filename, "generation_provenance.independent_check_required", p.GenerationProvenance.IndependentCheckRequire),
 	); err != nil {
 		return err
 	}
@@ -379,8 +383,6 @@ func (p DrawPack) validate(filename string) error {
 	}
 	for i, v := range p.WinnerCountVectors {
 		prefix := fmt.Sprintf("winner_count_vectors[%d]", i)
-		// rate_k is deliberately absent for the zero- and one-candidate short
-		// circuits, where the rate arithmetic is never evaluated.
 		if err := firstError(
 			requireSet(filename, prefix+".candidate_count", v.CandidateCount),
 			requireSet(filename, prefix+".selection_rate_bps", v.SelectionRateBps),
@@ -391,6 +393,26 @@ func (p DrawPack) validate(filename string) error {
 			requireSet(filename, prefix+".expected_k", v.ExpectedK),
 		); err != nil {
 			return err
+		}
+
+		// rate_k is null for the zero- and one-candidate short circuits, where the
+		// rate arithmetic is never evaluated, and a value everywhere else. The null
+		// is itself a statement, so the member must be PRESENT in both cases: an
+		// absent member would otherwise read as "not evaluated" without the pack
+		// ever saying so.
+		if !v.RateK.IsSet() {
+			return structureError(filename, "%s.rate_k is missing", prefix)
+		}
+		shortCircuit := v.CandidateCount.Uint64() < 2
+		switch {
+		case shortCircuit && !v.RateK.IsNull():
+			return structureError(filename,
+				"%s states candidate_count %d but a non-null rate_k; the rate arithmetic is not evaluated below two candidates",
+				prefix, v.CandidateCount.Uint64())
+		case !shortCircuit && v.RateK.IsNull():
+			return structureError(filename,
+				"%s states candidate_count %d but a null rate_k; the rate arithmetic is evaluated at two candidates or more",
+				prefix, v.CandidateCount.Uint64())
 		}
 	}
 
@@ -432,11 +454,7 @@ func (p DrawPack) validate(filename string) error {
 		return err
 	}
 	for i, v := range p.TimingVectors {
-		prefix := fmt.Sprintf("timing_vectors[%d]", i)
-		if err := firstError(
-			requireText(filename, prefix+".name", v.Name),
-			requireText(filename, prefix+".expected", v.Expected),
-		); err != nil {
+		if err := v.validate(filename, fmt.Sprintf("timing_vectors[%d]", i)); err != nil {
 			return err
 		}
 	}
@@ -445,11 +463,7 @@ func (p DrawPack) validate(filename string) error {
 		return err
 	}
 	for i, v := range p.NegativeVectors {
-		prefix := fmt.Sprintf("negative_vectors[%d]", i)
-		if err := firstError(
-			requireText(filename, prefix+".name", v.Name),
-			requireText(filename, prefix+".expected_error", v.ExpectedError),
-		); err != nil {
+		if err := v.validate(filename, fmt.Sprintf("negative_vectors[%d]", i)); err != nil {
 			return err
 		}
 	}
@@ -525,6 +539,7 @@ func (p DrawPrimitives) validate(filename string) error {
 		requireSet(filename, "primitives.beacon_hash_v1.beacon_end_height", beacon.BeaconEndHeight),
 		requireNonEmptySlice(filename, "primitives.beacon_hash_v1.included_entries", len(beacon.IncludedEntries)),
 		requireHex32(filename, "primitives.beacon_hash_v1.expected_beacon_hash_hex", beacon.ExpectedBeaconHashHex),
+		requireBoolSet(filename, "primitives.beacon_hash_v1.committed_height_intentionally_absent", beacon.CommittedHeightIntentionallyNo),
 	); err != nil {
 		return err
 	}
@@ -641,7 +656,7 @@ func (e DrawEndToEnd) validate(filename string) error {
 			requireContext(filename, tc.prefix, tc.value.ChainID, tc.value.SlotID, tc.value.TargetEpoch),
 			requireHex32(filename, tc.prefix+".expected_candidate_set_hash_hex", tc.value.ExpectedCandidateSetHashHex),
 			requireSet(filename, tc.prefix+".expected_k", tc.value.ExpectedK),
-			requireText(filename, tc.prefix+".expected_outcome", tc.value.ExpectedOutcome),
+			requireBoolSet(filename, tc.prefix+".beacon_required", tc.value.BeaconRequired),
 		); err != nil {
 			return err
 		}
@@ -668,7 +683,7 @@ func (e DrawEndToEnd) validate(filename string) error {
 			requireNonEmptySlice(filename, tc.prefix+".observed_beacon_window", len(tc.value.ObservedBeaconWindow)),
 			requireSet(filename, tc.prefix+".expected_usable_block_count", tc.value.ExpectedUsableBlockCount),
 			requireSet(filename, tc.prefix+".expected_distinct_external_proposers", tc.value.ExpectedDistinctExternalProposers),
-			requireText(filename, tc.prefix+".expected_outcome", tc.value.ExpectedOutcome),
+			requireBoolSet(filename, tc.prefix+".beacon_hash_defined", tc.value.BeaconHashDefined),
 		); err != nil {
 			return err
 		}
@@ -690,6 +705,137 @@ func validateObservedBlock(filename, prefix string, b ObservedBlock) error {
 	)
 }
 
+// validate checks a timing vector against the schema of its own rule.
+//
+// Timing vectors are variant-specific by design: a case about the commitment
+// window states the epoch anchor and the beacon geometry, while a case about a
+// late result states only the target-epoch start and the publication height.
+// Requiring the union would reject the pack; requiring only name and expected
+// would let a case lose the very field it exists to constrain.
+//
+// An unrecognized name is a hard failure rather than a fall-through to the
+// weakest schema, because a new case admitted without a schema would be checked
+// by nothing.
+func (v TimingVector) validate(filename, prefix string) error {
+	if err := firstError(
+		requireText(filename, prefix+".name", v.Name),
+		requireText(filename, prefix+".expected", v.Expected),
+	); err != nil {
+		return err
+	}
+
+	commitmentWindow := func() error {
+		return firstError(
+			requireSet(filename, prefix+".epoch_n_minus_1_start_height", v.EpochNMinus1StartHeight),
+			requireSet(filename, prefix+".epoch_n_start_height", v.EpochNStartHeight),
+			requireSet(filename, prefix+".beacon_start_offset_blocks", v.BeaconStartOffsetBlocks),
+			requireSet(filename, prefix+".beacon_window_blocks", v.BeaconWindowBlocks),
+			requireSet(filename, prefix+".committed_height", v.CommittedHeight),
+		)
+	}
+	publication := func() error {
+		return firstError(
+			requireSet(filename, prefix+".target_epoch_start_height", v.TargetEpochStartHeight),
+			requireSet(filename, prefix+".published_height", v.PublishedHeight),
+		)
+	}
+
+	switch v.Name {
+	case "valid_commit_first_block", "valid_commit_last_pre_beacon_block", "commit_at_beacon_start_rejected":
+		return commitmentWindow()
+
+	case "beacon_fit_rejection":
+		// This case states no committed height: it rejects on geometry alone.
+		return firstError(
+			requireSet(filename, prefix+".epoch_n_minus_1_start_height", v.EpochNMinus1StartHeight),
+			requireSet(filename, prefix+".epoch_n_start_height", v.EpochNStartHeight),
+			requireSet(filename, prefix+".beacon_start_offset_blocks", v.BeaconStartOffsetBlocks),
+			requireSet(filename, prefix+".beacon_window_blocks", v.BeaconWindowBlocks),
+			requireSet(filename, prefix+".derived_beacon_start_height", v.DerivedBeaconStartHeight),
+			requireSet(filename, prefix+".derived_beacon_end_height", v.DerivedBeaconEndHeight),
+			requireSet(filename, prefix+".latest_permitted_beacon_end_height", v.LatestPermittedBeaconEndHeight),
+		)
+
+	case "late_result_rejection", "valid_result_last_block":
+		return publication()
+
+	default:
+		return structureError(filename,
+			"%s names timing vector %q, which has no schema; a new case needs one before it can be validated",
+			prefix, v.Name)
+	}
+}
+
+// validate checks a negative vector against the schema of its own rejection case.
+//
+// Presence is all that is checked on the payload fields, deliberately. These
+// vectors carry deliberately malformed input — one of them states a draw ID that
+// is NOT 32 bytes, because that is the condition under test — so applying the
+// semantic HEX32 rule here would reject the pack for containing exactly what it
+// is supposed to contain. Structural validation asks whether the payload is
+// present; the conformance test asks what the implementation does with it.
+//
+// An unrecognized name is a hard failure, for the same reason as above.
+func (v DrawNegativeVector) validate(filename, prefix string) error {
+	if err := firstError(
+		requireText(filename, prefix+".name", v.Name),
+		requireText(filename, prefix+".expected_error", v.ExpectedError),
+	); err != nil {
+		return err
+	}
+
+	switch v.Name {
+	case "candidate_list_not_strictly_sorted":
+		return requireNonEmptySlice(filename, prefix+".candidate_list_draw_ids_hex", len(v.CandidateListDrawIDsHex))
+
+	case "candidate_set_hash_mismatch":
+		return firstError(
+			requireText(filename, prefix+".expected_candidate_set_hash_hex", v.ExpectedCandidateSetHashHex),
+			requireText(filename, prefix+".published_candidate_set_hash_hex", v.PublishedCandidateSetHash),
+		)
+
+	case "candidate_count_mismatch":
+		return firstError(
+			requireSet(filename, prefix+".draw_commitment_candidate_count", v.DrawCommitmentCandidateCnt),
+			requireSet(filename, prefix+".candidate_list_candidate_count", v.CandidateListCandidateCount),
+			requireSet(filename, prefix+".candidate_list_length", v.CandidateListLength),
+		)
+
+	case "wrong_published_winner":
+		return firstError(
+			requireNonEmptySlice(filename, prefix+".expected_winner_draw_ids_hex", len(v.ExpectedWinnerDrawIDsHex)),
+			requireNonEmptySlice(filename, prefix+".published_winner_draw_ids_hex", len(v.PublishedWinnerDrawIDsHex)),
+		)
+
+	case "wrong_beacon_hash":
+		return firstError(
+			requireText(filename, prefix+".expected_beacon_hash_hex", v.ExpectedBeaconHashHex),
+			requireText(filename, prefix+".published_beacon_hash_hex", v.PublishedBeaconHashHex),
+		)
+
+	case "duplicate_winner", "non_32_byte_winner", "winner_count_list_length_mismatch":
+		// non_32_byte_winner deliberately carries a draw ID of the wrong length;
+		// only its presence is required here.
+		return firstError(
+			requireSet(filename, prefix+".winner_count", v.WinnerCount),
+			requireNonEmptySlice(filename, prefix+".winner_draw_ids_hex", len(v.WinnerDrawIDsHex)),
+		)
+
+	case "draw_result_key_mismatch":
+		return firstError(
+			requireSet(filename, prefix+".commitment_slot_id", v.CommitmentSlotID),
+			requireSet(filename, prefix+".commitment_target_epoch", v.CommitmentTargetEpoch),
+			requireSet(filename, prefix+".result_slot_id", v.ResultSlotID),
+			requireSet(filename, prefix+".result_target_epoch", v.ResultTargetEpoch),
+		)
+
+	default:
+		return structureError(filename,
+			"%s names negative vector %q, which has no schema; a new case needs one before it can be validated",
+			prefix, v.Name)
+	}
+}
+
 func (c EmptySetCrossCheck) validate(filename string) error {
 	const prefix = "empty_set_cross_check"
 	if err := firstError(
@@ -698,6 +844,7 @@ func (c EmptySetCrossCheck) validate(filename string) error {
 		requireHex32(filename, prefix+".expected_hash_a_hex", c.ExpectedHashAHex),
 		requireHex32(filename, prefix+".expected_hash_b_hex", c.ExpectedHashBHex),
 		requireText(filename, prefix+".note", c.Note),
+		requireBoolSet(filename, prefix+".expected_equal", c.ExpectedEqual),
 	); err != nil {
 		return err
 	}

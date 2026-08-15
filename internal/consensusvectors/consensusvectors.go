@@ -107,6 +107,112 @@ func (v *U64) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Bool is a JSON boolean whose presence is tracked.
+//
+// A plain bool cannot separate "declared false" from "not declared at all", and
+// several required declarations in the packs are canonically false. Without this
+// type, deleting one of them would decode to the same value it is supposed to
+// have and the deletion would be invisible.
+type Bool struct {
+	value bool
+	set   bool
+}
+
+// Bool returns the underlying value.
+func (v Bool) Bool() bool { return v.value }
+
+// IsSet reports whether the field was present in the pack.
+func (v Bool) IsSet() bool { return v.set }
+
+// UnmarshalJSON decodes a JSON boolean. A JSON null is not a boolean and is
+// rejected rather than silently leaving the value false.
+func (v *Bool) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return fmt.Errorf("%w: boolean field is null", ErrMalformedPack)
+	}
+	var parsed bool
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return fmt.Errorf("%w: %s is not a JSON boolean", ErrMalformedPack, data)
+	}
+	v.value = parsed
+	v.set = true
+	return nil
+}
+
+// Int is a bare JSON number whose presence is tracked.
+//
+// The packs carry protocol integers as decimal strings and use bare numbers only
+// for a few counts, so this type is deliberately narrow. Zero is a legitimate
+// value for every one of them, which is why presence has to be tracked
+// separately.
+type Int struct {
+	value int
+	set   bool
+}
+
+// Value returns the underlying value.
+func (v Int) Value() int { return v.value }
+
+// IsSet reports whether the field was present in the pack.
+func (v Int) IsSet() bool { return v.set }
+
+// UnmarshalJSON decodes a bare JSON number.
+func (v *Int) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return fmt.Errorf("%w: integer field is null", ErrMalformedPack)
+	}
+	var parsed int
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return fmt.Errorf("%w: %s is not a JSON integer", ErrMalformedPack, data)
+	}
+	v.value = parsed
+	v.set = true
+	return nil
+}
+
+// NullableU64 is a uint64 field that the packs may legitimately state as null,
+// and which distinguishes three states: absent, explicitly null, and a value.
+//
+// A *U64 collapses the first two, because encoding/json leaves a pointer nil for
+// both an absent member and an explicit null without consulting the field at
+// all. That matters where null is itself normative: the winner-count vectors use
+// it to record that the rate arithmetic was never evaluated, so an absent member
+// would masquerade as that statement.
+//
+// Declared as a value type rather than a pointer on purpose. encoding/json calls
+// UnmarshalJSON on a value that implements Unmarshaler even when the input is
+// null, which is exactly the hook needed to observe an explicit null.
+type NullableU64 struct {
+	value uint64
+	set   bool
+	null  bool
+}
+
+// IsSet reports whether the member was present at all.
+func (v NullableU64) IsSet() bool { return v.set }
+
+// IsNull reports whether the member was present and explicitly null.
+func (v NullableU64) IsNull() bool { return v.null }
+
+// Uint64 returns the value. It is zero when the member is null or absent; use
+// IsSet and IsNull where the difference matters.
+func (v NullableU64) Uint64() uint64 { return v.value }
+
+// UnmarshalJSON records presence, then nullness, then the value.
+func (v *NullableU64) UnmarshalJSON(data []byte) error {
+	v.set = true
+	if string(data) == "null" {
+		v.null = true
+		return nil
+	}
+	var inner U64
+	if err := inner.UnmarshalJSON(data); err != nil {
+		return err
+	}
+	v.value = inner.Uint64()
+	return nil
+}
+
 // decodePack decodes pack bytes into dst under the full decoding discipline
 // described on the package.
 func decodePack(filename string, data []byte, dst any) error {
@@ -255,6 +361,35 @@ func requireSet(filename, field string, value U64) error {
 		return structureError(filename, "%s is missing", field)
 	}
 	return nil
+}
+
+// requireBoolSet fails when a mandatory boolean declaration was absent. It does
+// NOT constrain the value: several of these are canonically false, and requiring
+// true would reject the pack as written.
+func requireBoolSet(filename, field string, value Bool) error {
+	if !value.IsSet() {
+		return structureError(filename, "%s is missing", field)
+	}
+	return nil
+}
+
+// requireIntSet fails when a mandatory bare-number count was absent.
+func requireIntSet(filename, field string, value Int) error {
+	if !value.IsSet() {
+		return structureError(filename, "%s is missing", field)
+	}
+	return nil
+}
+
+// requireMetadataPresence checks that a pack declares its own identity fields at
+// all, before their values are compared. Without it an absent version reports as
+// "declares version 0", which describes a file that says something it does not.
+func requireMetadataPresence(filename string, version, revision Int, normative Bool) error {
+	return firstError(
+		requireIntSet(filename, "version", version),
+		requireIntSet(filename, "revision", revision),
+		requireBoolSet(filename, "normative", normative),
+	)
 }
 
 // requireHex32 fails when a mandatory 32-byte hexadecimal value is absent or is

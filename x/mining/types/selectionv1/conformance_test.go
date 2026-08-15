@@ -257,7 +257,7 @@ func runPrimitiveVectors(t *testing.T, primitives consensusvectors.DrawPrimitive
 		if want := mustHash(t, v.ExpectedBeaconHashHex); got != want {
 			t.Errorf("beacon hash = %s, want %s", got, want)
 		}
-		if !v.CommittedHeightIntentionallyNo {
+		if !v.CommittedHeightIntentionallyNo.Bool() {
 			t.Error("vector no longer asserts that committed_height is absent from the preimage")
 		}
 		ledger.Record(packName, section, "beacon_hash_v1")
@@ -298,7 +298,7 @@ func runWinnerCountVectors(t *testing.T, vectors []consensusvectors.WinnerCountV
 			if got := candidateCount % denominator; got != v.RemainderRem.Uint64() {
 				t.Errorf("remainder rem = %d, want %d", got, v.RemainderRem.Uint64())
 			}
-			if v.RateK != nil {
+			if !v.RateK.IsNull() {
 				want := v.RateK.Uint64()
 				got := v.QuotientQ.Uint64()*v.SelectionRateBps.Uint64() +
 					(v.RemainderRem.Uint64()*v.SelectionRateBps.Uint64())/denominator
@@ -437,7 +437,7 @@ func runEndToEndVectors(t *testing.T, cases consensusvectors.DrawEndToEnd, ledge
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := tc.value
-			if v.BeaconRequired {
+			if v.BeaconRequired.Bool() {
 				t.Fatalf("%s vector expects a beacon; the short-circuit paths require none", tc.name)
 			}
 			result, err := selectionv1.Evaluate(selectionv1.EvaluationInput{
@@ -529,8 +529,8 @@ func runEndToEndVectors(t *testing.T, cases consensusvectors.DrawEndToEnd, ledge
 			}
 			// BeaconHashV1 is undefined for an invalid beacon; claiming one would
 			// assert randomness the protocol says does not exist here.
-			if result.BeaconHashDefined != v.BeaconHashDefined {
-				t.Errorf("beacon hash defined = %v, want %v", result.BeaconHashDefined, v.BeaconHashDefined)
+			if result.BeaconHashDefined != v.BeaconHashDefined.Bool() {
+				t.Errorf("beacon hash defined = %v, want %v", result.BeaconHashDefined, v.BeaconHashDefined.Bool())
 			}
 			if len(result.SelectedDrawIDs) != 0 {
 				t.Errorf("selected %d participants, want 0 under NO_VALID_BEACON", len(result.SelectedDrawIDs))
@@ -875,8 +875,8 @@ func runEmptySetCrossCheck(t *testing.T, check consensusvectors.EmptySetCrossChe
 	if want := mustHash(t, check.ExpectedHashBHex); hashB != want {
 		t.Errorf("hash B = %s, want %s", hashB, want)
 	}
-	if equal := hashA == hashB; equal != check.ExpectedEqual {
-		t.Errorf("hashes equal = %v, want %v", equal, check.ExpectedEqual)
+	if equal := hashA == hashB; equal != check.ExpectedEqual.Bool() {
+		t.Errorf("hashes equal = %v, want %v", equal, check.ExpectedEqual.Bool())
 	}
 	ledger.Record(packName, "empty_set_cross_check", "empty_set_cross_check")
 }

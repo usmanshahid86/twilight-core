@@ -131,9 +131,9 @@ func TestDecodePackRejectsDuplicateRootKey(t *testing.T) {
 	if err := json.Unmarshal([]byte(injected), &permissive); err != nil {
 		t.Fatalf("mutated pack is not valid JSON: %v", err)
 	}
-	if permissive.Revision != rewardPackRevision {
+	if permissive.Revision.Value() != rewardPackRevision {
 		t.Fatalf("last-value-wins gave revision %d, want %d; the test no longer covers the hazard",
-			permissive.Revision, rewardPackRevision)
+			permissive.Revision.Value(), rewardPackRevision)
 	}
 
 	requireMalformed(t, loadRewardFrom([]byte(injected)), "duplicate root key")
@@ -332,6 +332,316 @@ func TestDrawPackVariantSectionsAreNotOverconstrained(t *testing.T) {
 	if shortDrawID == 0 {
 		t.Error("no negative vector carries a wrong-length draw id; the restraint is no longer exercised")
 	}
+}
+
+// nested walks a chain of object members and returns the object at the end.
+func nested(t *testing.T, doc map[string]any, path ...string) map[string]any {
+	t.Helper()
+	current := doc
+	for _, key := range path {
+		next, ok := current[key].(map[string]any)
+		if !ok {
+			t.Fatalf("%s is not an object", key)
+		}
+		current = next
+	}
+	return current
+}
+
+// elemAt returns the i-th element of an array member as an object.
+func elemAt(t *testing.T, doc map[string]any, key string, i int) map[string]any {
+	t.Helper()
+	list, ok := doc[key].([]any)
+	if !ok || len(list) <= i {
+		t.Fatalf("%s has no element %d", key, i)
+	}
+	elem, ok := list[i].(map[string]any)
+	if !ok {
+		t.Fatalf("%s[%d] is not an object", key, i)
+	}
+	return elem
+}
+
+// elemNamed returns the array element whose "name" member equals name.
+func elemNamed(t *testing.T, doc map[string]any, key, name string) map[string]any {
+	t.Helper()
+	list, ok := doc[key].([]any)
+	if !ok {
+		t.Fatalf("%s is not an array", key)
+	}
+	for _, raw := range list {
+		elem, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if elem["name"] == name {
+			return elem
+		}
+	}
+	t.Fatalf("%s has no element named %q", key, name)
+	return nil
+}
+
+// --- D. counts, booleans and nullable members ---------------------------------
+
+// TestAllocationVectorRequiresNPos closes a real silent weakening. n_pos was a
+// plain int, so deleting it decoded as 0, and the reward harness skips the
+// carry <= n_pos-1 assertion when n_pos is 0. The pack could therefore certify
+// strictly less while every test stayed green.
+func TestAllocationVectorRequiresNPos(t *testing.T) {
+	data := mutateJSON(t, rewardPackBytes, func(doc map[string]any) {
+		delete(firstElem(t, doc, "allocation_vectors"), "n_pos")
+	})
+	requireMalformed(t, loadRewardFrom(data), "allocation vector without n_pos")
+
+	// A legal zero must still be accepted: the zero-participation vector states
+	// n_pos 0 legitimately.
+	zeroed := mutateJSON(t, rewardPackBytes, func(doc map[string]any) {
+		firstElem(t, doc, "allocation_vectors")["n_pos"] = 0
+	})
+	if err := loadRewardFrom(zeroed); err != nil {
+		t.Fatalf("n_pos of 0 rejected: %v", err)
+	}
+}
+
+// TestRequiredBooleansMustBePresent covers both polarities. A plain bool cannot
+// separate "declared false" from "not declared", and three of these are
+// canonically false — so for those, a deletion would decode to exactly the value
+// the pack is supposed to state and would be invisible.
+func TestRequiredBooleansMustBePresent(t *testing.T) {
+	cases := []struct {
+		name      string
+		canonical bool
+		remove    func(t *testing.T, doc map[string]any)
+	}{
+		{
+			"generation_provenance.independent_check_required", true,
+			func(t *testing.T, doc map[string]any) {
+				delete(nested(t, doc, "generation_provenance"), "independent_check_required")
+			},
+		},
+		{
+			"primitives.beacon_hash_v1.committed_height_intentionally_absent", true,
+			func(t *testing.T, doc map[string]any) {
+				delete(nested(t, doc, "primitives", "beacon_hash_v1"), "committed_height_intentionally_absent")
+			},
+		},
+		{
+			"empty_set_cross_check.expected_equal", true,
+			func(t *testing.T, doc map[string]any) {
+				delete(nested(t, doc, "empty_set_cross_check"), "expected_equal")
+			},
+		},
+		{
+			"end_to_end.no_candidates.beacon_required", false,
+			func(t *testing.T, doc map[string]any) {
+				delete(nested(t, doc, "end_to_end", "no_candidates"), "beacon_required")
+			},
+		},
+		{
+			"end_to_end.single_candidate.beacon_required", false,
+			func(t *testing.T, doc map[string]any) {
+				delete(nested(t, doc, "end_to_end", "single_candidate"), "beacon_required")
+			},
+		},
+		{
+			"end_to_end.no_valid_beacon_insufficient_usable_blocks.beacon_hash_defined", false,
+			func(t *testing.T, doc map[string]any) {
+				delete(nested(t, doc, "end_to_end", "no_valid_beacon_insufficient_usable_blocks"), "beacon_hash_defined")
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := mutateJSON(t, drawPackBytes, func(doc map[string]any) { tc.remove(t, doc) })
+			requireMalformed(t, loadDrawFrom(data), "draw pack without "+tc.name)
+		})
+	}
+
+	// A required boolean is required to be PRESENT, not to be true; flipping a
+	// canonical true to false must still load, because the validator constrains
+	// presence and the conformance test constrains the value.
+	flipped := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+		nested(t, doc, "generation_provenance")["independent_check_required"] = false
+	})
+	if err := loadDrawFrom(flipped); err != nil {
+		t.Fatalf("a present-but-false boolean was rejected by structural validation: %v", err)
+	}
+}
+
+// TestRateKDistinguishesAbsentFromNull covers the third state a *U64 cannot
+// express. The packs use null to record that the rate arithmetic was never
+// evaluated, which is a statement; an absent member would impersonate it.
+func TestRateKDistinguishesAbsentFromNull(t *testing.T) {
+	// Vector 0 is the zero-candidate short circuit, where rate_k is null.
+	t.Run("missing for C<2 is rejected", func(t *testing.T) {
+		data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+			delete(elemAt(t, doc, "winner_count_vectors", 0), "rate_k")
+		})
+		requireMalformed(t, loadDrawFrom(data), "winner-count vector without rate_k")
+	})
+
+	t.Run("explicit null for C<2 is accepted", func(t *testing.T) {
+		data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+			elemAt(t, doc, "winner_count_vectors", 0)["rate_k"] = nil
+		})
+		if err := loadDrawFrom(data); err != nil {
+			t.Fatalf("explicit null rate_k rejected: %v", err)
+		}
+	})
+
+	t.Run("non-null for C<2 is rejected", func(t *testing.T) {
+		data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+			elemAt(t, doc, "winner_count_vectors", 0)["rate_k"] = "0"
+		})
+		requireMalformed(t, loadDrawFrom(data), "short-circuit vector with a non-null rate_k")
+	})
+
+	// Vector 2 is the first case with two or more candidates.
+	t.Run("missing for C>=2 is rejected", func(t *testing.T) {
+		data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+			elem := elemAt(t, doc, "winner_count_vectors", 2)
+			if elem["candidate_count"] == "0" || elem["candidate_count"] == "1" {
+				t.Fatalf("vector 2 is a short circuit; the test targets the wrong element")
+			}
+			delete(elem, "rate_k")
+		})
+		requireMalformed(t, loadDrawFrom(data), "multi-candidate vector without rate_k")
+	})
+
+	t.Run("null for C>=2 is rejected", func(t *testing.T) {
+		data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+			elemAt(t, doc, "winner_count_vectors", 2)["rate_k"] = nil
+		})
+		requireMalformed(t, loadDrawFrom(data), "multi-candidate vector with a null rate_k")
+	})
+}
+
+// TestMetadataPresenceIsRequired separates "declares version 0" from "declares
+// no version". Both are rejected, but only the second is an accurate report.
+func TestMetadataPresenceIsRequired(t *testing.T) {
+	for _, key := range []string{"version", "revision", "normative"} {
+		t.Run("missing "+key, func(t *testing.T) {
+			data := mutateJSON(t, rewardPackBytes, func(doc map[string]any) { delete(doc, key) })
+			var pack RewardPack
+			if err := decodePack(RewardPackFilename, data, &pack); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			err := requireMetadataPresence(RewardPackFilename, pack.Version, pack.Revision, pack.Normative)
+			requireMalformed(t, err, "reward pack without "+key)
+		})
+	}
+}
+
+// --- E. variant-specific timing and negative schemas --------------------------
+
+// TestTimingVectorVariantSchemas deletes one required field from each timing
+// shape. Before this, the loader asked only for name and expected, so any of
+// these deletions passed.
+func TestTimingVectorVariantSchemas(t *testing.T) {
+	cases := []struct {
+		vector string
+		field  string
+	}{
+		{"valid_commit_first_block", "committed_height"},
+		{"valid_commit_first_block", "epoch_n_minus_1_start_height"},
+		{"valid_commit_last_pre_beacon_block", "beacon_start_offset_blocks"},
+		{"commit_at_beacon_start_rejected", "beacon_window_blocks"},
+		{"beacon_fit_rejection", "derived_beacon_end_height"},
+		{"beacon_fit_rejection", "latest_permitted_beacon_end_height"},
+		{"late_result_rejection", "published_height"},
+		{"valid_result_last_block", "target_epoch_start_height"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.vector+" without "+tc.field, func(t *testing.T) {
+			data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+				delete(elemNamed(t, doc, "timing_vectors", tc.vector), tc.field)
+			})
+			requireMalformed(t, loadDrawFrom(data), tc.vector+" without "+tc.field)
+		})
+	}
+
+	// The beacon-fit case states no committed height, so requiring one would
+	// reject the pack as written.
+	t.Run("beacon_fit_rejection needs no committed_height", func(t *testing.T) {
+		if elemNamed(t, decodeDoc(t, drawPackBytes), "timing_vectors", "beacon_fit_rejection")["committed_height"] != nil {
+			t.Skip("the pack now states a committed height for this case")
+		}
+		if err := loadDrawFrom(drawPackBytes); err != nil {
+			t.Fatalf("real pack rejected: %v", err)
+		}
+	})
+
+	// An unrecognized case must fail loudly rather than fall through to the
+	// weakest schema, where it would be checked by nothing.
+	t.Run("unknown timing vector name", func(t *testing.T) {
+		data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+			elemNamed(t, doc, "timing_vectors", "late_result_rejection")["name"] = "brand_new_timing_case"
+		})
+		requireMalformed(t, loadDrawFrom(data), "unknown timing vector name")
+	})
+}
+
+// TestNegativeVectorVariantSchemas does the same for the rejection cases, and
+// pins the one restraint that matters most: the deliberately wrong-length draw
+// ID must still load, because malformed input is this vector's payload.
+func TestNegativeVectorVariantSchemas(t *testing.T) {
+	cases := []struct {
+		vector string
+		field  string
+	}{
+		{"candidate_list_not_strictly_sorted", "candidate_list_draw_ids_hex"},
+		{"candidate_set_hash_mismatch", "published_candidate_set_hash_hex"},
+		{"candidate_count_mismatch", "candidate_list_length"},
+		{"wrong_published_winner", "published_winner_draw_ids_hex"},
+		{"wrong_beacon_hash", "expected_beacon_hash_hex"},
+		{"duplicate_winner", "winner_draw_ids_hex"},
+		{"non_32_byte_winner", "winner_draw_ids_hex"},
+		{"draw_result_key_mismatch", "result_slot_id"},
+		{"winner_count_list_length_mismatch", "winner_count"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.vector+" without "+tc.field, func(t *testing.T) {
+			data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+				delete(elemNamed(t, doc, "negative_vectors", tc.vector), tc.field)
+			})
+			requireMalformed(t, loadDrawFrom(data), tc.vector+" without "+tc.field)
+		})
+	}
+
+	// Presence validation is not semantic validation. This vector exists to carry
+	// a draw ID that is NOT 32 bytes; rejecting it structurally would delete the
+	// case the conformance test needs.
+	t.Run("wrong-length payload still loads", func(t *testing.T) {
+		doc := decodeDoc(t, drawPackBytes)
+		ids, ok := elemNamed(t, doc, "negative_vectors", "non_32_byte_winner")["winner_draw_ids_hex"].([]any)
+		if !ok || len(ids) == 0 {
+			t.Fatal("the wrong-length payload is missing")
+		}
+		if id, _ := ids[0].(string); len(id) == 64 {
+			t.Fatal("the payload is 32 bytes; this vector no longer exercises the restraint")
+		}
+		if err := loadDrawFrom(drawPackBytes); err != nil {
+			t.Fatalf("real pack rejected: %v", err)
+		}
+	})
+
+	t.Run("unknown negative vector name", func(t *testing.T) {
+		data := mutateJSON(t, drawPackBytes, func(doc map[string]any) {
+			elemNamed(t, doc, "negative_vectors", "duplicate_winner")["name"] = "brand_new_negative_case"
+		})
+		requireMalformed(t, loadDrawFrom(data), "unknown negative vector name")
+	})
+}
+
+func decodeDoc(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return doc
 }
 
 // TestValidPacksStillLoad is the counterweight to every rejection above.

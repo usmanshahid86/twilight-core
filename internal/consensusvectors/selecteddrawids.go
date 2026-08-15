@@ -20,9 +20,9 @@ const (
 // SelectedDrawIDsPack is the r1 SelectedDrawIDsHashV1 vector pack.
 type SelectedDrawIDsPack struct {
 	Artifact            string                  `json:"artifact"`
-	Version             int                     `json:"version"`
-	Revision            int                     `json:"revision"`
-	Normative           bool                    `json:"normative"`
+	Version             Int                     `json:"version"`
+	Revision            Int                     `json:"revision"`
+	Normative           Bool                    `json:"normative"`
 	Domain              string                  `json:"domain"`
 	Encoding            string                  `json:"encoding"`
 	Vectors             []SelectedDrawIDsVector `json:"vectors"`
@@ -48,12 +48,15 @@ func LoadSelectedDrawIDsPack() (SelectedDrawIDsPack, error) {
 	if err := decodePack(SelectedDrawIDsPackFilename, selectedDrawIDsPackBytes, &pack); err != nil {
 		return SelectedDrawIDsPack{}, err
 	}
+	if err := requireMetadataPresence(SelectedDrawIDsPackFilename, pack.Version, pack.Revision, pack.Normative); err != nil {
+		return SelectedDrawIDsPack{}, err
+	}
 	if err := assertMetadata(
 		SelectedDrawIDsPackFilename,
 		pack.Artifact, selectedDrawIDsArtifact,
-		pack.Version, selectedDrawIDsVersion,
-		pack.Revision, selectedDrawIDsRevision,
-		pack.Normative,
+		pack.Version.Value(), selectedDrawIDsVersion,
+		pack.Revision.Value(), selectedDrawIDsRevision,
+		pack.Normative.Bool(),
 	); err != nil {
 		return SelectedDrawIDsPack{}, err
 	}
