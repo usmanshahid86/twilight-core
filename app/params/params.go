@@ -1,7 +1,9 @@
-// Package params holds the canonical chain-identity and native-token constants.
+// Package params holds the canonical chain-identity and native-token constants,
+// and the shared V2 hard bounds (see bounds.go).
 //
-// It is intentionally dependency-neutral: it imports NOTHING from this repo, so
-// the app, the CLI, and future economic modules (x/emissions, x/rewards) can all
+// It is intentionally dependency-neutral: its only repository import is
+// internal/checked, which imports nothing beyond the standard library. The app,
+// the CLI, and the economic modules (x/rewards, and later x/mining) can all
 // consume it without import cycles. Denom identity is CHAIN identity — it is NOT
 // owned by x/coreslot (the validator-ownership module).
 package params
