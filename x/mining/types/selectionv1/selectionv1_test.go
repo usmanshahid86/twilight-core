@@ -365,6 +365,222 @@ func TestOutcomeString(t *testing.T) {
 	}
 }
 
+// TestValidateResultPublicationHeightBounds pins every boundary of the complete
+// r6 §47 rule. The r2 timing vectors carry only enough data for the upper bound,
+// so the rest is covered here rather than by fabricating vector fields.
+func TestValidateResultPublicationHeightBounds(t *testing.T) {
+	const (
+		epochNMinus1Start = 1000
+		epochNStart       = 1360
+		beaconEnd         = 1071
+	)
+
+	cases := []struct {
+		name           string
+		published      uint64
+		candidateCount uint64
+		beaconEnd      uint64
+		wantErr        error
+	}{
+		// Lower bound of the epoch.
+		{"before epoch N-1 start", 999, 0, 0, selectionv1.ErrResultBeforeEpochStart},
+		{"at epoch N-1 start, no candidates", epochNMinus1Start, 0, 0, nil},
+		{"at epoch N-1 start, one candidate", epochNMinus1Start, 1, 0, nil},
+
+		// Upper bound of the epoch.
+		{"last block of epoch N-1", 1359, 0, 0, nil},
+		{"at target epoch start", epochNStart, 0, 0, selectionv1.ErrLateResult},
+		{"after target epoch start", epochNStart + 1, 0, 0, selectionv1.ErrLateResult},
+
+		// Multi-candidate beacon bound.
+		{"one block before beacon end", 1070, 2, beaconEnd, selectionv1.ErrResultBeforeBeaconEnd},
+		{"at beacon end", beaconEnd, 2, beaconEnd, selectionv1.ErrResultBeforeBeaconEnd},
+		{"first block after beacon end", 1072, 2, beaconEnd, nil},
+		{"well after beacon end", 1200, 9, beaconEnd, nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := selectionv1.ValidateResultPublicationHeight(
+				tc.published, epochNMinus1Start, epochNStart, tc.candidateCount, tc.beaconEnd,
+			)
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Fatalf("published %d rejected: %v", tc.published, err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("published %d: err = %v, want %v", tc.published, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestResultPublicationIgnoresBeaconBelowTwoCandidates guards the direction that
+// would be easy to get wrong in the other way: r6 §44 and §45 require no beacon
+// at all for zero or one candidate, so no beacon-relative bound may be imposed on
+// those paths. Here a publication height that a multi-candidate Selection would
+// have to reject must be accepted.
+func TestResultPublicationIgnoresBeaconBelowTwoCandidates(t *testing.T) {
+	const (
+		epochNMinus1Start = 1000
+		epochNStart       = 1360
+		beaconEnd         = 1071
+	)
+	for _, candidateCount := range []uint64{0, 1} {
+		for _, published := range []uint64{epochNMinus1Start, 1050, beaconEnd} {
+			if err := selectionv1.ValidateResultPublicationHeight(
+				published, epochNMinus1Start, epochNStart, candidateCount, beaconEnd,
+			); err != nil {
+				t.Errorf("C=%d published %d rejected: %v", candidateCount, published, err)
+			}
+		}
+	}
+	// The same height with two candidates is rejected, which is what shows the
+	// bound exists and is being skipped deliberately rather than never applied.
+	if err := selectionv1.ValidateResultPublicationHeight(
+		beaconEnd, epochNMinus1Start, epochNStart, 2, beaconEnd,
+	); !errors.Is(err, selectionv1.ErrResultBeforeBeaconEnd) {
+		t.Errorf("C=2 at beacon end: err = %v, want ErrResultBeforeBeaconEnd", err)
+	}
+}
+
+// TestResultPublicationRejectsUnrepresentableBeaconEnd covers the checked
+// addition: a beacon ending at the maximum height leaves no publication height,
+// which must fail rather than wrap to zero and appear satisfiable.
+func TestResultPublicationRejectsUnrepresentableBeaconEnd(t *testing.T) {
+	err := selectionv1.ValidateResultPublicationHeight(
+		math.MaxUint64-1, 0, math.MaxUint64, 2, math.MaxUint64,
+	)
+	if !errors.Is(err, selectionv1.ErrResultBeforeBeaconEnd) {
+		t.Fatalf("err = %v, want ErrResultBeforeBeaconEnd", err)
+	}
+}
+
+func TestValidateBeaconParams(t *testing.T) {
+	valid := selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 12, MinDistinctExternalProposers: 3}
+	if err := selectionv1.ValidateBeaconParams(48, 24, valid); err != nil {
+		t.Fatalf("valid params rejected: %v", err)
+	}
+	// The relations are inclusive at their upper ends.
+	if err := selectionv1.ValidateBeaconParams(1, 24, selectionv1.BeaconThresholds{
+		MinExternalBeaconBlocks: 24, MinDistinctExternalProposers: 24,
+	}); err != nil {
+		t.Fatalf("params at the relation limits rejected: %v", err)
+	}
+
+	invalid := []struct {
+		name       string
+		offset     uint64
+		window     uint64
+		thresholds selectionv1.BeaconThresholds
+	}{
+		{"zero offset", 0, 24, valid},
+		{"zero window", 48, 0, valid},
+		{"zero min usable", 48, 24, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 0, MinDistinctExternalProposers: 3}},
+		{"zero min distinct", 48, 24, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 12, MinDistinctExternalProposers: 0}},
+		{"min usable exceeds window", 48, 24, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 25, MinDistinctExternalProposers: 3}},
+		{"min distinct exceeds min usable", 48, 24, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 12, MinDistinctExternalProposers: 13}},
+	}
+	for _, tc := range invalid {
+		if err := selectionv1.ValidateBeaconParams(tc.offset, tc.window, tc.thresholds); !errors.Is(
+			err, selectionv1.ErrInvalidParams,
+		) {
+			t.Errorf("%s: err = %v, want ErrInvalidParams", tc.name, err)
+		}
+	}
+}
+
+// TestEvaluateRejectsInvalidBeaconParams is the regression for the hole the
+// review found: with zero thresholds, an empty window satisfied the validity
+// predicate and Evaluate reported SUCCESS for a Selection that observed nothing.
+func TestEvaluateRejectsInvalidBeaconParams(t *testing.T) {
+	sc := selectionv1.SelectionContext{ChainID: "twilight-1", SlotID: 7, TargetEpoch: 1042}
+	var low, high selectionv1.DrawID
+	low[31] = 1
+	high[31] = 2
+	candidates := []selectionv1.DrawID{low, high}
+	limits := selectionv1.CountLimits{SelectionRateBps: 2_500, SlotMaxSelected: 100, ProtocolMaxSelected: 1_000}
+
+	cases := []struct {
+		name       string
+		offset     uint64
+		window     uint64
+		thresholds selectionv1.BeaconThresholds
+	}{
+		{"zero offset", 0, 24, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 12, MinDistinctExternalProposers: 3}},
+		{"zero window", 48, 0, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 12, MinDistinctExternalProposers: 3}},
+		{"zero min usable", 48, 24, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 0, MinDistinctExternalProposers: 3}},
+		{"zero min distinct", 48, 24, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 12, MinDistinctExternalProposers: 0}},
+		{"min usable exceeds window", 48, 24, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 25, MinDistinctExternalProposers: 3}},
+		{"min distinct exceeds min usable", 48, 24, selectionv1.BeaconThresholds{MinExternalBeaconBlocks: 12, MinDistinctExternalProposers: 13}},
+		// The exact case the review reported: an empty window declared valid by
+		// thresholds of zero, which returned SUCCESS with no observations at all.
+		{"empty window with zero thresholds", 0, 1, selectionv1.BeaconThresholds{}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := selectionv1.Evaluate(selectionv1.EvaluationInput{
+				Context:                 sc,
+				CandidateDrawIDs:        candidates,
+				EpochNMinus1StartHeight: 1000,
+				BeaconStartOffsetBlocks: tc.offset,
+				BeaconWindowBlocks:      tc.window,
+				Thresholds:              tc.thresholds,
+				Limits:                  limits,
+			})
+			if !errors.Is(err, selectionv1.ErrInvalidParams) {
+				t.Fatalf("err = %v, want ErrInvalidParams (outcome was %s)", err, result.Outcome)
+			}
+			if result.Outcome == selectionv1.OutcomeSuccess {
+				t.Fatal("invalid beacon parameters produced SUCCESS")
+			}
+		})
+	}
+}
+
+// TestEvaluateSmallCandidateCountsIgnoreBeaconParams confirms Fix 3 did not
+// leak a beacon requirement onto the paths r6 says need none. Zero and one
+// candidate must still evaluate with no beacon parameters supplied at all.
+func TestEvaluateSmallCandidateCountsIgnoreBeaconParams(t *testing.T) {
+	sc := selectionv1.SelectionContext{ChainID: "twilight-1", SlotID: 7, TargetEpoch: 1042}
+	var only selectionv1.DrawID
+	only[31] = 1
+
+	for _, tc := range []struct {
+		name        string
+		candidates  []selectionv1.DrawID
+		wantOutcome selectionv1.Outcome
+		wantCount   uint64
+	}{
+		{"zero candidates", nil, selectionv1.OutcomeNoCandidates, 0},
+		{"one candidate", []selectionv1.DrawID{only}, selectionv1.OutcomeSuccess, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Every beacon field left at its zero value, which ValidateBeaconParams
+			// would reject if it were consulted here.
+			result, err := selectionv1.Evaluate(selectionv1.EvaluationInput{
+				Context:          sc,
+				CandidateDrawIDs: tc.candidates,
+			})
+			if err != nil {
+				t.Fatalf("Evaluate: %v", err)
+			}
+			if result.Outcome != tc.wantOutcome {
+				t.Errorf("outcome = %s, want %s", result.Outcome, tc.wantOutcome)
+			}
+			if result.SelectedCount != tc.wantCount {
+				t.Errorf("selected count = %d, want %d", result.SelectedCount, tc.wantCount)
+			}
+			if result.BeaconHashDefined {
+				t.Error("a beacon was claimed on a path that requires none")
+			}
+		})
+	}
+}
+
 func TestValidateCanonicalDrawIDsAcceptsSmallLists(t *testing.T) {
 	if err := selectionv1.ValidateCanonicalDrawIDs(nil); err != nil {
 		t.Errorf("empty list rejected: %v", err)

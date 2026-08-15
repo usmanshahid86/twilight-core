@@ -72,6 +72,17 @@ var (
 	// Vector code: REJECT_LATE_RESULT.
 	ErrLateResult = errors.New("selectionv1: result published at or after target epoch start")
 
+	// ErrResultBeforeEpochStart reports a result published before epoch N-1 begins.
+	// It is deliberately distinct from ErrLateResult: a result outside its epoch on
+	// the early side is a different fault, and describing it as "late" would send a
+	// reader looking for the opposite problem.
+	ErrResultBeforeEpochStart = errors.New("selectionv1: result published before epoch N-1 start")
+
+	// ErrResultBeforeBeaconEnd reports a multi-candidate result published at or
+	// before the end of its beacon window, which would mean publishing before the
+	// randomness it depends on was complete.
+	ErrResultBeforeBeaconEnd = errors.New("selectionv1: multi-candidate result published at or before beacon end")
+
 	// ErrInvalidParams reports Selection parameters that violate a protocol
 	// relation independently of any particular Selection.
 	ErrInvalidParams = errors.New("selectionv1: invalid selection parameters")

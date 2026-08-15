@@ -58,17 +58,62 @@ func ValidateBeaconWindowFits(beaconEndHeight, epochNStartHeight uint64) error {
 	return nil
 }
 
-// ValidateResultPublishedBeforeTargetEpoch enforces the upper bound of r6 §47:
+// ValidateResultPublicationHeight enforces the complete r6 §47 publication rule:
 //
-//	published_height < EpochStartHeight(N)
+//	EpochStartHeight(N-1) <= published_height < EpochStartHeight(N)
 //
-// A result published once the target epoch has begun is rejected outright; V1
-// has no late-result path and does not synthesize one.
-func ValidateResultPublishedBeforeTargetEpoch(publishedHeight, epochNStartHeight uint64) error {
+// and, for a multi-candidate Selection only:
+//
+//	published_height > beacon_end_height
+//
+// The whole rule lives in one function on purpose. Splitting it across exported
+// helpers would leave a caller to remember that a second bound exists, and a
+// forgotten bound here admits a result published before its own randomness was
+// complete — which is the failure the rule exists to prevent.
+//
+// beaconEndHeight is consulted only when candidateCount is two or more. The
+// zero- and one-candidate paths require no beacon at all (r6 §44, §45), so they
+// carry no beacon-relative bound and a caller may pass anything for it.
+//
+// No further publication window is imposed. These are the only bounds §47 states.
+func ValidateResultPublicationHeight(
+	publishedHeight,
+	epochNMinus1StartHeight,
+	epochNStartHeight,
+	candidateCount,
+	beaconEndHeight uint64,
+) error {
+	if publishedHeight < epochNMinus1StartHeight {
+		return fmt.Errorf(
+			"%w: published height %d precedes epoch N-1 start %d",
+			ErrResultBeforeEpochStart, publishedHeight, epochNMinus1StartHeight,
+		)
+	}
 	if publishedHeight >= epochNStartHeight {
 		return fmt.Errorf(
 			"%w: published height %d is at or after target epoch start %d",
 			ErrLateResult, publishedHeight, epochNStartHeight,
+		)
+	}
+
+	if candidateCount < 2 {
+		return nil
+	}
+
+	// Checked: a beacon ending at the maximum height leaves no representable
+	// publication height, which is refused rather than wrapped to zero.
+	earliestPermitted, err := checked.AddUint64(beaconEndHeight, 1)
+	if err != nil {
+		return fmt.Errorf(
+			"%w: beacon end height %d leaves no publication height: %v",
+			ErrResultBeforeBeaconEnd, beaconEndHeight, err,
+		)
+	}
+	if publishedHeight < earliestPermitted {
+		return fmt.Errorf(
+			"%w: published height %d is at or before beacon end %d; the earliest "+
+				"permitted multi-candidate publication height is %d",
+			ErrResultBeforeBeaconEnd, publishedHeight, beaconEndHeight, earliestPermitted,
 		)
 	}
 	return nil

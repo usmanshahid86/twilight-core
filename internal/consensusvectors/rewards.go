@@ -1,6 +1,9 @@
 package consensusvectors
 
-import _ "embed"
+import (
+	_ "embed"
+	"fmt"
+)
 
 // The r1 reward consensus-vector pack: per-block emission with supply-threshold
 // halving, uniform active-block allocation, and the reward-pool relation.
@@ -93,7 +96,8 @@ type NegativeDiscriminator struct {
 	RequiredResult string `json:"required_result"`
 }
 
-// LoadRewardPack returns the r1 pack, verifying its declared identity.
+// LoadRewardPack returns the r1 pack, verifying its declared identity and its
+// mandatory structure.
 func LoadRewardPack() (RewardPack, error) {
 	var pack RewardPack
 	if err := decodePack(RewardPackFilename, rewardPackBytes, &pack); err != nil {
@@ -108,5 +112,163 @@ func LoadRewardPack() (RewardPack, error) {
 	); err != nil {
 		return RewardPack{}, err
 	}
+	if err := pack.validate(RewardPackFilename); err != nil {
+		return RewardPack{}, err
+	}
 	return pack, nil
+}
+
+// validate checks the mandatory structure of the r1 pack.
+//
+// emission_reference and per_block_subsidies_semantics are normative prose that
+// states which recurrence the numbers come from and how a truncated per-block
+// schedule is to be read. Either could vanish and leave every numeric assertion
+// still passing while the pack no longer says what it is asserting about.
+func (p RewardPack) validate(filename string) error {
+	if err := firstError(
+		requireText(filename, "emission_reference", p.EmissionReference),
+		requireText(filename, "per_block_subsidies_semantics", p.PerBlockSubsidySemantics),
+		requireNonEmptySlice(filename, "emission_vectors", len(p.EmissionVectors)),
+		requireNonEmptySlice(filename, "allocation_vectors", len(p.AllocationVectors)),
+		requireNonEmptySlice(filename, "pool_vectors", len(p.PoolVectors)),
+		requireNonEmptySlice(filename, "required_assertions", len(p.RequiredAssertions)),
+		requireNonEmptySlice(filename, "negative_discriminators", len(p.NegativeDiscriminators)),
+	); err != nil {
+		return err
+	}
+
+	for i, v := range p.EmissionVectors {
+		prefix := fmt.Sprintf("emission_vectors[%d]", i)
+		if err := firstError(
+			requireText(filename, prefix+".name", v.Name),
+			requireAmount(filename, prefix+".cumulative_before", v.CumulativeBefore),
+			requireSet(filename, prefix+".reward_enabled_blocks", v.RewardEnabledBlock),
+			requireAmount(filename, prefix+".max_supply", v.MaxSupply),
+			requireAmount(filename, prefix+".initial_block_subsidy", v.InitialBlockSubsid),
+			requireAmount(filename, prefix+".minted_emission", v.MintedEmission),
+			requireAmount(filename, prefix+".cumulative_after", v.CumulativeAfter),
+		); err != nil {
+			return err
+		}
+		// A fully paused epoch legitimately carries an empty schedule.
+		if v.PerBlockSubsidies == nil {
+			return structureError(filename, "%s.per_block_subsidies is missing", prefix)
+		}
+		for j, subsidy := range v.PerBlockSubsidies {
+			if err := requireAmount(filename, fmt.Sprintf("%s.per_block_subsidies[%d]", prefix, j), subsidy); err != nil {
+				return err
+			}
+		}
+	}
+
+	for i, v := range p.AllocationVectors {
+		prefix := fmt.Sprintf("allocation_vectors[%d]", i)
+		if err := firstError(
+			requireText(filename, prefix+".name", v.Name),
+			requireAmount(filename, prefix+".pool", v.Pool),
+			requireNonEmptySlice(filename, prefix+".blocks_active", len(v.BlocksActive)),
+			requireNonEmptySlice(filename, prefix+".entitlements", len(v.Entitlements)),
+			requireAmount(filename, prefix+".carry_out", v.CarryOut),
+			requireAmount(filename, prefix+".allocated", v.Allocated),
+		); err != nil {
+			return err
+		}
+		if len(v.BlocksActive) != len(v.Entitlements) {
+			return structureError(filename,
+				"%s states %d activity rows but %d entitlements", prefix, len(v.BlocksActive), len(v.Entitlements))
+		}
+		for j, blocks := range v.BlocksActive {
+			if err := requireSet(filename, fmt.Sprintf("%s.blocks_active[%d]", prefix, j), blocks); err != nil {
+				return err
+			}
+		}
+		for j, entitlement := range v.Entitlements {
+			if err := requireAmount(filename, fmt.Sprintf("%s.entitlements[%d]", prefix, j), entitlement); err != nil {
+				return err
+			}
+		}
+	}
+
+	for i, v := range p.PoolVectors {
+		prefix := fmt.Sprintf("pool_vectors[%d]", i)
+		if err := firstError(
+			requireText(filename, prefix+".name", v.Name),
+			requireAmount(filename, prefix+".minted_emission", v.MintedEmission),
+			requireSet(filename, prefix+".treasury_share_bps", v.TreasuryShareBps),
+			requireAmount(filename, prefix+".treasury", v.Treasury),
+			requireAmount(filename, prefix+".carry_in", v.CarryIn),
+			requireAmount(filename, prefix+".pool", v.Pool),
+		); err != nil {
+			return err
+		}
+	}
+
+	for i, assertion := range p.RequiredAssertions {
+		if err := requireText(filename, fmt.Sprintf("required_assertions[%d]", i), assertion); err != nil {
+			return err
+		}
+	}
+
+	for i, v := range p.NegativeDiscriminators {
+		if err := v.validate(filename, fmt.Sprintf("negative_discriminators[%d]", i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validate checks a negative discriminator against the shape its own case uses.
+//
+// The two discriminators describe different forbidden computations and therefore
+// populate different fields. Requiring the union of both would reject the pack as
+// written, so the shape is identified first and only its own fields are demanded.
+func (d NegativeDiscriminator) validate(filename, prefix string) error {
+	if err := firstError(
+		requireText(filename, prefix+".name", d.Name),
+		requireText(filename, prefix+".required_result", d.RequiredResult),
+		requireAmount(filename, prefix+".pool", d.Pool),
+		requireNonEmptySlice(filename, prefix+".blocks_active", len(d.BlocksActive)),
+	); err != nil {
+		return err
+	}
+	for j, blocks := range d.BlocksActive {
+		if err := requireSet(filename, fmt.Sprintf("%s.blocks_active[%d]", prefix, j), blocks); err != nil {
+			return err
+		}
+	}
+
+	overAllocation := len(d.IncorrectEntitlements) > 0
+	roundingOrder := len(d.IncorrectFloorPoolThenMultip) > 0
+	switch {
+	case overAllocation && roundingOrder:
+		return structureError(filename, "%s matches two discriminator shapes at once", prefix)
+	case overAllocation:
+		if err := firstError(
+			requireSet(filename, prefix+".correct_denominator_W", d.CorrectDenominatorW),
+			requireSet(filename, prefix+".incorrect_denominator_reward_enabled_blocks", d.IncorrectDenominatorREB),
+			requireAmount(filename, prefix+".incorrect_allocated", d.IncorrectAllocated),
+		); err != nil {
+			return err
+		}
+		return requireAmountSlice(filename, prefix+".incorrect_entitlements", d.IncorrectEntitlements)
+	case roundingOrder:
+		if err := requireNonEmptySlice(filename, prefix+".correct_entitlements", len(d.CorrectEntitlements)); err != nil {
+			return err
+		}
+		if err := requireAmountSlice(filename, prefix+".correct_entitlements", d.CorrectEntitlements); err != nil {
+			return err
+		}
+		return requireAmountSlice(filename, prefix+".incorrect_floor_pool_over_W_then_multiply", d.IncorrectFloorPoolThenMultip)
+	default:
+		return structureError(filename, "%s matches no known discriminator shape", prefix)
+	}
+}
+
+func requireAmountSlice(filename, field string, values []string) error {
+	for i, value := range values {
+		if err := requireAmount(filename, fmt.Sprintf("%s[%d]", field, i), value); err != nil {
+			return err
+		}
+	}
+	return nil
 }

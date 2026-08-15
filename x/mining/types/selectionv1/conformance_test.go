@@ -623,17 +623,24 @@ func runTimingVectors(t *testing.T, vectors []consensusvectors.TimingVector, led
 					t.Fatalf("err = %v, want ErrBeaconWindowDoesNotFit", err)
 				}
 
+			// These two vectors state only a target-epoch start and a published
+			// height, so they can exercise only the upper bound of r6 §47. The
+			// remaining arguments are chosen so that no other bound can decide the
+			// outcome, rather than invented as missing vector data: an epoch N-1
+			// anchor of 0 is satisfied by every height, and a candidate count of 0
+			// carries no beacon-relative bound, so the upper bound alone determines
+			// the result. The complete rule is covered by focused unit tests.
 			case "late_result_rejection":
-				err := selectionv1.ValidateResultPublishedBeforeTargetEpoch(
-					v.PublishedHeight.Uint64(), v.TargetEpochStartHeight.Uint64(),
+				err := selectionv1.ValidateResultPublicationHeight(
+					v.PublishedHeight.Uint64(), 0, v.TargetEpochStartHeight.Uint64(), 0, 0,
 				)
 				if !errors.Is(err, selectionv1.ErrLateResult) {
 					t.Fatalf("err = %v, want ErrLateResult", err)
 				}
 
 			case "valid_result_last_block":
-				if err := selectionv1.ValidateResultPublishedBeforeTargetEpoch(
-					v.PublishedHeight.Uint64(), v.TargetEpochStartHeight.Uint64(),
+				if err := selectionv1.ValidateResultPublicationHeight(
+					v.PublishedHeight.Uint64(), 0, v.TargetEpochStartHeight.Uint64(), 0, 0,
 				); err != nil {
 					t.Fatalf("published height %d rejected: %v", v.PublishedHeight.Uint64(), err)
 				}

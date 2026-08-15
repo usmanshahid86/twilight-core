@@ -1,6 +1,9 @@
 package consensusvectors
 
-import _ "embed"
+import (
+	_ "embed"
+	"fmt"
+)
 
 // The r2 TokenDrop draw golden-vector pack: the frozen Selection V1 primitives,
 // the deterministic count K, ranking, timing rules and rejection cases.
@@ -312,7 +315,8 @@ type DrawNegativeVector struct {
 	ResultTargetEpoch           U64      `json:"result_target_epoch"`
 }
 
-// LoadDrawPack returns the r2 draw pack, verifying its declared identity.
+// LoadDrawPack returns the r2 draw pack, verifying its declared identity and its
+// mandatory structure.
 func LoadDrawPack() (DrawPack, error) {
 	var pack DrawPack
 	if err := decodePack(DrawPackFilename, drawPackBytes, &pack); err != nil {
@@ -327,5 +331,381 @@ func LoadDrawPack() (DrawPack, error) {
 	); err != nil {
 		return DrawPack{}, err
 	}
+	if err := pack.validate(DrawPackFilename); err != nil {
+		return DrawPack{}, err
+	}
 	return pack, nil
+}
+
+// requireContext validates the (chain, Slot, target epoch) triple every Selection
+// vector is scoped by.
+func requireContext(filename, prefix, chainID string, slotID, targetEpoch U64) error {
+	return firstError(
+		requireText(filename, prefix+".chain_id", chainID),
+		requireSet(filename, prefix+".slot_id", slotID),
+		requireSet(filename, prefix+".target_epoch", targetEpoch),
+	)
+}
+
+// validate checks the mandatory structure of the r2 pack.
+//
+// Sections whose cases legitimately populate different fields — timing vectors
+// and negative vectors — are checked only for the fields every case carries. A
+// timing vector that exercises the late-result rule states no beacon geometry,
+// and a negative vector that exercises an invalid draw-ID length deliberately
+// carries a value that is not 32 bytes. Demanding the union of every modeled
+// field would reject the pack exactly as its specification intends it.
+func (p DrawPack) validate(filename string) error {
+	if err := firstError(
+		requireText(filename, "spec_status", p.SpecStatus),
+		requireText(filename, "encoding_notes.integers", p.EncodingNotes.Integers),
+		requireText(filename, "encoding_notes.chain_id", p.EncodingNotes.ChainID),
+		requireText(filename, "encoding_notes.hash_fields", p.EncodingNotes.HashFields),
+		requireText(filename, "encoding_notes.draw_ids", p.EncodingNotes.DrawIDs),
+		requireText(filename, "encoding_notes.ordering", p.EncodingNotes.Ordering),
+		requireText(filename, "generation_provenance.generated_with", p.GenerationProvenance.GeneratedWith),
+		requireText(filename, "generation_provenance.block_hash_fixture_rule", p.GenerationProvenance.BlockHashFixtureRule),
+		requireText(filename, "generation_provenance.note", p.GenerationProvenance.Note),
+	); err != nil {
+		return err
+	}
+
+	if err := p.Primitives.validate(filename); err != nil {
+		return err
+	}
+
+	if err := requireNonEmptySlice(filename, "winner_count_vectors", len(p.WinnerCountVectors)); err != nil {
+		return err
+	}
+	for i, v := range p.WinnerCountVectors {
+		prefix := fmt.Sprintf("winner_count_vectors[%d]", i)
+		// rate_k is deliberately absent for the zero- and one-candidate short
+		// circuits, where the rate arithmetic is never evaluated.
+		if err := firstError(
+			requireSet(filename, prefix+".candidate_count", v.CandidateCount),
+			requireSet(filename, prefix+".selection_rate_bps", v.SelectionRateBps),
+			requireSet(filename, prefix+".slot_max_winners", v.SlotMaxWinners),
+			requireSet(filename, prefix+".protocol_max_winners_per_draw", v.ProtocolMaxWinnersPerDraw),
+			requireSet(filename, prefix+".quotient_q", v.QuotientQ),
+			requireSet(filename, prefix+".remainder_rem", v.RemainderRem),
+			requireSet(filename, prefix+".expected_k", v.ExpectedK),
+		); err != nil {
+			return err
+		}
+	}
+
+	if err := p.EndToEnd.validate(filename); err != nil {
+		return err
+	}
+
+	if err := requireNonEmptySlice(filename, ProposerResolutionSection, len(p.ProposerResolution)); err != nil {
+		return err
+	}
+	for i, v := range p.ProposerResolution {
+		prefix := fmt.Sprintf("%s[%d]", ProposerResolutionSection, i)
+		if err := firstError(
+			requireText(filename, prefix+".name", v.Name),
+			requireSet(filename, prefix+".slot_id", v.SlotID),
+			requireSet(filename, prefix+".validator_update_emitted_height_u", v.ValidatorUpdateEmittedHeightU),
+			requireText(filename, prefix+".old_consensus_address_hex", v.OldConsensusAddressHex),
+			requireText(filename, prefix+".new_consensus_address_hex", v.NewConsensusAddressHex),
+			requireSet(filename, prefix+".old_valid_until_height_exclusive", v.OldValidUntilHeightExclusive),
+			requireSet(filename, prefix+".new_valid_from_height", v.NewValidFromHeight),
+			requireNonEmptySlice(filename, prefix+".assertions", len(v.Assertions)),
+			requireText(filename, prefix+".note", v.Note),
+		); err != nil {
+			return err
+		}
+		for j, a := range v.Assertions {
+			assertion := fmt.Sprintf("%s.assertions[%d]", prefix, j)
+			if err := firstError(
+				requireSet(filename, assertion+".height", a.Height),
+				requireText(filename, assertion+".consensus_address_hex", a.ConsensusAddressHex),
+				requireSet(filename, assertion+".expected_slot_id", a.ExpectedSlotID),
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := requireNonEmptySlice(filename, "timing_vectors", len(p.TimingVectors)); err != nil {
+		return err
+	}
+	for i, v := range p.TimingVectors {
+		prefix := fmt.Sprintf("timing_vectors[%d]", i)
+		if err := firstError(
+			requireText(filename, prefix+".name", v.Name),
+			requireText(filename, prefix+".expected", v.Expected),
+		); err != nil {
+			return err
+		}
+	}
+
+	if err := requireNonEmptySlice(filename, "negative_vectors", len(p.NegativeVectors)); err != nil {
+		return err
+	}
+	for i, v := range p.NegativeVectors {
+		prefix := fmt.Sprintf("negative_vectors[%d]", i)
+		if err := firstError(
+			requireText(filename, prefix+".name", v.Name),
+			requireText(filename, prefix+".expected_error", v.ExpectedError),
+		); err != nil {
+			return err
+		}
+	}
+
+	if err := requireNonEmptySlice(filename, "comparator_vectors", len(p.ComparatorVectors)); err != nil {
+		return err
+	}
+	for i, v := range p.ComparatorVectors {
+		prefix := fmt.Sprintf("comparator_vectors[%d]", i)
+		if err := firstError(
+			requireText(filename, prefix+".name", v.Name),
+			requireHex32(filename, prefix+".synthetic_ticket_hex", v.SyntheticTicketHex),
+			requireNonEmptySlice(filename, prefix+".candidates", len(v.Candidates)),
+			requireNonEmptySlice(filename, prefix+".expected_order_draw_ids_hex", len(v.ExpectedOrderDrawIDHex)),
+			requireText(filename, prefix+".note", v.Note),
+		); err != nil {
+			return err
+		}
+		for j, c := range v.Candidates {
+			candidate := fmt.Sprintf("%s.candidates[%d]", prefix, j)
+			if err := firstError(
+				requireHex32(filename, candidate+".draw_id_hex", c.DrawIDHex),
+				requireHex32(filename, candidate+".ticket_hex", c.TicketHex),
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	return p.EmptySetCrossCheck.validate(filename)
+}
+
+func (p DrawPrimitives) validate(filename string) error {
+	drawID := p.DrawIDV1
+	if err := firstError(
+		requireContext(filename, "primitives.draw_id_v1", drawID.ChainID, drawID.SlotID, drawID.TargetEpoch),
+		requireHex32(filename, "primitives.draw_id_v1.participation_secret_hex", drawID.ParticipationSecretHex),
+		requireHex32(filename, "primitives.draw_id_v1.expected_draw_id_hex", drawID.ExpectedDrawIDHex),
+	); err != nil {
+		return err
+	}
+
+	for _, v := range []struct {
+		prefix string
+		value  CandidateSetHashVector
+	}{
+		{"primitives.candidate_set_hash_v1", p.CandidateSetHashV1},
+		{"primitives.candidate_set_hash_empty_v1", p.CandidateSetHashEmptyV1},
+	} {
+		if err := firstError(
+			requireContext(filename, v.prefix, v.value.ChainID, v.value.SlotID, v.value.TargetEpoch),
+			requireHex32(filename, v.prefix+".expected_candidate_set_hash_hex", v.value.ExpectedCandidateSetHashHex),
+		); err != nil {
+			return err
+		}
+		// An empty list is legitimate here; an ABSENT list is not, and the two are
+		// distinguishable only by nil.
+		if v.value.DrawIDsHex == nil {
+			return structureError(filename, "%s.draw_ids_hex is missing", v.prefix)
+		}
+		for i, id := range v.value.DrawIDsHex {
+			if err := requireHex32(filename, fmt.Sprintf("%s.draw_ids_hex[%d]", v.prefix, i), id); err != nil {
+				return err
+			}
+		}
+	}
+
+	beacon := p.BeaconHashV1
+	if err := firstError(
+		requireContext(filename, "primitives.beacon_hash_v1", beacon.ChainID, beacon.SlotID, beacon.TargetEpoch),
+		requireHex32(filename, "primitives.beacon_hash_v1.candidate_set_hash_hex", beacon.CandidateSetHashHex),
+		requireSet(filename, "primitives.beacon_hash_v1.beacon_start_height", beacon.BeaconStartHeight),
+		requireSet(filename, "primitives.beacon_hash_v1.beacon_end_height", beacon.BeaconEndHeight),
+		requireNonEmptySlice(filename, "primitives.beacon_hash_v1.included_entries", len(beacon.IncludedEntries)),
+		requireHex32(filename, "primitives.beacon_hash_v1.expected_beacon_hash_hex", beacon.ExpectedBeaconHashHex),
+	); err != nil {
+		return err
+	}
+	for i, e := range beacon.IncludedEntries {
+		if err := validateBeaconEntry(filename, fmt.Sprintf("primitives.beacon_hash_v1.included_entries[%d]", i), e); err != nil {
+			return err
+		}
+	}
+
+	ticket := p.TicketV1
+	return firstError(
+		requireContext(filename, "primitives.ticket_v1", ticket.ChainID, ticket.SlotID, ticket.TargetEpoch),
+		requireHex32(filename, "primitives.ticket_v1.candidate_set_hash_hex", ticket.CandidateSetHashHex),
+		requireHex32(filename, "primitives.ticket_v1.beacon_hash_hex", ticket.BeaconHashHex),
+		requireHex32(filename, "primitives.ticket_v1.draw_id_hex", ticket.DrawIDHex),
+		requireHex32(filename, "primitives.ticket_v1.expected_ticket_hex", ticket.ExpectedTicketHex),
+	)
+}
+
+func validateBeaconEntry(filename, prefix string, e BeaconEntry) error {
+	return firstError(
+		requireSet(filename, prefix+".height", e.Height),
+		requireSet(filename, prefix+".proposer_slot_id", e.ProposerSlotID),
+		requireHex32(filename, prefix+".block_hash_hex", e.BlockHashHex),
+	)
+}
+
+// validate checks the draw params of an end-to-end case. The invalid-beacon
+// cases never reach the count arithmetic and state no protocol maximum, so that
+// field is required only where the case actually selects participants.
+func (p DrawParams) validate(filename, prefix string, requireProtocolMax bool) error {
+	if err := firstError(
+		requireSet(filename, prefix+".beacon_start_offset_blocks", p.BeaconStartOffsetBlocks),
+		requireSet(filename, prefix+".beacon_window_blocks", p.BeaconWindowBlocks),
+		requireSet(filename, prefix+".min_external_beacon_blocks", p.MinExternalBeaconBlocks),
+		requireSet(filename, prefix+".min_distinct_external_proposers", p.MinDistinctExternalProposers),
+	); err != nil {
+		return err
+	}
+	if requireProtocolMax {
+		return requireSet(filename, prefix+".protocol_max_winners_per_draw", p.ProtocolMaxWinnersPerDraw)
+	}
+	return nil
+}
+
+func (e DrawEndToEnd) validate(filename string) error {
+	success := e.SuccessWithTargetSlotExclusion
+	const successPrefix = "end_to_end.success_with_target_slot_exclusion"
+	if err := firstError(
+		requireContext(filename, successPrefix, success.ChainID, success.SlotID, success.TargetEpoch),
+		requireSet(filename, successPrefix+".epoch_n_minus_1_start_height", success.EpochNMinus1StartHeight),
+		requireSet(filename, successPrefix+".epoch_n_start_height", success.EpochNStartHeight),
+		requireSet(filename, successPrefix+".draw_commitment.candidate_count", success.DrawCommitment.CandidateCount),
+		requireHex32(filename, successPrefix+".draw_commitment.candidate_set_hash_hex", success.DrawCommitment.CandidateSetHashHex),
+		requireSet(filename, successPrefix+".draw_commitment.committed_height", success.DrawCommitment.CommittedHeight),
+		requireSet(filename, successPrefix+".draw_commitment.selection_rate_bps", success.DrawCommitment.SelectionRateBps),
+		requireSet(filename, successPrefix+".draw_commitment.slot_max_winners", success.DrawCommitment.SlotMaxWinners),
+		success.DrawParams.validate(filename, successPrefix+".draw_params", true),
+		requireNonEmptySlice(filename, successPrefix+".candidate_list_draw_ids_hex", len(success.CandidateListDrawIDsHex)),
+		requireNonEmptySlice(filename, successPrefix+".observed_beacon_window", len(success.ObservedBeaconWindow)),
+		requireNonEmptySlice(filename, successPrefix+".expected_included_entries", len(success.ExpectedIncludedEntries)),
+		requireSet(filename, successPrefix+".expected_usable_block_count", success.ExpectedUsableBlockCount),
+		requireSet(filename, successPrefix+".expected_distinct_external_proposers", success.ExpectedDistinctExternalProposers),
+		requireHex32(filename, successPrefix+".expected_beacon_hash_hex", success.ExpectedBeaconHashHex),
+		requireSet(filename, successPrefix+".expected_k", success.ExpectedK),
+		requireNonEmptySlice(filename, successPrefix+".expected_ranking", len(success.ExpectedRanking)),
+		requireNonEmptySlice(filename, successPrefix+".expected_winner_draw_ids_hex", len(success.ExpectedWinnerDrawIDsHex)),
+		requireText(filename, successPrefix+".expected_outcome", success.ExpectedOutcome),
+	); err != nil {
+		return err
+	}
+	for i, block := range success.ObservedBeaconWindow {
+		if err := validateObservedBlock(filename, fmt.Sprintf("%s.observed_beacon_window[%d]", successPrefix, i), block); err != nil {
+			return err
+		}
+	}
+	for i, entry := range success.ExpectedIncludedEntries {
+		if err := validateBeaconEntry(filename, fmt.Sprintf("%s.expected_included_entries[%d]", successPrefix, i), entry); err != nil {
+			return err
+		}
+	}
+	for i, ranked := range success.ExpectedRanking {
+		prefix := fmt.Sprintf("%s.expected_ranking[%d]", successPrefix, i)
+		if err := firstError(
+			requireHex32(filename, prefix+".draw_id_hex", ranked.DrawIDHex),
+			requireHex32(filename, prefix+".ticket_hex", ranked.TicketHex),
+		); err != nil {
+			return err
+		}
+	}
+
+	invariance := e.CommitmentHeightInvariance
+	const invariancePrefix = "end_to_end.commitment_height_invariance"
+	if err := firstError(
+		requireContext(filename, invariancePrefix, invariance.ChainID, invariance.SlotID, invariance.TargetEpoch),
+		requireSet(filename, invariancePrefix+".epoch_n_minus_1_start_height", invariance.EpochNMinus1StartHeight),
+		requireSet(filename, invariancePrefix+".beacon_start_height", invariance.BeaconStartHeight),
+		requireNonEmptySlice(filename, invariancePrefix+".commitment_heights", len(invariance.CommitmentHeights)),
+		requireHex32(filename, invariancePrefix+".expected_same_beacon_hash_hex", invariance.ExpectedSameBeaconHashHex),
+		requireNonEmptySlice(filename, invariancePrefix+".expected_same_winner_draw_ids_hex", len(invariance.ExpectedSameWinnerDrawIDsHex)),
+		requireText(filename, invariancePrefix+".assertion", invariance.Assertion),
+	); err != nil {
+		return err
+	}
+
+	for _, tc := range []struct {
+		prefix string
+		value  SmallCandidateCase
+	}{
+		{"end_to_end.no_candidates", e.NoCandidates},
+		{"end_to_end.single_candidate", e.SingleCandidate},
+	} {
+		if err := firstError(
+			requireContext(filename, tc.prefix, tc.value.ChainID, tc.value.SlotID, tc.value.TargetEpoch),
+			requireHex32(filename, tc.prefix+".expected_candidate_set_hash_hex", tc.value.ExpectedCandidateSetHashHex),
+			requireSet(filename, tc.prefix+".expected_k", tc.value.ExpectedK),
+			requireText(filename, tc.prefix+".expected_outcome", tc.value.ExpectedOutcome),
+		); err != nil {
+			return err
+		}
+		// Both lists are legitimately empty on the zero-candidate path, so absence
+		// is what has to be rejected, not emptiness.
+		if tc.value.CandidateListDrawIDsHex == nil {
+			return structureError(filename, "%s.candidate_list_draw_ids_hex is missing", tc.prefix)
+		}
+		if tc.value.ExpectedWinnerDrawIDsHex == nil {
+			return structureError(filename, "%s.expected_winner_draw_ids_hex is missing", tc.prefix)
+		}
+	}
+
+	for _, tc := range []struct {
+		prefix string
+		value  InvalidBeaconCase
+	}{
+		{"end_to_end.no_valid_beacon_insufficient_usable_blocks", e.NoValidBeaconInsufficientUsable},
+		{"end_to_end.no_valid_beacon_insufficient_distinct_proposers", e.NoValidBeaconInsufficientDistinct},
+	} {
+		if err := firstError(
+			requireContext(filename, tc.prefix, tc.value.ChainID, tc.value.SlotID, tc.value.TargetEpoch),
+			tc.value.DrawParams.validate(filename, tc.prefix+".draw_params", false),
+			requireNonEmptySlice(filename, tc.prefix+".observed_beacon_window", len(tc.value.ObservedBeaconWindow)),
+			requireSet(filename, tc.prefix+".expected_usable_block_count", tc.value.ExpectedUsableBlockCount),
+			requireSet(filename, tc.prefix+".expected_distinct_external_proposers", tc.value.ExpectedDistinctExternalProposers),
+			requireText(filename, tc.prefix+".expected_outcome", tc.value.ExpectedOutcome),
+		); err != nil {
+			return err
+		}
+		for i, block := range tc.value.ObservedBeaconWindow {
+			if err := validateObservedBlock(filename, fmt.Sprintf("%s.observed_beacon_window[%d]", tc.prefix, i), block); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func validateObservedBlock(filename, prefix string, b ObservedBlock) error {
+	return firstError(
+		requireSet(filename, prefix+".height", b.Height),
+		requireSet(filename, prefix+".resolved_proposer_slot_id", b.ResolvedProposerSlotID),
+		requireHex32(filename, prefix+".block_hash_hex", b.BlockHashHex),
+	)
+}
+
+func (c EmptySetCrossCheck) validate(filename string) error {
+	const prefix = "empty_set_cross_check"
+	if err := firstError(
+		requireContext(filename, prefix+".input_a", c.InputA.ChainID, c.InputA.SlotID, c.InputA.TargetEpoch),
+		requireContext(filename, prefix+".input_b", c.InputB.ChainID, c.InputB.SlotID, c.InputB.TargetEpoch),
+		requireHex32(filename, prefix+".expected_hash_a_hex", c.ExpectedHashAHex),
+		requireHex32(filename, prefix+".expected_hash_b_hex", c.ExpectedHashBHex),
+		requireText(filename, prefix+".note", c.Note),
+	); err != nil {
+		return err
+	}
+	if c.InputA.DrawIDsHex == nil {
+		return structureError(filename, "%s.input_a.draw_ids_hex is missing", prefix)
+	}
+	if c.InputB.DrawIDsHex == nil {
+		return structureError(filename, "%s.input_b.draw_ids_hex is missing", prefix)
+	}
+	return nil
 }

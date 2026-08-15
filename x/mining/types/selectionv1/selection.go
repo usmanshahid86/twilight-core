@@ -112,6 +112,16 @@ func Evaluate(in EvaluationInput) (EvaluationResult, error) {
 		return result, nil
 	}
 
+	// Beacon parameters are validated before anything is derived from them. An
+	// unvalidated threshold of zero would let an empty window satisfy the validity
+	// predicate and report SUCCESS, so this check has to precede evaluation rather
+	// than accompany it.
+	if err := ValidateBeaconParams(
+		in.BeaconStartOffsetBlocks, in.BeaconWindowBlocks, in.Thresholds,
+	); err != nil {
+		return EvaluationResult{}, err
+	}
+
 	startHeight, endHeight, err := DeriveBeaconWindow(
 		in.EpochNMinus1StartHeight, in.BeaconStartOffsetBlocks, in.BeaconWindowBlocks,
 	)

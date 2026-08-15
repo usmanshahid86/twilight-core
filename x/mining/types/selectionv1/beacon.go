@@ -44,6 +44,54 @@ type BeaconStats struct {
 	DistinctExternalProposers uint64
 }
 
+// ValidateBeaconParams enforces the r6 §15 relations that govern a beacon:
+//
+//	0 < beaconStartOffsetBlocks
+//	0 < beaconWindowBlocks
+//	0 < MinExternalBeaconBlocks      <= beaconWindowBlocks
+//	0 < MinDistinctExternalProposers <= MinExternalBeaconBlocks
+//
+// The positive floors are what make the thresholds mean anything. A threshold of
+// zero is satisfied by an empty window, so a Selection with no usable blocks at
+// all would produce a "valid" beacon and a SUCCESS outcome — the exact opposite
+// of what the threshold exists to prevent. The two upper relations rule out
+// thresholds no window of the configured size could ever meet.
+//
+// This is the subset of the Selection parameter relations that a pure evaluator
+// needs in order to refuse a beacon it cannot evaluate meaningfully. Admission of
+// a complete SelectionParams set, including the bounds that require calibrated
+// deployment values, belongs to app/params and is not duplicated here.
+func ValidateBeaconParams(
+	beaconStartOffsetBlocks, beaconWindowBlocks uint64,
+	thresholds BeaconThresholds,
+) error {
+	if beaconStartOffsetBlocks == 0 {
+		return fmt.Errorf("%w: beacon start offset blocks must be positive", ErrInvalidParams)
+	}
+	if beaconWindowBlocks == 0 {
+		return fmt.Errorf("%w: beacon window blocks must be positive", ErrInvalidParams)
+	}
+	if thresholds.MinExternalBeaconBlocks == 0 {
+		return fmt.Errorf("%w: min external beacon blocks must be positive", ErrInvalidParams)
+	}
+	if thresholds.MinExternalBeaconBlocks > beaconWindowBlocks {
+		return fmt.Errorf(
+			"%w: min external beacon blocks is %d, exceeds the beacon window of %d blocks",
+			ErrInvalidParams, thresholds.MinExternalBeaconBlocks, beaconWindowBlocks,
+		)
+	}
+	if thresholds.MinDistinctExternalProposers == 0 {
+		return fmt.Errorf("%w: min distinct external proposers must be positive", ErrInvalidParams)
+	}
+	if thresholds.MinDistinctExternalProposers > thresholds.MinExternalBeaconBlocks {
+		return fmt.Errorf(
+			"%w: min distinct external proposers is %d, exceeds min external beacon blocks of %d",
+			ErrInvalidParams, thresholds.MinDistinctExternalProposers, thresholds.MinExternalBeaconBlocks,
+		)
+	}
+	return nil
+}
+
 // DeriveBeaconWindow implements the epoch-anchored V1 window (r6 §30.2):
 //
 //	beacon_start_height = EpochStartHeight(N-1) + beacon_start_offset_blocks
