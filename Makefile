@@ -18,9 +18,11 @@ lint:
 vet:
 	go vet ./...
 
-# Dependency vulnerability scan (matches CI). Installs govulncheck on demand.
+# Dependency vulnerability scan. Runs the same script as CI, so the two cannot drift:
+# the govulncheck version is pinned inside the script, and reachable advisories fail
+# unless explicitly accepted in .govulncheck-allow.json. Requires jq.
 vuln:
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	./scripts/vulncheck.sh ./...
 
 tidy:
 	go mod tidy

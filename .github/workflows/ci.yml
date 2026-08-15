@@ -113,12 +113,13 @@ jobs:
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest
-    # Blocking. The dependency + Go-toolchain upgrade (go 1.25.11, grpc v1.79.3,
-    # x/net v0.53.0) cleared every reachable advisory -- govulncheck reports 0
-    # vulnerabilities affecting called symbols. The step is intentionally blocking
-    # so a newly reachable advisory fails CI and is triaged, rather than silently
-    # accumulating. (govulncheck exits non-zero only on reachable findings;
-    # advisories in required modules that the code does not call do not fail it.)
+    # Blocking. A reachable advisory fails CI and is triaged rather than silently
+    # accumulating; advisories in required modules the code does not call do not fail it.
+    #
+    # Advisories that are reachable but have no available fix are accepted explicitly in
+    # .govulncheck-allow.json, with a reason and a review_by date. Anything reachable and
+    # not listed there still fails, and an expired acceptance also fails, so an exception
+    # cannot outlive its review date. See REVIEW.md.
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -126,8 +127,8 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run govulncheck
-        run: |
-          # Pinned (bump intentionally, like protoc/golangci-lint) so a new
-          # govulncheck release cannot change gating behavior without a code change.
-          go install golang.org/x/vuln/cmd/govulncheck@v1.5.0
-          "$(go env GOPATH)/bin/govulncheck" ./...
+        # Same script as `make vuln`, so local and CI results cannot diverge. The
+        # govulncheck version is pinned inside it (bump intentionally, like
+        # protoc/golangci-lint) so a new release cannot change gating behavior
+        # without a code change.
+        run: ./scripts/vulncheck.sh ./...
