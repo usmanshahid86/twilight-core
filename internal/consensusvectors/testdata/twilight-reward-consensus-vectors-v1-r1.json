@@ -1,0 +1,237 @@
+{
+  "artifact": "twilight-reward-consensus-vectors-v1",
+  "version": 1,
+  "revision": 1,
+  "normative": true,
+  "emission_reference": "per-block supply-threshold recurrence from Chain V2.2 \u00a730",
+  "emission_vectors": [
+    {
+      "name": "no-cross",
+      "cumulative_before": "0",
+      "reward_enabled_blocks": "3",
+      "max_supply": "1000",
+      "initial_block_subsidy": "100",
+      "per_block_subsidies": [
+        "100",
+        "100",
+        "100"
+      ],
+      "minted_emission": "300",
+      "cumulative_after": "300"
+    },
+    {
+      "name": "threshold-cross-clipped",
+      "cumulative_before": "450",
+      "reward_enabled_blocks": "5",
+      "max_supply": "1000",
+      "initial_block_subsidy": "100",
+      "per_block_subsidies": [
+        "50",
+        "50",
+        "50",
+        "50",
+        "50"
+      ],
+      "minted_emission": "250",
+      "cumulative_after": "700"
+    },
+    {
+      "name": "exact-threshold-start",
+      "cumulative_before": "500",
+      "reward_enabled_blocks": "4",
+      "max_supply": "1000",
+      "initial_block_subsidy": "100",
+      "per_block_subsidies": [
+        "50",
+        "50",
+        "50",
+        "50"
+      ],
+      "minted_emission": "200",
+      "cumulative_after": "700"
+    },
+    {
+      "name": "near-max-supply",
+      "cumulative_before": "990",
+      "reward_enabled_blocks": "5",
+      "max_supply": "1000",
+      "initial_block_subsidy": "100",
+      "per_block_subsidies": [
+        "1",
+        "1",
+        "1",
+        "0",
+        "0"
+      ],
+      "minted_emission": "3",
+      "cumulative_after": "993"
+    },
+    {
+      "name": "fully-paused-zero-blocks",
+      "cumulative_before": "450",
+      "reward_enabled_blocks": "0",
+      "max_supply": "1000",
+      "initial_block_subsidy": "100",
+      "per_block_subsidies": [],
+      "minted_emission": "0",
+      "cumulative_after": "450"
+    },
+    {
+      "name": "zero-base-after-deep-halving",
+      "cumulative_before": "999",
+      "reward_enabled_blocks": "5",
+      "max_supply": "1000",
+      "initial_block_subsidy": "1",
+      "per_block_subsidies": [
+        "0",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "minted_emission": "0",
+      "cumulative_after": "999"
+    }
+  ],
+  "allocation_vectors": [
+    {
+      "name": "aggregate-floor-basic",
+      "pool": "5",
+      "blocks_active": [
+        "2",
+        "1"
+      ],
+      "entitlements": [
+        "3",
+        "1"
+      ],
+      "carry_out": "1",
+      "allocated": "4",
+      "n_pos": 2
+    },
+    {
+      "name": "two-slot-exact",
+      "pool": "1000",
+      "blocks_active": [
+        "201",
+        "99"
+      ],
+      "entitlements": [
+        "670",
+        "330"
+      ],
+      "carry_out": "0",
+      "allocated": "1000",
+      "n_pos": 2
+    },
+    {
+      "name": "one-slot",
+      "pool": "777",
+      "blocks_active": [
+        "1"
+      ],
+      "entitlements": [
+        "777"
+      ],
+      "carry_out": "0",
+      "allocated": "777",
+      "n_pos": 1
+    },
+    {
+      "name": "zero-participation",
+      "pool": "777",
+      "blocks_active": [
+        "0",
+        "0"
+      ],
+      "entitlements": [
+        "0",
+        "0"
+      ],
+      "carry_out": "777",
+      "allocated": "0",
+      "n_pos": 0
+    },
+    {
+      "name": "unequal-active-blocks",
+      "pool": "900007",
+      "blocks_active": [
+        "360",
+        "180",
+        "90"
+      ],
+      "entitlements": [
+        "514289",
+        "257144",
+        "128572"
+      ],
+      "carry_out": "2",
+      "allocated": "900005",
+      "n_pos": 3
+    }
+  ],
+  "pool_vectors": [
+    {
+      "name": "treasury-and-carry",
+      "minted_emission": "1000000",
+      "treasury_share_bps": "1000",
+      "treasury": "100000",
+      "carry_in": "7",
+      "pool": "900007"
+    },
+    {
+      "name": "no-treasury",
+      "minted_emission": "250",
+      "treasury_share_bps": "0",
+      "treasury": "0",
+      "carry_in": "3",
+      "pool": "253"
+    }
+  ],
+  "required_assertions": [
+    "allocated <= pool before carry definition",
+    "carry = pool - allocated",
+    "carry >= 0",
+    "when n_pos>0 carry <= n_pos-1",
+    "cumulative_after <= max_supply",
+    "carry_in(E)=carry_out(E-1)"
+  ],
+  "negative_discriminators": [
+    {
+      "name": "wrong-denominator-overallocation-must-reject",
+      "pool": "1000",
+      "blocks_active": [
+        "360",
+        "180",
+        "90"
+      ],
+      "correct_denominator_W": "630",
+      "incorrect_denominator_reward_enabled_blocks": "360",
+      "incorrect_entitlements": [
+        "1000",
+        "500",
+        "250"
+      ],
+      "incorrect_allocated": "1750",
+      "required_result": "REJECT because allocated > pool before carry definition"
+    },
+    {
+      "name": "floor-pool-before-multiply-must-not-conform",
+      "pool": "1000",
+      "blocks_active": [
+        "201",
+        "99"
+      ],
+      "correct_entitlements": [
+        "670",
+        "330"
+      ],
+      "incorrect_floor_pool_over_W_then_multiply": [
+        "603",
+        "297"
+      ],
+      "required_result": "implementation output mismatch"
+    }
+  ],
+  "per_block_subsidies_semantics": "conceptual length equals reward_enabled_blocks; once subsidy reaches zero, all trailing entries are zero"
+}
