@@ -1,11 +1,17 @@
 package types_test
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	gogoproto "github.com/cosmos/gogoproto/proto"
+	descriptorpb "github.com/cosmos/gogoproto/protoc-gen-gogo/descriptor"
+	anypb "github.com/cosmos/gogoproto/types/any"
 
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
@@ -17,21 +23,198 @@ import (
 // removed — including the deprecated parameters, which keep their numbers rather
 // than being reserved.
 
+// fieldLedger is the authoritative record of a message's wire schema: field
+// number -> "name:kind". Every entry here is permanent. A test that only
+// round-trips values would pass through a renumbering as long as both sides moved
+// together; comparing the descriptor against a written-down ledger cannot.
+type fieldLedger map[int32]string
+
+// readFieldLedger derives the ledger from the compiled descriptor, so it reflects
+// the schema actually generated rather than a hand-copied restatement of it.
+func readFieldLedger(t *testing.T, msg descriptorMessage) fieldLedger {
+	t.Helper()
+	gzipped, _ := msg.Descriptor()
+	raw, err := decompressDescriptor(gzipped)
+	require.NoError(t, err)
+
+	var file descriptorpb.FileDescriptorProto
+	require.NoError(t, gogoproto.Unmarshal(raw, &file))
+
+	name := gogoproto.MessageName(msg)
+	shortName := name[strings.LastIndex(name, ".")+1:]
+	for _, message := range file.MessageType {
+		if message.GetName() != shortName {
+			continue
+		}
+		ledger := fieldLedger{}
+		for _, field := range message.Field {
+			kind := field.GetType().String()
+			if field.GetTypeName() != "" {
+				kind = field.GetTypeName()
+			}
+			if field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REPEATED {
+				kind = "repeated " + kind
+			}
+			ledger[field.GetNumber()] = field.GetName() + ":" + kind
+		}
+		return ledger
+	}
+	t.Fatalf("message %s not found in its own file descriptor", name)
+	return nil
+}
+
+type descriptorMessage interface {
+	gogoproto.Message
+	Descriptor() ([]byte, []int)
+}
+
+func decompressDescriptor(gzipped []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(gzipped))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return io.ReadAll(reader)
+}
+
+// TestWireLedgersArePinned is the durability proof for every message this change
+// extended. It pins the pre-existing numbers and wire kinds AND the additions, so
+// a renumbering, a retype, a removal or an unreviewed new number all fail here.
+//
+// This is what lets the decode test below make an accurate claim: that test
+// exercises a subset of the old fields, while this one proves none of the old
+// fields moved or changed kind — including the two the decode fixture cannot
+// carry (the Any-typed consensus key and the nested metadata message).
+func TestWireLedgersArePinned(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		msg    descriptorMessage
+		ledger fieldLedger
+	}{
+		{"CoreSlot", &types.CoreSlot{}, fieldLedger{
+			// Pre-existing, unchanged.
+			1:  "slot_id:TYPE_UINT64",
+			2:  "operator_address:TYPE_STRING",
+			3:  "consensus_pubkey:.google.protobuf.Any",
+			4:  "payout_address:TYPE_STRING",
+			5:  "status:.twilight.coreslot.v1.SlotStatus",
+			6:  "consensus_power:TYPE_INT64",
+			7:  "reward_weight:TYPE_STRING",
+			8:  "created_height:TYPE_INT64",
+			9:  "activated_height:TYPE_INT64",
+			10: "updated_height:TYPE_INT64",
+			11: "suspended_height:TYPE_INT64",
+			12: "removed_height:TYPE_INT64",
+			13: "metadata:.twilight.coreslot.v1.OperatorMetadata",
+			// Added by this change.
+			14: "settlement_address:TYPE_STRING",
+			15: "activation_sequence:TYPE_UINT64",
+			16: "activation_effective_height:TYPE_INT64",
+			17: "current_selection_policy_version:TYPE_UINT64",
+			18: "last_selection_policy_update_height:TYPE_INT64",
+		}},
+		{"GenesisState", &types.GenesisState{}, fieldLedger{
+			1: "params:.twilight.coreslot.v1.Params",
+			2: "slots:repeated .twilight.coreslot.v1.CoreSlot",
+			3: "pending_key_rotations:repeated .twilight.coreslot.v1.PendingKeyRotation",
+			4: "reserved_consensus_addresses:repeated .twilight.coreslot.v1.ReservedConsensusAddress",
+			5: "reward_weights:repeated .twilight.coreslot.v1.OperatorRewardWeight",
+			6: "last_applied_validators:repeated .twilight.coreslot.v1.LastAppliedValidator",
+			7: "next_slot_id:TYPE_UINT64",
+			8: "selection_policies:repeated .twilight.coreslot.v1.SelectionPolicyVersion",
+		}},
+		{"MsgRegisterCoreSlot", &types.MsgRegisterCoreSlot{}, fieldLedger{
+			1: "authority:TYPE_STRING",
+			2: "operator_address:TYPE_STRING",
+			3: "consensus_pubkey:.google.protobuf.Any",
+			4: "payout_address:TYPE_STRING",
+			5: "metadata:.twilight.coreslot.v1.OperatorMetadata",
+			6: "settlement_address:TYPE_STRING",
+			7: "initial_selection_policy:.twilight.coreslot.v1.InitialSelectionPolicy",
+		}},
+		{"Params", &types.Params{}, fieldLedger{
+			1: "authority:TYPE_STRING",
+			2: "emergency_authority:TYPE_STRING",
+			3: "slot_voting_power:TYPE_INT64",
+			4: "min_active_slots:TYPE_UINT64",
+			5: "max_active_slots:TYPE_UINT64",
+			// Deprecated in place: the numbers are retained, never reserved.
+			6:  "activation_delay_blocks:TYPE_UINT64",
+			7:  "key_rotation_delay_blocks:TYPE_UINT64",
+			8:  "removal_delay_blocks:TYPE_UINT64",
+			9:  "consensus_key_reuse_lockout:TYPE_UINT64",
+			10: "allow_self_registration:TYPE_BOOL",
+			11: "allow_emergency_below_min_active:TYPE_BOOL",
+		}},
+		{"SelectionPolicyVersion", &types.SelectionPolicyVersion{}, fieldLedger{
+			1: "slot_id:TYPE_UINT64",
+			2: "policy_version:TYPE_UINT64",
+			3: "selection_rate_bps:TYPE_UINT64",
+			4: "max_selected_participants:TYPE_UINT64",
+			5: "valid_from_height:TYPE_INT64",
+			6: "valid_until_height_exclusive:TYPE_INT64",
+		}},
+		{"InitialSelectionPolicy", &types.InitialSelectionPolicy{}, fieldLedger{
+			1: "selection_rate_bps:TYPE_UINT64",
+			2: "max_selected_participants:TYPE_UINT64",
+		}},
+		{"MsgUpdateSettlementAddress", &types.MsgUpdateSettlementAddress{}, fieldLedger{
+			1: "operator:TYPE_STRING",
+			2: "slot_id:TYPE_UINT64",
+			3: "settlement_address:TYPE_STRING",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.ledger, readFieldLedger(t, tc.msg))
+		})
+	}
+}
+
+// TestDeprecatedParamsAreMarkedDeprecated pins the deprecation itself, which the
+// number ledger alone cannot express: the fields must remain present AND carry
+// the deprecated option, so tooling reports them as retired rather than absent.
+func TestDeprecatedParamsAreMarkedDeprecated(t *testing.T) {
+	gzipped, _ := (&types.Params{}).Descriptor()
+	raw, err := decompressDescriptor(gzipped)
+	require.NoError(t, err)
+	var file descriptorpb.FileDescriptorProto
+	require.NoError(t, gogoproto.Unmarshal(raw, &file))
+
+	deprecated := map[int32]string{}
+	for _, message := range file.MessageType {
+		if message.GetName() != "Params" {
+			continue
+		}
+		for _, field := range message.Field {
+			if field.Options.GetDeprecated() {
+				deprecated[field.GetNumber()] = field.GetName()
+			}
+		}
+	}
+	require.Equal(t, map[int32]string{
+		6:  "activation_delay_blocks",
+		8:  "removal_delay_blocks",
+		10: "allow_self_registration",
+	}, deprecated)
+}
+
 // preV2CoreSlot is a CoreSlot as it was encoded before this change: fields 1-13
 // only. It is declared as its own message rather than built from the current
 // type, so the bytes under test cannot silently follow a schema change.
 type preV2CoreSlot struct {
-	SlotId          uint64 `protobuf:"varint,1,opt,name=slot_id,json=slotId,proto3" json:"slot_id,omitempty"`
-	OperatorAddress string `protobuf:"bytes,2,opt,name=operator_address,json=operatorAddress,proto3" json:"operator_address,omitempty"`
-	PayoutAddress   string `protobuf:"bytes,4,opt,name=payout_address,json=payoutAddress,proto3" json:"payout_address,omitempty"`
-	Status          int32  `protobuf:"varint,5,opt,name=status,proto3" json:"status,omitempty"`
-	ConsensusPower  int64  `protobuf:"varint,6,opt,name=consensus_power,json=consensusPower,proto3" json:"consensus_power,omitempty"`
-	RewardWeight    string `protobuf:"bytes,7,opt,name=reward_weight,json=rewardWeight,proto3" json:"reward_weight,omitempty"`
-	CreatedHeight   int64  `protobuf:"varint,8,opt,name=created_height,json=createdHeight,proto3" json:"created_height,omitempty"`
-	ActivatedHeight int64  `protobuf:"varint,9,opt,name=activated_height,json=activatedHeight,proto3" json:"activated_height,omitempty"`
-	UpdatedHeight   int64  `protobuf:"varint,10,opt,name=updated_height,json=updatedHeight,proto3" json:"updated_height,omitempty"`
-	SuspendedHeight int64  `protobuf:"varint,11,opt,name=suspended_height,json=suspendedHeight,proto3" json:"suspended_height,omitempty"`
-	RemovedHeight   int64  `protobuf:"varint,12,opt,name=removed_height,json=removedHeight,proto3" json:"removed_height,omitempty"`
+	SlotId          uint64                  `protobuf:"varint,1,opt,name=slot_id,json=slotId,proto3" json:"slot_id,omitempty"`
+	OperatorAddress string                  `protobuf:"bytes,2,opt,name=operator_address,json=operatorAddress,proto3" json:"operator_address,omitempty"`
+	ConsensusPubkey *anypb.Any              `protobuf:"bytes,3,opt,name=consensus_pubkey,json=consensusPubkey,proto3" json:"consensus_pubkey,omitempty"`
+	PayoutAddress   string                  `protobuf:"bytes,4,opt,name=payout_address,json=payoutAddress,proto3" json:"payout_address,omitempty"`
+	Status          int32                   `protobuf:"varint,5,opt,name=status,proto3" json:"status,omitempty"`
+	ConsensusPower  int64                   `protobuf:"varint,6,opt,name=consensus_power,json=consensusPower,proto3" json:"consensus_power,omitempty"`
+	RewardWeight    string                  `protobuf:"bytes,7,opt,name=reward_weight,json=rewardWeight,proto3" json:"reward_weight,omitempty"`
+	CreatedHeight   int64                   `protobuf:"varint,8,opt,name=created_height,json=createdHeight,proto3" json:"created_height,omitempty"`
+	ActivatedHeight int64                   `protobuf:"varint,9,opt,name=activated_height,json=activatedHeight,proto3" json:"activated_height,omitempty"`
+	UpdatedHeight   int64                   `protobuf:"varint,10,opt,name=updated_height,json=updatedHeight,proto3" json:"updated_height,omitempty"`
+	SuspendedHeight int64                   `protobuf:"varint,11,opt,name=suspended_height,json=suspendedHeight,proto3" json:"suspended_height,omitempty"`
+	RemovedHeight   int64                   `protobuf:"varint,12,opt,name=removed_height,json=removedHeight,proto3" json:"removed_height,omitempty"`
+	Metadata        *types.OperatorMetadata `protobuf:"bytes,13,opt,name=metadata,proto3" json:"metadata,omitempty"`
 }
 
 func (m *preV2CoreSlot) Reset()         { *m = preV2CoreSlot{} }
@@ -44,10 +227,12 @@ func (*preV2CoreSlot) ProtoMessage()    {}
 func TestPreV2CoreSlotBytesStillDecode(t *testing.T) {
 	old := &preV2CoreSlot{
 		SlotId: 7, OperatorAddress: "operator", PayoutAddress: "payout",
-		Status: int32(types.SlotStatus_SLOT_STATUS_ACTIVE), ConsensusPower: 1,
+		ConsensusPubkey: &anypb.Any{TypeUrl: "/cosmos.crypto.ed25519.PubKey", Value: []byte{1, 2, 3}},
+		Status:          int32(types.SlotStatus_SLOT_STATUS_ACTIVE), ConsensusPower: 1,
 		RewardWeight:  types.DefaultRewardWeight,
 		CreatedHeight: 3, ActivatedHeight: 4, UpdatedHeight: 5,
 		SuspendedHeight: 6, RemovedHeight: 8,
+		Metadata: &types.OperatorMetadata{Moniker: "legacy", Details: "all original fields retained"},
 	}
 	bz, err := gogoproto.Marshal(old)
 	require.NoError(t, err)
@@ -57,6 +242,7 @@ func TestPreV2CoreSlotBytesStillDecode(t *testing.T) {
 
 	require.Equal(t, uint64(7), decoded.SlotId)
 	require.Equal(t, "operator", decoded.OperatorAddress)
+	require.True(t, gogoproto.Equal(old.ConsensusPubkey, decoded.ConsensusPubkey))
 	require.Equal(t, "payout", decoded.PayoutAddress)
 	require.Equal(t, types.SlotStatus_SLOT_STATUS_ACTIVE, decoded.Status)
 	require.Equal(t, int64(1), decoded.ConsensusPower)
@@ -66,6 +252,7 @@ func TestPreV2CoreSlotBytesStillDecode(t *testing.T) {
 	require.Equal(t, int64(5), decoded.UpdatedHeight)
 	require.Equal(t, int64(6), decoded.SuspendedHeight)
 	require.Equal(t, int64(8), decoded.RemovedHeight)
+	require.True(t, gogoproto.Equal(old.Metadata, decoded.Metadata))
 
 	// The V2 fields are absent from the old bytes and decode as zero values, which
 	// is exactly the never-activated / no-policy sentinel state. A stored row in

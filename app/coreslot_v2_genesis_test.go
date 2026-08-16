@@ -5,13 +5,17 @@ import (
 	"testing"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	cmtcrypto "github.com/cometbft/cometbft/proto/tendermint/crypto"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 
+	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
+	anypb "github.com/cosmos/gogoproto/types/any"
 
 	"github.com/twilight-project/twilight-core/app"
 	appparams "github.com/twilight-project/twilight-core/app/params"
+	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
@@ -25,10 +29,29 @@ import (
 // ctx.BlockHeight() as the initial height would normalize against the wrong value
 // and either reject a conforming genesis or admit a non-conforming one.
 func TestFreshV2GenesisBootsThroughTheRealApplication(t *testing.T) {
+	// The requested initial height and the height genesis is normalized against
+	// are not the same thing: InitChain reports 0 for a chain starting at 1, and
+	// only carries a real header height above that. Both branches are exercised.
+	for _, tc := range []struct {
+		name            string
+		requestedHeight int64
+		initialHeight   int64
+	}{
+		{"default first block", 0, 1},
+		{"explicit first block", 1, 1},
+		{"explicit height above one", 5, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bootFreshV2Genesis(t, tc.requestedHeight, tc.initialHeight)
+		})
+	}
+}
+
+func bootFreshV2Genesis(t *testing.T, requestedHeight, initialHeight int64) {
+	t.Helper()
 	a := bootApp(t)
 	cdc := genesisCodec()
 
-	const initialHeight = int64(1)
 	operator, payout, settlement := acc(2), acc(12), acc(22)
 	csParams := coreslottypes.DefaultParams(app.AuthorityAddress(), app.EmergencyAuthorityAddress())
 	csGen := &coreslottypes.GenesisState{
@@ -57,6 +80,7 @@ func TestFreshV2GenesisBootsThroughTheRealApplication(t *testing.T) {
 
 	_, err = a.InitChain(&abci.RequestInitChain{
 		ChainId:         "",
+		InitialHeight:   requestedHeight,
 		ConsensusParams: sims.DefaultConsensusParams,
 		AppStateBytes:   appState,
 	})
@@ -93,6 +117,112 @@ func TestFreshV2GenesisBootsThroughTheRealApplication(t *testing.T) {
 	storedParams, err := a.CoreSlotKeeper.Params.Get(ctx)
 	require.NoError(t, err)
 	require.LessOrEqual(t, storedParams.MaxActiveSlots, appparams.HardMaxActiveCoreSlots)
+}
+
+// TestInitChainComparesTheSuppliedValidatorSet closes the outer half of the §80
+// validator-set contract.
+//
+// x/coreslot returns the validator set it derives from ACTIVE slots; BaseApp
+// compares that against the set CometBFT supplies in RequestInitChain and refuses
+// to start on any mismatch. The keeper tests prove the derivation; this proves the
+// comparison actually runs, so the module's output is checked against the genesis
+// document rather than silently trusted.
+func TestInitChainComparesTheSuppliedValidatorSet(t *testing.T) {
+	const initialHeight = int64(1)
+	operator, payout, settlement := acc(2), acc(12), acc(22)
+	consensusKey := ed25519Any(t, 7)
+
+	buildState := func(t *testing.T, a *app.App) []byte {
+		t.Helper()
+		cdc := genesisCodec()
+		csParams := coreslottypes.DefaultParams(app.AuthorityAddress(), app.EmergencyAuthorityAddress())
+		csGen := &coreslottypes.GenesisState{
+			Params: &csParams,
+			Slots: []*coreslottypes.CoreSlot{{
+				SlotId: 1, OperatorAddress: operator, PayoutAddress: payout,
+				SettlementAddress: settlement,
+				ConsensusPubkey:   consensusKey,
+				Status:            coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
+				ConsensusPower:    1, RewardWeight: coreslottypes.DefaultRewardWeight,
+				ActivationSequence: 1, ActivatedHeight: initialHeight, ActivationEffectiveHeight: initialHeight,
+				CurrentSelectionPolicyVersion: 1,
+			}},
+			SelectionPolicies: []*coreslottypes.SelectionPolicyVersion{{
+				SlotId: 1, PolicyVersion: 1, SelectionRateBps: 2_500, MaxSelectedParticipants: 10,
+				ValidFromHeight: initialHeight,
+			}},
+			RewardWeights: []*coreslottypes.OperatorRewardWeight{{SlotId: 1, FinalWeight: coreslottypes.DefaultRewardWeight}},
+			NextSlotId:    2,
+		}
+		genMap := a.DefaultGenesis()
+		genMap[coreslottypes.ModuleName] = cdc.MustMarshalJSON(csGen)
+		appState, err := json.Marshal(genMap)
+		require.NoError(t, err)
+		return appState
+	}
+
+	cmtKey := func(t *testing.T, any *anypb.Any) cmtcrypto.PublicKey {
+		t.Helper()
+		pk, err := coreslotkeeper.DecodePubKey(any)
+		require.NoError(t, err)
+		proto, err := cryptocodec.ToCmtProtoPublicKey(pk)
+		require.NoError(t, err)
+		return proto
+	}
+
+	t.Run("matching validator set is accepted", func(t *testing.T) {
+		a := bootApp(t)
+		_, err := a.InitChain(&abci.RequestInitChain{
+			ChainId:         "",
+			ConsensusParams: sims.DefaultConsensusParams,
+			AppStateBytes:   buildState(t, a),
+			Validators: []abci.ValidatorUpdate{
+				{PubKey: cmtKey(t, consensusKey), Power: 1},
+			},
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("mismatching validator key is rejected", func(t *testing.T) {
+		a := bootApp(t)
+		_, err := a.InitChain(&abci.RequestInitChain{
+			ChainId:         "",
+			ConsensusParams: sims.DefaultConsensusParams,
+			AppStateBytes:   buildState(t, a),
+			Validators: []abci.ValidatorUpdate{
+				// A key no CoreSlot holds.
+				{PubKey: cmtKey(t, ed25519Any(t, 99)), Power: 1},
+			},
+		})
+		require.Error(t, err, "a validator the module did not derive must not be accepted")
+	})
+
+	t.Run("mismatching validator power is rejected", func(t *testing.T) {
+		a := bootApp(t)
+		_, err := a.InitChain(&abci.RequestInitChain{
+			ChainId:         "",
+			ConsensusParams: sims.DefaultConsensusParams,
+			AppStateBytes:   buildState(t, a),
+			Validators: []abci.ValidatorUpdate{
+				{PubKey: cmtKey(t, consensusKey), Power: 7},
+			},
+		})
+		require.Error(t, err, "a power the module did not derive must not be accepted")
+	})
+
+	t.Run("extra supplied validator is rejected", func(t *testing.T) {
+		a := bootApp(t)
+		_, err := a.InitChain(&abci.RequestInitChain{
+			ChainId:         "",
+			ConsensusParams: sims.DefaultConsensusParams,
+			AppStateBytes:   buildState(t, a),
+			Validators: []abci.ValidatorUpdate{
+				{PubKey: cmtKey(t, consensusKey), Power: 1},
+				{PubKey: cmtKey(t, ed25519Any(t, 99)), Power: 1},
+			},
+		})
+		require.Error(t, err, "nothing outside the ACTIVE set may appear in the initial validator set")
+	})
 }
 
 // TestFreshV2GenesisRejectsNonNormalizedInput is the counterweight through the real

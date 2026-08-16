@@ -27,6 +27,16 @@ import (
 
 func setup(t *testing.T, blocked ...string) (keeper.Keeper, sdk.Context, string, string) {
 	t.Helper()
+	k, ctx, authority, emergency, _ := setupWithRawStore(t, blocked...)
+	return k, ctx, authority, emergency
+}
+
+// setupWithRawStore additionally returns the module's store key, so a test can
+// reach the raw keyspace beneath the collections API. That is only appropriate
+// for proving what a read path does NOT touch: a value written as raw bytes can
+// be made undecodable, which the typed API cannot express.
+func setupWithRawStore(t *testing.T, blocked ...string) (keeper.Keeper, sdk.Context, string, string, *storetypes.KVStoreKey) {
+	t.Helper()
 	registry := codectypes.NewInterfaceRegistry()
 	types.RegisterInterfaces(registry)
 	cdc := codec.NewProtoCodec(registry)
@@ -37,7 +47,7 @@ func setup(t *testing.T, blocked ...string) (keeper.Keeper, sdk.Context, string,
 	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(key), testEconomicAddresses(t, blocked...))
 	authority := sdk.AccAddress(make([]byte, 20)).String()
 	emergency := sdk.AccAddress(append([]byte{1}, make([]byte, 19)...)).String()
-	return k, ctx, authority, emergency
+	return k, ctx, authority, emergency, key
 }
 
 func pubkey(t *testing.T, marker byte) *anypb.Any {

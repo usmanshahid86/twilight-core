@@ -31,7 +31,7 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) ([
 	if err != nil {
 		return nil, err
 	}
-	if err := validateGenesisInitialHeight(genesis, initialHeight); err != nil {
+	if err := types.ValidateFreshGenesisInitialHeight(genesis, initialHeight); err != nil {
 		return nil, err
 	}
 	if err := k.validateGenesisEconomicAddresses(genesis); err != nil {
@@ -100,15 +100,6 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) ([
 	return updates, nil
 }
 
-// validateGenesisInitialHeight pins the fresh-genesis heights §80 normalizes,
-// against the chain's own initial height rather than a second independent source.
-//
-// PENDING rows carry the never-activated sentinel and were already checked by
-// GenesisState.Validate; what needs the chain's height is the ACTIVE case, where
-// both the activation height and the reward-accounting effective height must be
-// initial_height exactly. Fresh genesis is the explicit exception to the runtime
-// H+1 rule: a genesis ACTIVE slot is effective from the first block, not the one
-// after it.
 // genesisInitialHeight resolves the height the chain's first block will carry,
 // from the context InitGenesis is given.
 //
@@ -117,45 +108,14 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) ([
 // height as 0, even though req.InitialHeight is 1 by default" — and only puts a
 // real height on the header when InitialHeight is greater than 1. baseapp applies
 // exactly this normalization to its own copy ("If initial height is 0, set it to
-// 1"), so mirroring it here reads the SDK's value under the SDK's convention
-// rather than introducing a second, independent notion of the initial height.
+// 1"), so the shared types helper reads the SDK's value under the SDK's
+// convention rather than introducing another notion of the initial height.
 //
 // A negative height cannot be produced by a well-formed InitChain and is refused
 // rather than normalized, because silently treating it as 1 would let a
 // nonsensical context define consensus state.
 func genesisInitialHeight(ctx context.Context) (int64, error) {
-	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
-	if height < 0 {
-		return 0, types.ErrInvalidGenesis.Wrapf("genesis context height %d is negative", height)
-	}
-	if height == 0 {
-		return 1, nil
-	}
-	return height, nil
-}
-
-func validateGenesisInitialHeight(genesis *types.GenesisState, initialHeight int64) error {
-	if initialHeight < 1 {
-		return types.ErrInvalidGenesis.Wrapf("initial height must be at least 1, is %d", initialHeight)
-	}
-	for _, slot := range genesis.Slots {
-		if slot.Status != types.SlotStatus_SLOT_STATUS_ACTIVE {
-			continue
-		}
-		if slot.ActivatedHeight != initialHeight || slot.ActivationEffectiveHeight != initialHeight {
-			return types.ErrInvalidGenesis.Wrapf(
-				"active slot %d must have activated and activation-effective heights equal to the initial height %d",
-				slot.SlotId, initialHeight)
-		}
-	}
-	for _, policy := range genesis.SelectionPolicies {
-		if policy.ValidFromHeight != initialHeight {
-			return types.ErrInvalidGenesis.Wrapf(
-				"slot %d policy must be valid from the initial height %d, is %d",
-				policy.SlotId, initialHeight, policy.ValidFromHeight)
-		}
-	}
-	return nil
+	return types.EffectiveInitialHeight(sdk.UnwrapSDKContext(ctx).BlockHeight())
 }
 
 // assertGenesisValidatorConsistency checks that the ACTIVE slot set, the ACTIVE

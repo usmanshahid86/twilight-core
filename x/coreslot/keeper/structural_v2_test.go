@@ -1,6 +1,8 @@
 package keeper_test
 
 import (
+	"encoding/binary"
+	"encoding/hex"
 	"math"
 	"reflect"
 	"testing"
@@ -9,6 +11,7 @@ import (
 
 	"cosmossdk.io/collections"
 
+	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	appparams "github.com/twilight-project/twilight-core/app/params"
@@ -395,6 +398,53 @@ func TestActiveEnumerationDoesNotScanEveryRegisteredSlot(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestActiveCoreSlotsQueryReadsTheIndexNotEverySlot is the query-side half of the
+// O(A) guarantee.
+//
+// It plants an UNDECODABLE value at a dormant non-ACTIVE slot's key, directly in
+// the raw keyspace. Nothing indexed as ACTIVE refers to it, so an index-driven
+// read never touches those bytes and succeeds; an implementation that walks every
+// slot and filters by status must decode them first and therefore fails. Removing
+// rows would not distinguish the two, because a walk simply would not see them.
+func TestActiveCoreSlotsQueryReadsTheIndexNotEverySlot(t *testing.T) {
+	k, ctx, authority, emergency, storeKey := setupWithRawStore(t)
+	params := types.DefaultParams(authority, emergency)
+	ops := makeOps(120, 4)
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{
+		Params: &params, NextSlotId: 5,
+		Slots: []*types.CoreSlot{
+			slot(t, 1, ops[0], 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
+			slot(t, 2, ops[1], 2, types.SlotStatus_SLOT_STATUS_PENDING, 0),
+			slot(t, 3, ops[2], 3, types.SlotStatus_SLOT_STATUS_PENDING, 0),
+			slot(t, 4, ops[3], 4, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
+		},
+	})
+	require.NoError(t, err)
+
+	// Corrupt the two dormant rows in place. The key encoding is the collections
+	// prefix followed by the big-endian slot id, which is what makes this reach
+	// exactly the same bytes the typed API would read.
+	store := ctx.KVStore(storeKey)
+	for _, id := range []uint64{2, 3} {
+		rawKey := append(append([]byte{}, types.SlotsPrefix...), binary.BigEndian.AppendUint64(nil, id)...)
+		require.NotNil(t, store.Get(rawKey), "the row must exist before it is corrupted")
+		store.Set(rawKey, []byte{0xff, 0xff, 0xff, 0xff})
+	}
+
+	// A full scan is now impossible: this proves the corruption is load-bearing
+	// rather than something the decoder happens to tolerate.
+	require.Error(t, k.Slots.Walk(ctx, nil, func(uint64, types.CoreSlot) (bool, error) { return false, nil }),
+		"a scan over every slot must fail on the corrupted rows")
+
+	qs := keeper.NewQueryServer(k)
+	resp, err := qs.ActiveCoreSlots(ctx, &types.QueryActiveCoreSlotsRequest{})
+	require.NoError(t, err, "the active query must not read dormant slots")
+	require.Equal(t, []uint64{1, 4}, querySlotIDs(resp.Slots))
+	for _, s := range resp.Slots {
+		require.Equal(t, types.SlotStatus_SLOT_STATUS_ACTIVE, s.Status)
+	}
+}
+
 // TestActiveIndexDivergenceFailsClosed proves the absence of a silent fallback:
 // an index entry with no ACTIVE record is an error, not something to skip.
 func TestActiveIndexDivergenceFailsClosed(t *testing.T) {
@@ -755,6 +805,79 @@ func TestGenesisRejectsMoreActiveSlotsThanTheCeilings(t *testing.T) {
 	})
 }
 
+// TestFreshGenesisRejectsPendingKeyRotations covers the one collection whose mere
+// presence contradicts fresh genesis.
+//
+// A staged rotation can only exist because a runtime rotation request created
+// one, so it is lifecycle history by construction. Importing it would mean
+// rebuilding the consensus-key index entry and uniqueness guarantee that made it
+// safe, from a file that cannot be checked against the history it came from —
+// continuation work, deferred.
+//
+// The cases below range from obviously malformed to entirely plausible on
+// purpose: the rule is about the collection being non-empty, not about the rows
+// being well-formed, and a fixture that only ever failed on a malformed row would
+// not prove that.
+func TestFreshGenesisRejectsPendingKeyRotations(t *testing.T) {
+	authority := sdk.AccAddress(make([]byte, 20)).String()
+	emergency := sdk.AccAddress(append([]byte{1}, make([]byte, 19)...)).String()
+	op := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
+
+	for _, tc := range []struct {
+		name     string
+		rotation *types.PendingKeyRotation
+	}{
+		{"structurally plausible rotation", &types.PendingKeyRotation{
+			SlotId: 1, OldPubkey: pubkey(t, 1), NewPubkey: pubkey(t, 9),
+			RequestedHeight: 1, EffectiveHeight: 2,
+		}},
+		{"missing old key", &types.PendingKeyRotation{
+			SlotId: 1, NewPubkey: pubkey(t, 9), RequestedHeight: 1, EffectiveHeight: 2,
+		}},
+		{"old key does not match the slot", &types.PendingKeyRotation{
+			SlotId: 1, OldPubkey: pubkey(t, 200), NewPubkey: pubkey(t, 9),
+			RequestedHeight: 1, EffectiveHeight: 2,
+		}},
+		{"unknown slot id", &types.PendingKeyRotation{
+			SlotId: 404, OldPubkey: pubkey(t, 1), NewPubkey: pubkey(t, 9),
+			RequestedHeight: 1, EffectiveHeight: 2,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			k, ctx, _, _ := setup(t)
+			params := types.DefaultParams(authority, emergency)
+			genesis := freshGenesis(t, &types.GenesisState{
+				Params: &params, NextSlotId: 2,
+				Slots: []*types.CoreSlot{slot(t, 1, op, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1)},
+			})
+			// The same input without the rotation is conforming, so the rotation is
+			// demonstrably the only reason for the rejection below.
+			require.NoError(t, genesis.Validate())
+
+			genesis.PendingKeyRotations = []*types.PendingKeyRotation{tc.rotation}
+			require.ErrorIs(t, genesis.Validate(), types.ErrInvalidGenesis)
+
+			_, err := k.InitGenesis(ctx, genesis)
+			require.ErrorIs(t, err, types.ErrInvalidGenesis)
+			require.Contains(t, err.Error(), "no pending key rotations")
+
+			// Total preflight: nothing at all survived the rejected import.
+			_, err = k.Params.Get(ctx)
+			require.Error(t, err, "params must not survive a rejected genesis")
+			has, err := k.Slots.Has(ctx, 1)
+			require.NoError(t, err)
+			require.False(t, has, "slots must not survive a rejected genesis")
+			has, err = k.Rotations.Has(ctx, tc.rotation.SlotId)
+			require.NoError(t, err)
+			require.False(t, has, "the rotation itself must not be written")
+			require.Empty(t, indexedIDs(t, k, ctx), "the active index must not survive a rejected genesis")
+			hasConsensus, err := k.ByConsensus.Has(ctx, consAddrHex(t, pubkey(t, 9)))
+			require.NoError(t, err)
+			require.False(t, hasConsensus, "no staged key may be indexed by a rejected genesis")
+		})
+	}
+}
+
 // TestGenesisValidatorSetsAgreeInBothDirections covers the CoreSlot-expressible
 // half of the §80 validator-set contract.
 func TestGenesisValidatorSetsAgreeInBothDirections(t *testing.T) {
@@ -771,19 +894,54 @@ func TestGenesisValidatorSetsAgreeInBothDirections(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// One update per ACTIVE slot and nothing else: no duplicate delta, and no
-	// delta for the PENDING slot.
-	require.Len(t, updates, 2)
-
 	active := activeIDs(t, k, ctx)
 	require.Equal(t, []uint64{1, 3}, active)
 
-	lastApplied := lastAppliedBySlot(t, k, ctx)
-	require.Len(t, lastApplied, len(active), "nothing outside the ACTIVE set may appear in LastApplied")
+	// Exact IDENTITIES and powers, not merely the right number of updates. A
+	// count-only assertion would pass if two slots' keys were swapped, or if a
+	// PENDING slot's key were emitted in place of an ACTIVE one.
+	expected := map[string]int64{}
 	for _, id := range active {
-		_, ok := lastApplied[id]
-		require.Truef(t, ok, "active slot %d must appear in LastApplied", id)
+		s, err := k.GetSlot(ctx, id)
+		require.NoError(t, err)
+		expected[consAddrHex(t, s.ConsensusPubkey)] = s.ConsensusPower
 	}
+	require.Len(t, expected, 2)
+
+	emitted := map[string]int64{}
+	for _, update := range updates {
+		pk, err := cryptocodec.FromCmtProtoPublicKey(update.PubKey)
+		require.NoError(t, err)
+		address := hex.EncodeToString(pk.Address().Bytes())
+		_, dup := emitted[address]
+		require.Falsef(t, dup, "validator %s appears in two updates", address)
+		emitted[address] = update.Power
+	}
+	require.Equal(t, expected, emitted,
+		"emitted updates must be exactly the ACTIVE slots' consensus keys at their stored powers")
+
+	// The PENDING slot's key must appear nowhere.
+	pendingSlot, err := k.GetSlot(ctx, 2)
+	require.NoError(t, err)
+	require.NotContains(t, emitted, consAddrHex(t, pendingSlot.ConsensusPubkey),
+		"a non-ACTIVE slot must not reach the validator set")
+
+	// LastApplied must describe the same slots, keys and powers.
+	persisted := map[string]int64{}
+	persistedSlots := map[string]uint64{}
+	require.NoError(t, k.LastApplied.Walk(ctx, nil, func(key string, validator types.LastAppliedValidator) (bool, error) {
+		persisted[key] = validator.Power
+		persistedSlots[key] = validator.SlotId
+		return false, nil
+	}))
+	require.Equal(t, expected, persisted, "LastApplied must match the emitted set exactly")
+	for _, id := range active {
+		s, err := k.GetSlot(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, id, persistedSlots[consAddrHex(t, s.ConsensusPubkey)],
+			"LastApplied must attribute each key to its own slot")
+	}
+
 	requireIndexMatchesStatus(t, k, ctx)
 }
 

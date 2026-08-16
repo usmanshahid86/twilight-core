@@ -93,21 +93,26 @@ func (g GenesisState) Validate() error {
 			return fmt.Errorf("non-active slot %d has nonzero power", slot.SlotId)
 		}
 	}
-	for _, rotation := range g.PendingKeyRotations {
-		if rotation == nil || rotation.SlotId == 0 {
-			return fmt.Errorf("invalid pending key rotation")
-		}
-		if rotation.EffectiveHeight <= rotation.RequestedHeight {
-			return fmt.Errorf("slot %d pending rotation has invalid effective height", rotation.SlotId)
-		}
-		if err := validateConsensusPubKey(rotation.NewPubkey); err != nil {
-			return fmt.Errorf("slot %d pending new pubkey: %w", rotation.SlotId, err)
-		}
-		key := rotation.NewPubkey.TypeUrl + string(rotation.NewPubkey.Value)
-		if _, ok := keys[key]; ok {
-			return fmt.Errorf("duplicate consensus pubkey in pending rotation")
-		}
-		keys[key] = struct{}{}
+	// A pending key rotation is lifecycle history: it can only exist because a
+	// runtime rotation request staged one, which a fresh chain has not had. Fresh
+	// genesis therefore admits none at all.
+	//
+	// This is a rejection rather than an import path on purpose. Accepting a
+	// staged rotation would require rebuilding the state that made it safe — the
+	// new key's entry in the consensus-key index, and the uniqueness guarantee
+	// that entry carries — from a genesis file that cannot be checked against the
+	// history it came from. Reconstructing that is continuation work (H7), and
+	// doing it here would decide continuation semantics as a side effect of
+	// authoring a fresh chain.
+	//
+	// The check is one condition on the whole collection rather than a per-row
+	// validation for the same reason: there is no such thing as a well-formed
+	// pending rotation at fresh genesis, so inspecting the rows would imply some
+	// of them could be admissible.
+	if len(g.PendingKeyRotations) != 0 {
+		return ErrInvalidGenesis.Wrapf(
+			"fresh genesis admits no pending key rotations, has %d; importing staged rotations is continuation work",
+			len(g.PendingKeyRotations))
 	}
 	// The pre-existing operational relation, unchanged: the configured window
 	// binds first and its lower end is the established min-active semantic.
@@ -191,6 +196,51 @@ func (g GenesisState) Validate() error {
 		}
 		if len(seen) != len(activeValidators) {
 			return ErrInvalidGenesis.Wrap("last-applied validators do not match active slots")
+		}
+	}
+	return nil
+}
+
+// EffectiveInitialHeight applies the SDK/BaseApp convention to the height a
+// genesis document or InitChain context supplies. Keeping this normalization in
+// one shared helper prevents the CLI and keeper from becoming independent
+// authorities on which block is the first block.
+func EffectiveInitialHeight(height int64) (int64, error) {
+	if height < 0 {
+		return 0, ErrInvalidGenesis.Wrapf("initial height %d is negative", height)
+	}
+	if height == 0 {
+		return 1, nil
+	}
+	return height, nil
+}
+
+// ValidateFreshGenesisInitialHeight pins the height-bearing portions of fresh
+// CoreSlot genesis to the effective first-block height. GenesisState.Validate
+// checks the internally decidable shape; callers that know the document/context
+// height use this second pure preflight before accepting or writing the state.
+func ValidateFreshGenesisInitialHeight(genesis *GenesisState, initialHeight int64) error {
+	if genesis == nil {
+		return ErrInvalidGenesis.Wrap("genesis state is nil")
+	}
+	if initialHeight < 1 {
+		return ErrInvalidGenesis.Wrapf("initial height must be at least 1, is %d", initialHeight)
+	}
+	for _, slot := range genesis.Slots {
+		if slot.Status != SlotStatus_SLOT_STATUS_ACTIVE {
+			continue
+		}
+		if slot.ActivatedHeight != initialHeight || slot.ActivationEffectiveHeight != initialHeight {
+			return ErrInvalidGenesis.Wrapf(
+				"active slot %d must have activated and activation-effective heights equal to the initial height %d",
+				slot.SlotId, initialHeight)
+		}
+	}
+	for _, policy := range genesis.SelectionPolicies {
+		if policy.ValidFromHeight != initialHeight {
+			return ErrInvalidGenesis.Wrapf(
+				"slot %d policy must be valid from the initial height %d, is %d",
+				policy.SlotId, initialHeight, policy.ValidFromHeight)
 		}
 	}
 	return nil

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,18 +15,53 @@ import (
 	"github.com/cosmos/cosmos-sdk/client/flags"
 
 	"github.com/twilight-project/twilight-core/app/params"
+	"github.com/twilight-project/twilight-core/internal/checked"
 	"github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
-// The chain's first block height. These commands write it into the CometBFT
-// genesis document, and the slot rows they build are normalized against the same
-// value, so the two cannot drift apart. Both spellings exist because the document
-// carries the height as a JSON string.
-const (
-	genesisInitialHeight     = int64(1)
-	genesisInitialHeightJSON = `"1"`
-)
+// effectiveInitialHeight reads the chain's first block height from the genesis
+// document and applies the SDK's convention for it.
+//
+// The document is the authority. These commands author slot rows that must be
+// normalized against the height the chain will actually start at, so they read
+// that height rather than declaring one — a command that wrote its own would be a
+// second authority, and would silently corrupt a genesis whose initial height is
+// not 1.
+//
+// The convention matches baseapp's: an absent or zero initial_height means the
+// chain starts at height 1, and any other value is used exactly. A negative or
+// unrepresentable height is refused rather than normalized, because a nonsensical
+// document must not quietly define consensus state.
+//
+// CometBFT writes the field as a JSON string; some tooling writes a bare number.
+// Both are accepted, and neither is rewritten.
+func effectiveInitialHeight(doc map[string]json.RawMessage) (int64, error) {
+	raw, present := doc["initial_height"]
+	if !present {
+		return types.EffectiveInitialHeight(0)
+	}
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return 0, fmt.Errorf("genesis initial_height is empty")
+	}
+
+	text := string(raw)
+	if raw[0] == '"' {
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return 0, fmt.Errorf("genesis initial_height %s is not a valid height: %w", string(raw), err)
+		}
+	}
+	height, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("genesis initial_height %s is not a valid height: %w", string(raw), err)
+	}
+	effective, err := types.EffectiveInitialHeight(height)
+	if err != nil {
+		return 0, fmt.Errorf("genesis initial_height: %w", err)
+	}
+	return effective, nil
+}
 
 func GetGenesisCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "coreslot-genesis", Short: "Manage core slots in genesis"}
@@ -53,7 +89,8 @@ func setAuthoritiesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			doc["initial_height"] = json.RawMessage(genesisInitialHeightJSON)
+			// initial_height is deliberately untouched: changing the authorities says
+			// nothing about when the chain starts.
 			return saveGenesis(path, doc)
 		},
 	}
@@ -84,9 +121,23 @@ func addGenesisSlotCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// The document owns the chain's first block height; this command reads it
+			// and never rewrites it.
+			initialHeight, err := effectiveInitialHeight(doc)
+			if err != nil {
+				return err
+			}
 			id := genesis.NextSlotId
 			if id == 0 {
 				id = 1
+			}
+			// Checked, and computed BEFORE any of the structures that will be saved
+			// are touched: at the top of the range an unchecked increment would wrap
+			// to zero and hand the next slot an identifier already in use. Failing
+			// here leaves the file on disk untouched.
+			nextID, err := checked.AddUint64(id, 1)
+			if err != nil {
+				return fmt.Errorf("slot id %d leaves no room for the next slot id: %w", id, err)
 			}
 			power, _ := cmd.Flags().GetInt64("power")
 			rateBps, _ := cmd.Flags().GetUint64("selection-rate-bps")
@@ -94,23 +145,23 @@ func addGenesisSlotCmd() *cobra.Command {
 			// This tool writes a fresh V2 genesis, whose only admissible statuses are
 			// PENDING and ACTIVE, and it always writes an ACTIVE slot. The §80
 			// normalization for a genesis ACTIVE slot is the first activation
-			// generation effective from the initial height, which this command pins
-			// to 1 below. Fresh genesis is the explicit exception to the runtime H+1
-			// rule, so both heights are the initial height.
+			// generation, effective from the initial height. Fresh genesis is the
+			// explicit exception to the runtime H+1 rule, so both heights are that
+			// same initial height.
 			slot := &types.CoreSlot{
 				SlotId: id, OperatorAddress: args[0], PayoutAddress: args[1], SettlementAddress: args[2],
 				ConsensusPubkey: pk, Status: types.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: power,
 				RewardWeight: types.DefaultRewardWeight, Metadata: &types.OperatorMetadata{Moniker: args[4]},
-				ActivationSequence: 1, ActivatedHeight: genesisInitialHeight, ActivationEffectiveHeight: genesisInitialHeight,
+				ActivationSequence: 1, ActivatedHeight: initialHeight, ActivationEffectiveHeight: initialHeight,
 				CurrentSelectionPolicyVersion: 1, LastSelectionPolicyUpdateHeight: 0,
 			}
 			genesis.Slots = append(genesis.Slots, slot)
 			genesis.SelectionPolicies = append(genesis.SelectionPolicies, &types.SelectionPolicyVersion{
 				SlotId: id, PolicyVersion: 1, SelectionRateBps: rateBps, MaxSelectedParticipants: maxSelected,
-				ValidFromHeight: genesisInitialHeight, ValidUntilHeightExclusive: 0,
+				ValidFromHeight: initialHeight, ValidUntilHeightExclusive: 0,
 			})
 			genesis.RewardWeights = append(genesis.RewardWeights, &types.OperatorRewardWeight{SlotId: id, BaseWeight: types.DefaultRewardWeight, UptimeWeight: types.DefaultRewardWeight, PerformanceWeight: types.DefaultRewardWeight, FinalWeight: types.DefaultRewardWeight})
-			genesis.NextSlotId = id + 1
+			genesis.NextSlotId = nextID
 			state[types.ModuleName] = clientCtx.Codec.MustMarshalJSON(&genesis)
 			ensureBankMetadata(state)
 			appState, err := json.Marshal(state)
@@ -118,7 +169,8 @@ func addGenesisSlotCmd() *cobra.Command {
 				return err
 			}
 			doc["app_state"] = appState
-			doc["initial_height"] = json.RawMessage(genesisInitialHeightJSON)
+			// initial_height is read above, not written: the document decides when the
+			// chain starts, and adding a slot is not that decision.
 			var validators []genesisValidator
 			_ = json.Unmarshal(doc["validators"], &validators)
 			// args[3] is the consensus pubkey and args[4] the moniker: the settlement
@@ -159,6 +211,13 @@ func validateGenesisCmd() *cobra.Command {
 			if err := genesis.Validate(); err != nil {
 				return err
 			}
+			initialHeight, err := effectiveInitialHeight(doc)
+			if err != nil {
+				return err
+			}
+			if err := types.ValidateFreshGenesisInitialHeight(&genesis, initialHeight); err != nil {
+				return err
+			}
 			var validators []genesisValidator
 			if err := json.Unmarshal(doc["validators"], &validators); err != nil {
 				return err
@@ -182,10 +241,9 @@ func validateGenesisCmd() *cobra.Command {
 					return fmt.Errorf("CometBFT validator %s does not match coreslot genesis", validator.Name)
 				}
 			}
-			doc["initial_height"] = json.RawMessage(genesisInitialHeightJSON)
-			if err := saveGenesis(path, doc); err != nil {
-				return err
-			}
+			// Reading the height is part of validating it; writing it back is not.
+			// This command reports whether the file is valid and must not be capable
+			// of changing the answer by editing the file it just judged.
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), "coreslot genesis valid; active slots:", strconv.Itoa(len(genesis.Slots)))
 			return err
 		},

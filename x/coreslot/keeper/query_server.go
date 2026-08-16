@@ -49,16 +49,29 @@ func (q queryServer) CoreSlots(ctx context.Context, req *types.QueryCoreSlotsReq
 	return &types.QueryCoreSlotsResponse{Slots: slots, Pagination: pageRes}, nil
 }
 
+// ActiveCoreSlots reads the ACTIVE membership index through the keeper's own
+// enumeration rather than scanning every slot ever registered and filtering.
+//
+// Sharing GetActiveSlots is the point: there is exactly one active-set
+// enumeration in the module, so this query inherits its bound (proportional to
+// the active set, itself capped at HardMaxActiveCoreSlots), its ascending
+// slot-ID order, CoreSlot as the authoritative payload, and its fail-closed
+// behavior when index and records disagree. A second implementation here could
+// drift from all four.
+//
+// The result is unpaginated because the active set is immutably bounded at 100;
+// that bound is what makes returning it whole safe, not an assumption about
+// deployment size.
 func (q queryServer) ActiveCoreSlots(ctx context.Context, _ *types.QueryActiveCoreSlotsRequest) (*types.QueryCoreSlotsResponse, error) {
-	resp := &types.QueryCoreSlotsResponse{}
-	err := q.Slots.Walk(ctx, nil, func(_ uint64, slot types.CoreSlot) (bool, error) {
-		if slot.Status == types.SlotStatus_SLOT_STATUS_ACTIVE {
-			slotCopy := slot
-			resp.Slots = append(resp.Slots, &slotCopy)
-		}
-		return false, nil
-	})
-	return resp, err
+	slots, err := q.GetActiveSlots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp := &types.QueryCoreSlotsResponse{Slots: make([]*types.CoreSlot, 0, len(slots))}
+	for i := range slots {
+		resp.Slots = append(resp.Slots, &slots[i])
+	}
+	return resp, nil
 }
 
 func (q queryServer) CoreSlotByOperator(ctx context.Context, req *types.QueryCoreSlotByOperatorRequest) (*types.QueryCoreSlotResponse, error) {
