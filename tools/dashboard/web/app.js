@@ -111,7 +111,7 @@ async function tick() {
       max active slots: ${cs.max_active_slots ?? "—"}
     </div>
     <pre style="background:#0c0c0f;border:1px solid var(--border);border-radius:8px;padding:.8rem;overflow:auto;font-size:.78rem;color:#cfcfe0">H=~/.twilight-devnet; C="--from validator --keyring-backend test --home $H --chain-id ${ov.chain_id} --node http://localhost:26657 --gas 400000 --fees 0utwlt -y"
-twilightd coreslot register &lt;operator&gt; &lt;payout&gt; &lt;consensus-pubkey-b64&gt; "&lt;moniker&gt;" $C
+twilightd coreslot register &lt;operator&gt; &lt;payout&gt; &lt;settlement&gt; &lt;consensus-pubkey-b64&gt; "&lt;moniker&gt;" $C
 twilightd coreslot-query slots --node http://localhost:26657 -o json   # find new slot-id
 twilightd coreslot activate &lt;slot-id&gt; $C</pre>
     <div class="k" style="text-transform:none;letter-spacing:0">Operator gets their pubkey with <code>twilightd comet show-validator | jq -r .key</code>. See devnet/README.md.</div>

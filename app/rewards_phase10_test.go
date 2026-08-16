@@ -15,8 +15,39 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
 
 	"github.com/twilight-project/twilight-core/app"
+	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
+
+// renormalizeCoreSlotGenesis rewrites an exported CoreSlot genesis so its ACTIVE
+// slots and Selection policies are normalized against initialHeight, which is
+// what a fresh V2 genesis requires. It exists only so a rewards-focused
+// export/import test can run; it is test scaffolding and encodes no claim about
+// how a real continuation import should behave.
+func renormalizeCoreSlotGenesis(t *testing.T, appState []byte, initialHeight int64) []byte {
+	t.Helper()
+	var state map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(appState, &state))
+
+	cdc := genesisCodec()
+	var csGen coreslottypes.GenesisState
+	require.NoError(t, cdc.UnmarshalJSON(state[coreslottypes.ModuleName], &csGen))
+	for _, slot := range csGen.Slots {
+		if slot.Status != coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE {
+			continue
+		}
+		slot.ActivatedHeight = initialHeight
+		slot.ActivationEffectiveHeight = initialHeight
+	}
+	for _, policy := range csGen.SelectionPolicies {
+		policy.ValidFromHeight = initialHeight
+	}
+	state[coreslottypes.ModuleName] = cdc.MustMarshalJSON(&csGen)
+
+	out, err := json.Marshal(state)
+	require.NoError(t, err)
+	return out
+}
 
 func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
 	a := bootApp(t)
@@ -42,12 +73,25 @@ func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
 	require.Equal(t, int64(3), exported.Height)
 	require.NotEmpty(t, exported.Validators)
 
+	// x/coreslot genesis import is FRESH-genesis only: §80 requires an ACTIVE slot
+	// to be normalized against the chain's initial height, and height-preserving
+	// continuation for CoreSlot is a separate, deferred piece of work (H7). The
+	// exported slots carry the heights of the chain they came from, so they are
+	// renormalized to this chain's initial height before import.
+	//
+	// This test is about REWARDS continuity across an export/import, which the
+	// assertions below check and which renormalizing CoreSlot lifecycle heights
+	// does not affect. It is deliberately NOT a claim that CoreSlot continuation
+	// works; when H7 lands it will decide what a continuation import means, and
+	// this scaffolding should be revisited then rather than treated as precedent.
+	appState := renormalizeCoreSlotGenesis(t, exported.AppState, exported.Height)
+
 	b := app.New(log.NewNopLogger(), dbm.NewMemDB(), nil, true, sims.EmptyAppOptions{})
 	_, err = b.InitChain(&abci.RequestInitChain{
 		ChainId:         "",
 		InitialHeight:   exported.Height,
 		ConsensusParams: &exported.ConsensusParams,
-		AppStateBytes:   json.RawMessage(exported.AppState),
+		AppStateBytes:   appState,
 	})
 	require.NoError(t, err)
 

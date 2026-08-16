@@ -47,7 +47,41 @@ const (
 	// this is fixed by the protocol rather than chosen at deployment, so it is a
 	// constant and not a CalibratedBounds field.
 	AbsoluteMaxSelectionRateBps uint64 = 5_000
+
+	// HardMaxActiveCoreSlots is the immutable ceiling on the number of
+	// simultaneously ACTIVE CoreSlots. It is ratified, not calibrated, so like
+	// AbsoluteMaxSelectionRateBps it is a fixed constant rather than a
+	// CalibratedBounds field.
+	//
+	// A larger registered population may exist; at most this many Slots are
+	// ACTIVE at once. The bound is an implementation/network safety ceiling and
+	// closes the architecture's O(A) workload bound for rewards BeginBlock.
+	//
+	// This is NOT the governance-configured maximum. Params.MaxActiveSlots is a
+	// separate operational ceiling that sits beneath this one and may be set
+	// lower; the two are enforced as distinct layers and must never be collapsed
+	// into a single value, or a governance change could move the immutable
+	// ceiling. That coreslot's DefaultParams happens to ship MaxActiveSlots: 100
+	// is a coincidence of the V1 operating model, not the source of this value.
+	HardMaxActiveCoreSlots uint64 = 100
 )
+
+// ValidateMaxActiveSlots enforces
+//
+//	0 < configured <= HardMaxActiveCoreSlots
+//
+// on the governance-configured operational ceiling. The positive lower bound is
+// what stops a configuration from making activation impossible; the upper bound
+// is what stops governance from raising its own limit past the immutable one.
+func ValidateMaxActiveSlots(configured uint64) error {
+	if configured == 0 || configured > HardMaxActiveCoreSlots {
+		return fmt.Errorf(
+			"max active slots is %d, must be in (0, %d]",
+			configured, HardMaxActiveCoreSlots,
+		)
+	}
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // Protocol-fixed relations
@@ -258,6 +292,11 @@ func (p SelectionParams) Validate(hardMinEpochLengthBlocks uint64) error {
 // an actual fixed-width multiplication, that computation must use checked
 // arithmetic suited to it.
 type CalibratedBounds struct {
+	// MaxActiveCoreSlots is superseded by the ratified HardMaxActiveCoreSlots
+	// constant above and is no longer a calibration input. It is retained here
+	// only so this struct keeps naming every bound the architecture enumerates;
+	// consensus paths read the constant. Removing it is deliberate later cleanup,
+	// not part of the change that ratified the value.
 	MaxActiveCoreSlots                     uint64
 	MinEpochLengthBlocks                   uint64
 	MaxEpochLengthBlocks                   uint64

@@ -100,6 +100,17 @@ func emitPayoutUpdated(ctx context.Context, slotID uint64, operator string) {
 	)
 }
 
+// emitSettlementUpdated announces a settlement-credential replacement. The
+// address itself is deliberately not an attribute: the event marks that the
+// authorizing credential changed, and the current value is readable from the slot
+// record.
+func emitSettlementUpdated(ctx context.Context, slotID uint64, operator string) {
+	emit(ctx, types.EventTypeSettlementUpdated,
+		sdk.NewAttribute(types.AttributeKeySlotID, u64(slotID)),
+		sdk.NewAttribute(types.AttributeKeyOperatorAddress, operator),
+	)
+}
+
 func emitMetadataUpdated(ctx context.Context, slotID uint64, operator string) {
 	emit(ctx, types.EventTypeMetadataUpdated,
 		sdk.NewAttribute(types.AttributeKeySlotID, u64(slotID)),

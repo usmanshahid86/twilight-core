@@ -19,7 +19,17 @@ service Msg {
   rpc RotateConsensusKey(MsgRotateConsensusKey) returns (MsgRotateConsensusKeyResponse);
   rpc UpdatePayoutAddress(MsgUpdatePayoutAddress) returns (MsgUpdatePayoutAddressResponse);
   rpc UpdateOperatorMetadata(MsgUpdateOperatorMetadata) returns (MsgUpdateOperatorMetadataResponse);
+  rpc UpdateSettlementAddress(MsgUpdateSettlementAddress) returns (MsgUpdateSettlementAddressResponse);
   rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+}
+
+// InitialSelectionPolicy is the caller-supplied part of a slot's first Selection
+// policy. It carries only the two operator-selectable values: the keeper assigns
+// slot_id, policy_version and the validity window from consensus state, so a
+// registration transaction cannot choose its own version numbering or window.
+message InitialSelectionPolicy {
+  uint64 selection_rate_bps = 1;
+  uint64 max_selected_participants = 2;
 }
 
 message MsgRegisterCoreSlot {
@@ -30,6 +40,8 @@ message MsgRegisterCoreSlot {
   google.protobuf.Any consensus_pubkey = 3 [(cosmos_proto.accepts_interface) = "cosmos.crypto.PubKey"];
   string payout_address = 4;
   OperatorMetadata metadata = 5;
+  string settlement_address = 6;
+  InitialSelectionPolicy initial_selection_policy = 7;
 }
 message MsgRegisterCoreSlotResponse { uint64 slot_id = 1; }
 
@@ -88,6 +100,17 @@ message MsgUpdateOperatorMetadata {
   OperatorMetadata metadata = 3;
 }
 message MsgUpdateOperatorMetadataResponse {}
+
+// MsgUpdateSettlementAddress replaces a slot's operational credential address
+// (section 24). Permitted in PENDING/ACTIVE/INACTIVE, rejected while SUSPENDED
+// and after REMOVED; an identical no-op replacement is rejected.
+message MsgUpdateSettlementAddress {
+  option (cosmos.msg.v1.signer) = "operator";
+  string operator = 1;
+  uint64 slot_id = 2;
+  string settlement_address = 3;
+}
+message MsgUpdateSettlementAddressResponse {}
 
 message MsgUpdateParams {
   option (cosmos.msg.v1.signer) = "authority";

@@ -29,15 +29,34 @@ func activeGenesis(t *testing.T) (*types.GenesisState, *types.CoreSlot) {
 	a := sdk.AccAddress(make([]byte, 20)).String()
 	b := sdk.AccAddress(append([]byte{1}, make([]byte, 19)...)).String()
 	op := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
+	settlement := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
 	params := types.DefaultParams(a, b)
 	slot := &types.CoreSlot{
-		SlotId: 1, OperatorAddress: op, PayoutAddress: op, ConsensusPubkey: testPubKey(t, 1),
-		Status: types.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: params.SlotVotingPower, RewardWeight: types.DefaultRewardWeight,
+		SlotId: 1, OperatorAddress: op, PayoutAddress: op, SettlementAddress: settlement,
+		ConsensusPubkey: testPubKey(t, 1),
+		Status:          types.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: params.SlotVotingPower,
+		RewardWeight: types.DefaultRewardWeight,
+		// §80 normalization for a fresh-genesis ACTIVE slot: the first activation
+		// generation, effective from the initial height rather than the height
+		// after it.
+		ActivationSequence: 1, ActivatedHeight: testGenesisInitialHeight, ActivationEffectiveHeight: testGenesisInitialHeight,
+		CurrentSelectionPolicyVersion: 1, LastSelectionPolicyUpdateHeight: 0,
 	}
-	genesis := &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{slot}, NextSlotId: 2}
+	genesis := &types.GenesisState{
+		Params: &params, Slots: []*types.CoreSlot{slot}, NextSlotId: 2,
+		SelectionPolicies: []*types.SelectionPolicyVersion{{
+			SlotId: 1, PolicyVersion: 1, SelectionRateBps: 2_500, MaxSelectedParticipants: 10,
+			ValidFromHeight: testGenesisInitialHeight,
+		}},
+	}
 	require.NoError(t, genesis.Validate())
 	return genesis, slot
 }
+
+// testGenesisInitialHeight is the initial height these fixtures normalize
+// against. The types layer cannot see the chain's height, so it only requires
+// the ACTIVE heights to agree and be positive; the keeper pins the exact value.
+const testGenesisInitialHeight = int64(1)
 
 func TestParamsValidation(t *testing.T) {
 	a := sdk.AccAddress(make([]byte, 20)).String()

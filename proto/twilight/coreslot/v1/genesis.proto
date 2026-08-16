@@ -13,4 +13,9 @@ message GenesisState {
   repeated OperatorRewardWeight reward_weights = 5;
   repeated LastAppliedValidator last_applied_validators = 6;
   uint64 next_slot_id = 7;
+  // selection_policies carries the Selection policy history a fresh V2 genesis
+  // must supply: exactly one version-1 row per slot. Per-slot rate and maximum
+  // are operator configuration and are not derivable, so they cannot be
+  // synthesized by InitGenesis.
+  repeated SelectionPolicyVersion selection_policies = 8;
 }

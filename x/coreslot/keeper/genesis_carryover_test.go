@@ -17,7 +17,7 @@ func TestGenesisInitialValidatorSetCarryoverHeightsOneAndTwo(t *testing.T) {
 	params := types.DefaultParams(authority, emergency) // SlotVotingPower=1, Min=1, Max=100
 	ops := makeOps(10, 4)
 
-	updates, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	updates, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, ops[0], 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 		slot(t, 2, ops[1], 2, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 		slot(t, 3, ops[2], 3, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),

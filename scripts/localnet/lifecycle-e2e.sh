@@ -95,7 +95,10 @@ main() {
   local sid; sid="$(next_slot_id)" # expected new slot id (5)
 
   #  step           label                 code vu  eff submit            args
-  run_action "01-register-slot$sid"   0 0 0 submit_authority -- register "$newop" "$newop" "$k5" "core5"
+  # register takes operator, payout, settlement, consensus pubkey, moniker. The
+  # settlement address is mandatory protocol state and has no default; this drill
+  # reuses the operator account for all three, as the localnet genesis does.
+  run_action "01-register-slot$sid"   0 0 0 submit_authority -- register "$newop" "$newop" "$newop" "$k5" "core5"
   run_action "02-activate-slot$sid"   0 1 0 submit_authority -- activate "$sid"
   run_action "03-inactivate-slot4"    0 1 0 submit_authority -- inactivate 4 "maintenance"
   run_action "04-reactivate-slot4"    0 1 0 submit_authority -- activate 4

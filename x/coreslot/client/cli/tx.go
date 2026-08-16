@@ -19,7 +19,7 @@ func GetTxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "coreslot", Short: "Core-slot lifecycle transactions", DisableFlagParsing: true, SuggestionsMinimumDistance: 2}
 	cmd.AddCommand(
 		registerCmd(), activateCmd(), inactivateCmd(), suspendCmd(), removeCmd(), rotateCmd(),
-		updatePayoutCmd(), updateMetadataCmd(), updateParamsCmd(),
+		updatePayoutCmd(), updateMetadataCmd(), updateSettlementCmd(), updateParamsCmd(),
 	)
 	return cmd
 }
@@ -47,16 +47,49 @@ func txCmd(use string, args cobra.PositionalArgs, run func(*cobra.Command, []str
 }
 
 func registerCmd() *cobra.Command {
-	return txCmd("register [operator] [payout] [consensus-pubkey-base64] [moniker]", cobra.ExactArgs(4), func(cmd *cobra.Command, args []string) error {
+	cmd := txCmd("register [operator] [payout] [settlement] [consensus-pubkey-base64] [moniker]", cobra.ExactArgs(5), func(cmd *cobra.Command, args []string) error {
 		from, err := signer(cmd)
 		if err != nil {
 			return err
 		}
-		pk, err := pubKeyAny(args[2])
+		pk, err := pubKeyAny(args[3])
 		if err != nil {
 			return err
 		}
-		return broadcast(cmd, &types.MsgRegisterCoreSlot{Authority: from, OperatorAddress: args[0], PayoutAddress: args[1], ConsensusPubkey: pk, Metadata: &types.OperatorMetadata{Moniker: args[3]}})
+		rateBps, err := cmd.Flags().GetUint64("selection-rate-bps")
+		if err != nil {
+			return err
+		}
+		maxSelected, err := cmd.Flags().GetUint64("max-selected-participants")
+		if err != nil {
+			return err
+		}
+		return broadcast(cmd, &types.MsgRegisterCoreSlot{
+			Authority: from, OperatorAddress: args[0], PayoutAddress: args[1], SettlementAddress: args[2],
+			ConsensusPubkey: pk, Metadata: &types.OperatorMetadata{Moniker: args[4]},
+			InitialSelectionPolicy: &types.InitialSelectionPolicy{
+				SelectionRateBps: rateBps, MaxSelectedParticipants: maxSelected,
+			},
+		})
+	})
+	// Operator configuration, not protocol constants: convenience defaults with
+	// no protocol standing, constrained only by the local §27 rule.
+	cmd.Flags().Uint64("selection-rate-bps", 2_500, "initial selection rate in basis points")
+	cmd.Flags().Uint64("max-selected-participants", 10, "initial per-slot maximum selected participants")
+	return cmd
+}
+
+func updateSettlementCmd() *cobra.Command {
+	return txCmd("update-settlement [slot-id] [settlement-address]", cobra.ExactArgs(2), func(cmd *cobra.Command, args []string) error {
+		from, err := signer(cmd)
+		if err != nil {
+			return err
+		}
+		id, err := strconv.ParseUint(args[0], 10, 64)
+		if err != nil {
+			return err
+		}
+		return broadcast(cmd, &types.MsgUpdateSettlementAddress{Operator: from, SlotId: id, SettlementAddress: args[1]})
 	})
 }
 

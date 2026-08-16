@@ -5,6 +5,8 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	appparams "github.com/twilight-project/twilight-core/app/params"
+	"github.com/twilight-project/twilight-core/internal/checked"
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
@@ -41,25 +43,41 @@ func (m msgServer) RegisterCoreSlot(ctx context.Context, msg *types.MsgRegisterC
 	if err != nil {
 		return nil, err
 	}
-	if msg.Authority != params.Authority && !(params.AllowSelfRegistration && msg.Authority == msg.OperatorAddress) {
+	// Registration is authority-only. Architecture §19 states that fresh V2.2
+	// exposes no permissionless self-registration consensus path, so the branch
+	// that consulted Params.AllowSelfRegistration is gone rather than merely
+	// disabled: the parameter is deprecated and admission already refuses a true
+	// value, but authorization must not depend on a stored flag either way.
+	if msg.Authority != params.Authority {
 		return nil, types.ErrUnauthorized
 	}
 	// Address admission, after the authorization check so an unauthorized caller
 	// learns nothing about which addresses the chain would accept, and before any
 	// state is touched.
 	//
-	// The two fields are held to DIFFERENT rules on purpose. The operator address
-	// is a control identity: §18 requires it to be valid, but the protocol never
+	// The fields are held to DIFFERENT rules on purpose. The operator address is
+	// a control identity: §18 requires it to be valid, but the protocol never
 	// sends to it, so refusing a bank-blocked operator would deny an operator the
-	// protocol permits. The payout address is where value actually goes and takes
-	// the full canonical economic rule (§25).
+	// protocol permits. The payout and settlement addresses are where value
+	// actually goes and take the full canonical economic rule (§25).
 	if _, err := m.economicAddresses.ParseAccountAddress(msg.OperatorAddress); err != nil {
 		return nil, types.ErrInvalidAddress.Wrapf("operator address: %v", err)
 	}
 	if _, err := m.economicAddresses.Validate(msg.PayoutAddress); err != nil {
 		return nil, types.ErrInvalidAddress.Wrapf("payout address: %v", err)
 	}
+	// Mandatory from normal V2.2 registration onward (§24) — for the PENDING row
+	// this creates, not only once the slot activates.
+	if _, err := m.economicAddresses.Validate(msg.SettlementAddress); err != nil {
+		return nil, types.ErrInvalidAddress.Wrapf("settlement address: %v", err)
+	}
 	if err := types.ValidateMetadata(msg.Metadata); err != nil {
+		return nil, err
+	}
+	if msg.InitialSelectionPolicy == nil {
+		return nil, types.ErrInvalidSelectionPolicy.Wrap("an initial selection policy is required")
+	}
+	if err := types.ValidateSelectionPolicyValues(msg.InitialSelectionPolicy.SelectionRateBps, msg.InitialSelectionPolicy.MaxSelectedParticipants); err != nil {
 		return nil, err
 	}
 	if exists, err := m.ByOperator.Has(ctx, msg.OperatorAddress); err != nil {
@@ -80,8 +98,19 @@ func (m msgServer) RegisterCoreSlot(ctx context.Context, msg *types.MsgRegisterC
 		SlotId: id, OperatorAddress: msg.OperatorAddress, ConsensusPubkey: msg.ConsensusPubkey,
 		PayoutAddress: msg.PayoutAddress, Status: types.SlotStatus_SLOT_STATUS_PENDING,
 		RewardWeight: types.DefaultRewardWeight, CreatedHeight: height, UpdatedHeight: height, Metadata: msg.Metadata,
+		SettlementAddress: msg.SettlementAddress,
+		// A newly registered slot has never been activated, so the whole
+		// activation generation stays at the zero sentinel and the slot does not
+		// enter the ACTIVE membership index.
+		ActivationSequence:              0,
+		ActivationEffectiveHeight:       0,
+		CurrentSelectionPolicyVersion:   initialPolicyVersion,
+		LastSelectionPolicyUpdateHeight: 0,
 	}
 	if err := m.Slots.Set(ctx, id, slot); err != nil {
+		return nil, err
+	}
+	if err := m.writeInitialPolicy(ctx, id, height, msg.InitialSelectionPolicy); err != nil {
 		return nil, err
 	}
 	if err := m.ByOperator.Set(ctx, slot.OperatorAddress, id); err != nil {
@@ -97,7 +126,13 @@ func (m msgServer) RegisterCoreSlot(ctx context.Context, msg *types.MsgRegisterC
 	}); err != nil {
 		return nil, err
 	}
-	if err := m.NextSlotID.Set(ctx, id+1); err != nil {
+	// Checked: an unchecked increment at the top of the range would wrap to zero
+	// and hand the next registration an identifier that is already in use.
+	nextID, err := checked.AddUint64(id, 1)
+	if err != nil {
+		return nil, types.ErrInvalidTransition.Wrapf("slot id space exhausted: %v", err)
+	}
+	if err := m.NextSlotID.Set(ctx, nextID); err != nil {
 		return nil, err
 	}
 	emitRegistered(ctx, id, slot.OperatorAddress, key)
@@ -123,8 +158,18 @@ func (m msgServer) ActivateCoreSlot(ctx context.Context, msg *types.MsgActivateC
 	if err != nil {
 		return nil, err
 	}
+	// Two ceilings, both enforced. The configured operational maximum binds first
+	// and governance may lower it; the immutable ceiling is the outer guarantee
+	// that no state exceeds it whatever governance does. Params validation caps
+	// the former by the latter, which makes the second check redundant today —
+	// and that is exactly why it is asserted rather than assumed: a resource
+	// closure that holds only while a configurable value was validated correctly
+	// is not a closure.
 	if count >= params.MaxActiveSlots {
 		return nil, types.ErrMaxActiveSlots
+	}
+	if count >= appparams.HardMaxActiveCoreSlots {
+		return nil, types.ErrMaxActiveSlots.Wrapf("hard maximum %d active core slots", appparams.HardMaxActiveCoreSlots)
 	}
 	consAddr, _, err := consensusKey(slot.ConsensusPubkey)
 	if err != nil {
@@ -132,8 +177,37 @@ func (m msgServer) ActivateCoreSlot(ctx context.Context, msg *types.MsgActivateC
 	}
 	oldStatus := slot.Status
 	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
-	slot.Status, slot.ConsensusPower, slot.ActivatedHeight, slot.UpdatedHeight = types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower, height, height
+	// The activation generation advances on EVERY successful activation, including
+	// every reactivation, so a slot that lapsed and returned is distinguishable
+	// from one that never left. Both increments are checked: consensus code does
+	// not get to rely on Go's wrapping overflow, because a wrapped value is
+	// committed identically by every node and so is indistinguishable from a
+	// correct one.
+	nextSequence, err := checked.AddUint64(slot.ActivationSequence, 1)
+	if err != nil {
+		return nil, types.ErrInvalidTransition.Wrapf("slot %d activation sequence exhausted: %v", slot.SlotId, err)
+	}
+	effectiveHeight, err := checked.AddInt64(height, 1)
+	if err != nil {
+		return nil, types.ErrInvalidTransition.Wrapf("slot %d activation effective height overflows: %v", slot.SlotId, err)
+	}
+	slot.Status, slot.ConsensusPower = types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower
+	slot.ActivationSequence = nextSequence
+	slot.ActivatedHeight, slot.UpdatedHeight = height, height
+	// Reward accounting samples CoreSlot state at BeginBlock, so a slot activated
+	// in block H first earns credit in block H+1 (§20). Fresh genesis is the
+	// explicit exception and uses initial_height for both (§21).
+	slot.ActivationEffectiveHeight = effectiveHeight
+	// The POST-transition record is what must satisfy the ACTIVE invariant. The
+	// pre-transition row is PENDING or lapsed and would fail an ACTIVE-only check
+	// for reasons activation is about to fix.
+	if err := m.validateActiveSlotInvariant(ctx, slot); err != nil {
+		return nil, err
+	}
 	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
+		return nil, err
+	}
+	if err := m.setSlotActive(ctx, slot.SlotId); err != nil {
 		return nil, err
 	}
 	emitActivated(ctx, slot.SlotId, slot.OperatorAddress, oldStatus, consAddr, slot.ConsensusPower)
@@ -169,6 +243,11 @@ func (m msgServer) InactivateCoreSlot(ctx context.Context, msg *types.MsgInactiv
 	oldStatus := slot.Status
 	slot.Status, slot.ConsensusPower, slot.UpdatedHeight = types.SlotStatus_SLOT_STATUS_INACTIVE, 0, sdk.UnwrapSDKContext(ctx).BlockHeight()
 	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
+		return nil, err
+	}
+	// Leaving ACTIVE drops membership in the same state transition that writes the
+	// record, so index and status can never disagree at a block boundary.
+	if err := m.clearSlotActive(ctx, slot.SlotId); err != nil {
 		return nil, err
 	}
 	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
@@ -218,6 +297,12 @@ func (m msgServer) SuspendCoreSlot(ctx context.Context, msg *types.MsgSuspendCor
 	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
 		return nil, err
 	}
+	// Suspension is reachable from any non-terminal status, so this may be a
+	// no-op removal for a slot that was not ACTIVE — Remove tolerates an absent
+	// key, and unconditionally clearing is what keeps the invariant total.
+	if err := m.clearSlotActive(ctx, slot.SlotId); err != nil {
+		return nil, err
+	}
 	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
 		return nil, err
 	}
@@ -248,6 +333,12 @@ func (m msgServer) RemoveCoreSlot(ctx context.Context, msg *types.MsgRemoveCoreS
 	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
 	slot.Status, slot.ConsensusPower, slot.RemovedHeight, slot.UpdatedHeight = types.SlotStatus_SLOT_STATUS_REMOVED, 0, height, height
 	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
+		return nil, err
+	}
+	// Removal is only reachable from a non-active status, so this should already
+	// be absent; clearing unconditionally means no path can leave the index
+	// holding a terminal slot.
+	if err := m.clearSlotActive(ctx, slot.SlotId); err != nil {
 		return nil, err
 	}
 	// Defensive: removal is only reachable from a non-active slot, whose pending
@@ -337,6 +428,9 @@ func (m msgServer) UpdatePayoutAddress(ctx context.Context, msg *types.MsgUpdate
 	if msg.Operator != slot.OperatorAddress {
 		return nil, types.ErrUnauthorized
 	}
+	if err := operatorMutationAllowed(slot); err != nil {
+		return nil, err
+	}
 	// The stored operator identity was admitted canonically at registration and
 	// is the authorization subject here, not a value destination; only the new
 	// payout address is a fresh economic admission.
@@ -359,6 +453,9 @@ func (m msgServer) UpdateOperatorMetadata(ctx context.Context, msg *types.MsgUpd
 	if msg.Operator != slot.OperatorAddress {
 		return nil, types.ErrUnauthorized
 	}
+	if err := operatorMutationAllowed(slot); err != nil {
+		return nil, err
+	}
 	if err := types.ValidateMetadata(msg.Metadata); err != nil {
 		return nil, err
 	}
@@ -368,6 +465,55 @@ func (m msgServer) UpdateOperatorMetadata(ctx context.Context, msg *types.MsgUpd
 	}
 	emitMetadataUpdated(ctx, slot.SlotId, slot.OperatorAddress)
 	return &types.MsgUpdateOperatorMetadataResponse{}, nil
+}
+
+// operatorMutationAllowed gates the operator-controlled configuration surface by
+// slot status. Suspension freezes that surface until authority resolves the
+// slot's lifecycle, and removal is terminal (§22, §24).
+//
+// Authority-only lifecycle and consensus remediation remain available under their
+// own messages; this gate constrains what an operator may change about a slot,
+// not what authority may do to it.
+func operatorMutationAllowed(slot types.CoreSlot) error {
+	switch slot.Status {
+	case types.SlotStatus_SLOT_STATUS_PENDING,
+		types.SlotStatus_SLOT_STATUS_ACTIVE,
+		types.SlotStatus_SLOT_STATUS_INACTIVE:
+		return nil
+	default:
+		return types.ErrInvalidTransition.Wrapf(
+			"operator configuration is frozen for slot %d with status %s", slot.SlotId, slot.Status)
+	}
+}
+
+func (m msgServer) UpdateSettlementAddress(ctx context.Context, msg *types.MsgUpdateSettlementAddress) (*types.MsgUpdateSettlementAddressResponse, error) {
+	slot, err := m.getSlot(ctx, msg.SlotId)
+	if err != nil {
+		return nil, err
+	}
+	if msg.Operator != slot.OperatorAddress {
+		return nil, types.ErrUnauthorized
+	}
+	if err := operatorMutationAllowed(slot); err != nil {
+		return nil, err
+	}
+	// §24 requires an identical replacement to be rejected rather than silently
+	// accepted. Compared before economic validation so a no-op is reported as a
+	// no-op regardless of whether the stored value would still pass admission.
+	if msg.SettlementAddress == slot.SettlementAddress {
+		return nil, types.ErrNoOpUpdate.Wrapf("slot %d already uses this settlement address", slot.SlotId)
+	}
+	// The settlement address is a value destination (§25), so the replacement
+	// takes the full economic rule — and takes it before any state is written.
+	if _, err := m.economicAddresses.Validate(msg.SettlementAddress); err != nil {
+		return nil, types.ErrInvalidAddress.Wrapf("settlement address: %v", err)
+	}
+	slot.SettlementAddress, slot.UpdatedHeight = msg.SettlementAddress, sdk.UnwrapSDKContext(ctx).BlockHeight()
+	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
+		return nil, err
+	}
+	emitSettlementUpdated(ctx, slot.SlotId, slot.OperatorAddress)
+	return &types.MsgUpdateSettlementAddressResponse{}, nil
 }
 
 func (m msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {

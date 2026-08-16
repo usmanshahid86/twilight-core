@@ -90,7 +90,10 @@ func TestRealModuleAccountsRejectedAsEconomicAddresses(t *testing.T) {
 				Authority:       app.AuthorityAddress(),
 				OperatorAddress: ordinaryAccount(9),
 				PayoutAddress:   moduleAddress,
-				ConsensusPubkey: appPubkey(t, 2),
+				// Ordinary on purpose: only the payout address is under test here.
+				SettlementAddress:      ordinaryAccount(11),
+				ConsensusPubkey:        appPubkey(t, 2),
+				InitialSelectionPolicy: &coreslottypes.InitialSelectionPolicy{SelectionRateBps: 2_500, MaxSelectedParticipants: 10},
 			})
 			require.ErrorIs(t, err, coreslottypes.ErrInvalidAddress)
 		})
@@ -117,10 +120,12 @@ func TestOrdinaryAccountAcceptedThroughRealPath(t *testing.T) {
 	operator := ordinaryAccount(9)
 	msgs := coreslotkeeper.NewMsgServer(a.CoreSlotKeeper)
 	res, err := msgs.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
-		Authority:       app.AuthorityAddress(),
-		OperatorAddress: operator,
-		PayoutAddress:   ordinaryAccount(10),
-		ConsensusPubkey: appPubkey(t, 2),
+		Authority:              app.AuthorityAddress(),
+		OperatorAddress:        operator,
+		PayoutAddress:          ordinaryAccount(10),
+		SettlementAddress:      ordinaryAccount(11),
+		ConsensusPubkey:        appPubkey(t, 2),
+		InitialSelectionPolicy: &coreslottypes.InitialSelectionPolicy{SelectionRateBps: 2_500, MaxSelectedParticipants: 10},
 	})
 	require.NoError(t, err)
 
@@ -158,10 +163,12 @@ func TestControlPlaneAuthoritiesRemainValid(t *testing.T) {
 	// The module-account authority still authorizes a registration.
 	msgs := coreslotkeeper.NewMsgServer(a.CoreSlotKeeper)
 	_, err = msgs.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
-		Authority:       authority,
-		OperatorAddress: ordinaryAccount(12),
-		PayoutAddress:   ordinaryAccount(13),
-		ConsensusPubkey: appPubkey(t, 3),
+		Authority:              authority,
+		OperatorAddress:        ordinaryAccount(12),
+		PayoutAddress:          ordinaryAccount(13),
+		SettlementAddress:      ordinaryAccount(14),
+		ConsensusPubkey:        appPubkey(t, 3),
+		InitialSelectionPolicy: &coreslottypes.InitialSelectionPolicy{SelectionRateBps: 2_500, MaxSelectedParticipants: 10},
 	})
 	require.NoError(t, err, "the module-account authority must remain a valid control-plane identity")
 }

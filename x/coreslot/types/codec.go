@@ -20,6 +20,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgRotateConsensusKey{},
 		&MsgUpdatePayoutAddress{},
 		&MsgUpdateOperatorMetadata{},
+		&MsgUpdateSettlementAddress{},
 		&MsgUpdateParams{},
 	)
 	cryptocodec.RegisterInterfaces(registry)

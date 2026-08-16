@@ -84,7 +84,7 @@ func TestFullActiveSetReplacementSingleBlock(t *testing.T) {
 	params := types.DefaultParams(authority, emergency) // SlotVotingPower=1, Min=1, Max=100
 	oldOps := makeOps(10, 4)
 
-	updates, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	updates, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, oldOps[0], 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 		slot(t, 2, oldOps[1], 2, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 		slot(t, 3, oldOps[2], 3, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
@@ -97,9 +97,7 @@ func TestFullActiveSetReplacementSingleBlock(t *testing.T) {
 	newOps := makeOps(20, 4)
 	newIDs := make([]uint64, 0, 4)
 	for i := 0; i < 4; i++ {
-		res, err := msgs.RegisterCoreSlot(ctx, &types.MsgRegisterCoreSlot{
-			Authority: authority, OperatorAddress: newOps[i], PayoutAddress: newOps[i], ConsensusPubkey: pubkey(t, byte(11+i)),
-		})
+		res, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, newOps[i], newOps[i], byte(11+i)))
 		require.NoError(t, err)
 		_, err = msgs.ActivateCoreSlot(ctx, &types.MsgActivateCoreSlot{Authority: authority, SlotId: res.SlotId})
 		require.NoError(t, err)
@@ -143,7 +141,7 @@ func TestUnsafeFullDrainRejected(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	params := types.DefaultParams(authority, emergency) // MinActiveSlots=1
 	ops := makeOps(10, 4)
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, ops[0], 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 		slot(t, 2, ops[1], 2, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 		slot(t, 3, ops[2], 3, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),

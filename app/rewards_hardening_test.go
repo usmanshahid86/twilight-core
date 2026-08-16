@@ -44,9 +44,17 @@ func initChainWithRewards(t *testing.T, a *app.App, rewardsGen *rewardstypes.Gen
 		Params: &csParams,
 		Slots: []*coreslottypes.CoreSlot{{
 			SlotId: 1, OperatorAddress: operator, PayoutAddress: payout,
-			ConsensusPubkey: ed25519Any(t, 7),
-			Status:          coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
-			ConsensusPower:  1, RewardWeight: coreslottypes.DefaultRewardWeight,
+			SettlementAddress: payout,
+			ConsensusPubkey:   ed25519Any(t, 7),
+			Status:            coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
+			ConsensusPower:    1, RewardWeight: coreslottypes.DefaultRewardWeight,
+			// Fresh-genesis ACTIVE normalization at the chain's initial height (§80).
+			ActivationSequence: 1, ActivatedHeight: 1, ActivationEffectiveHeight: 1,
+			CurrentSelectionPolicyVersion: 1,
+		}},
+		SelectionPolicies: []*coreslottypes.SelectionPolicyVersion{{
+			SlotId: 1, PolicyVersion: 1, SelectionRateBps: 2_500, MaxSelectedParticipants: 10,
+			ValidFromHeight: 1,
 		}},
 		RewardWeights: []*coreslottypes.OperatorRewardWeight{{SlotId: 1, FinalWeight: coreslottypes.DefaultRewardWeight}},
 		NextSlotId:    2,

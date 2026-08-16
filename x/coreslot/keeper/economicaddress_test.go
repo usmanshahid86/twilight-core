@@ -23,7 +23,11 @@ func registerMsg(t *testing.T, authority, operator, payout string, marker byte) 
 		Authority:       authority,
 		OperatorAddress: operator,
 		PayoutAddress:   payout,
-		ConsensusPubkey: pubkey(t, marker),
+		// Independent of operator and payout on purpose: a test that makes one of
+		// those inadmissible must still observe a rejection naming that field.
+		SettlementAddress:      testSettlement(marker),
+		ConsensusPubkey:        pubkey(t, marker),
+		InitialSelectionPolicy: &types.InitialSelectionPolicy{SelectionRateBps: 2_500, MaxSelectedParticipants: 10},
 	}
 }
 
@@ -226,7 +230,7 @@ func TestControlPlaneAuthoritiesRemainModuleAccounts(t *testing.T) {
 
 	k, ctx, _, _ := setup(t)
 	params := types.DefaultParams(authority, emergency)
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, testAccount(2), 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 	}, NextSlotId: 2})
 	require.NoError(t, err, "module-account authorities must remain legal control-plane identities")
@@ -265,7 +269,7 @@ func TestInitGenesisRejectsInadmissibleSlotAddresses(t *testing.T) {
 			imported := slot(t, 1, tc.operator, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1)
 			imported.PayoutAddress = tc.payout
 
-			_, err := k.InitGenesis(ctx, &types.GenesisState{
+			_, err := initGenesis(t, k, ctx, &types.GenesisState{
 				Params: &params, Slots: []*types.CoreSlot{imported}, NextSlotId: 2,
 			})
 			require.ErrorIs(t, err, types.ErrInvalidAddress)
@@ -286,7 +290,7 @@ func TestInitGenesisAcceptsBankBlockedOperator(t *testing.T) {
 	imported := slot(t, 1, blocked, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1)
 	imported.PayoutAddress = testAccount(10)
 
-	_, err := k.InitGenesis(ctx, &types.GenesisState{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{
 		Params: &params, Slots: []*types.CoreSlot{imported}, NextSlotId: 2,
 	})
 	require.NoError(t, err, "a bank-blocked operator identity must import")
@@ -307,7 +311,7 @@ func TestInitGenesisRejectsBeforeAnyWrite(t *testing.T) {
 	bad := slot(t, 2, testAccount(3), 2, types.SlotStatus_SLOT_STATUS_ACTIVE, 1)
 	bad.PayoutAddress = testModuleAddress(testModuleAccountName)
 
-	_, err := k.InitGenesis(ctx, &types.GenesisState{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{
 		Params: &params, Slots: []*types.CoreSlot{good, bad}, NextSlotId: 3,
 	})
 	require.ErrorIs(t, err, types.ErrInvalidAddress)
@@ -324,7 +328,7 @@ func TestInitGenesisAcceptsOrdinarySlotAddresses(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	params := types.DefaultParams(authority, emergency)
 
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, testAccount(2), 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 		slot(t, 2, testAccount(3), 2, types.SlotStatus_SLOT_STATUS_PENDING, 0),
 	}, NextSlotId: 3})

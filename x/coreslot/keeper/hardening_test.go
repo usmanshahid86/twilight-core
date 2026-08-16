@@ -38,7 +38,7 @@ func twoActiveGenesis(t *testing.T, k keeper.Keeper, ctx sdk.Context, authority,
 	params.MinActiveSlots = 1
 	op1 = sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
 	op2 = sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, op1, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 		slot(t, 2, op2, 2, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 	}, NextSlotId: 3})
@@ -102,13 +102,13 @@ func TestPendingRotationCancelledOnRemove(t *testing.T) {
 	op := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
 	// One active slot keeps the active set non-empty; register a second pending
 	// slot that we will remove with an injected stale rotation.
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, op, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 	}, NextSlotId: 2})
 	require.NoError(t, err)
 	msgs := keeper.NewMsgServer(k)
 	op2 := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
-	res, err := msgs.RegisterCoreSlot(ctx, &types.MsgRegisterCoreSlot{Authority: authority, OperatorAddress: op2, PayoutAddress: op2, ConsensusPubkey: pubkey(t, 2)})
+	res, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, op2, op2, 2))
 	require.NoError(t, err)
 
 	// Inject a pending rotation on the still-PENDING slot 2 (defensive cleanup path).
@@ -136,12 +136,15 @@ func TestRemovedSlotRotationDoesNotMutate(t *testing.T) {
 	_, err := msgs.RotateConsensusKey(ctx, &types.MsgRotateConsensusKey{Authority: authority, SlotId: 1, NewConsensusPubkey: newPK})
 	require.NoError(t, err)
 
-	// Force an inconsistent REMOVED slot while leaving the rotation queued, to
-	// exercise the EndBlock defense (F1) directly.
+	// Force a REMOVED slot while leaving the rotation queued, to exercise the
+	// EndBlock defense (F1) directly. The ACTIVE membership index is cleared with
+	// it so this stays a test about the stale rotation rather than about index
+	// divergence, which has its own guard.
 	slot1, err := k.Slots.Get(ctx, 1)
 	require.NoError(t, err)
 	slot1.Status, slot1.ConsensusPower = types.SlotStatus_SLOT_STATUS_REMOVED, 0
 	require.NoError(t, k.Slots.Set(ctx, 1, slot1))
+	require.NoError(t, k.ActiveSlots.Remove(ctx, 1))
 
 	ctx = ctx.WithBlockHeight(2)
 	_, err = k.EndBlock(ctx)
@@ -184,14 +187,14 @@ func TestLifecycleEventsEmitted(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	params := types.DefaultParams(authority, emergency)
 	op1 := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, op1, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 	}, NextSlotId: 2})
 	require.NoError(t, err)
 	msgs := keeper.NewMsgServer(k)
 
 	op2 := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
-	res, err := msgs.RegisterCoreSlot(ctx, &types.MsgRegisterCoreSlot{Authority: authority, OperatorAddress: op2, PayoutAddress: op2, ConsensusPubkey: pubkey(t, 2)})
+	res, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, op2, op2, 2))
 	require.NoError(t, err)
 	_, err = msgs.ActivateCoreSlot(ctx, &types.MsgActivateCoreSlot{Authority: authority, SlotId: res.SlotId})
 	require.NoError(t, err)
@@ -222,14 +225,14 @@ func TestValidatorUpdateEventsEmitted(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	params := types.DefaultParams(authority, emergency)
 	op1 := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, op1, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 	}, NextSlotId: 2})
 	require.NoError(t, err)
 	msgs := keeper.NewMsgServer(k)
 
 	op2 := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
-	res, err := msgs.RegisterCoreSlot(ctx, &types.MsgRegisterCoreSlot{Authority: authority, OperatorAddress: op2, PayoutAddress: op2, ConsensusPubkey: pubkey(t, 2)})
+	res, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, op2, op2, 2))
 	require.NoError(t, err)
 	_, err = msgs.ActivateCoreSlot(ctx, &types.MsgActivateCoreSlot{Authority: authority, SlotId: res.SlotId})
 	require.NoError(t, err)
@@ -266,7 +269,7 @@ func TestSameKeyPowerChangeSingleUpdate(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	params := types.DefaultParams(authority, emergency)
 	op1 := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, op1, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 	}, NextSlotId: 2})
 	require.NoError(t, err)
@@ -292,7 +295,7 @@ func TestEmergencySuspendCannotRemoveLastValidator(t *testing.T) {
 	params := types.DefaultParams(authority, emergency)
 	params.AllowEmergencyBelowMinActive = true
 	op1 := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, op1, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 	}, NextSlotId: 2})
 	require.NoError(t, err)
