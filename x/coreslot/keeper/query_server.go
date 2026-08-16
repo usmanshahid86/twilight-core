@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -130,10 +131,30 @@ func (q queryServer) ActiveCoreSlots(ctx context.Context, _ *types.QueryActiveCo
 	return resp, nil
 }
 
+// slotIndexError classifies a secondary-index lookup for the public query
+// surface, on the same rule the Selection-policy queries already follow: only an
+// absent key is "no such slot".
+//
+// An index entry that exists and cannot be decoded is a storage failure, and
+// answering NotFound would tell a client the operator or validator was never
+// registered when in fact the record locating it is unreadable. The underlying
+// error is wrapped rather than replaced by a module sentinel: none of the
+// module's error classes describes "the database could not be read", and
+// inventing one that pretended to would be less honest than carrying the cause.
+func slotIndexError(index, key string, err error) error {
+	if errors.Is(err, collections.ErrNotFound) {
+		return grpcStatusError{code: codes.NotFound, err: types.ErrSlotNotFound.Wrapf("%s %s", index, key)}
+	}
+	return grpcStatusError{
+		code: codes.Internal,
+		err:  fmt.Errorf("coreslot %s index entry for %s could not be read: %w", index, key, err),
+	}
+}
+
 func (q queryServer) CoreSlotByOperator(ctx context.Context, req *types.QueryCoreSlotByOperatorRequest) (*types.QueryCoreSlotResponse, error) {
 	id, err := q.ByOperator.Get(ctx, req.OperatorAddress)
 	if err != nil {
-		return nil, types.ErrSlotNotFound
+		return nil, slotIndexError("operator", req.OperatorAddress, err)
 	}
 	return q.CoreSlot(ctx, &types.QueryCoreSlotRequest{SlotId: id})
 }
@@ -143,9 +164,10 @@ func (q queryServer) CoreSlotByConsensusAddress(ctx context.Context, req *types.
 	if err != nil {
 		return nil, err
 	}
-	id, err := q.ByConsensus.Get(ctx, hex.EncodeToString(raw))
+	key := hex.EncodeToString(raw)
+	id, err := q.ByConsensus.Get(ctx, key)
 	if err != nil {
-		return nil, types.ErrSlotNotFound
+		return nil, slotIndexError("consensus address", key, err)
 	}
 	return q.CoreSlot(ctx, &types.QueryCoreSlotRequest{SlotId: id})
 }
