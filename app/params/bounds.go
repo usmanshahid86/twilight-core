@@ -426,3 +426,39 @@ func requirePositiveAtLeast(name string, value, hardMin uint64) error {
 	}
 	return nil
 }
+
+// ValidateEpochLengthBlocks enforces
+//
+//	hardMin <= value <= hardMax,  with 0 < hardMin <= hardMax
+//
+// on a configured epoch length.
+//
+// Both bounds are supplied by the caller rather than read from a constant here,
+// for the same reason as every other relation in this file: the architecture
+// requires HARD_MIN_EPOCH_LENGTH_BLOCKS and HARD_MAX_EPOCH_LENGTH_BLOCKS to
+// exist and to bound the configured value, and does not fix their magnitudes.
+// Those two numbers are not yet ratified, so this function has no production
+// caller and no consensus path reads it. Wiring it is the whole of the remaining
+// work once the values are ratified: define the two immutable constants, call
+// this from epoch-configuration admission, and add the boundary tests that use
+// the real numbers.
+//
+// A positive lower bound is what stops a zero-length epoch: the canonical
+// start-height recurrence would then be stationary, every epoch would begin at
+// the same block, and no boundary would ever be reached.
+func ValidateEpochLengthBlocks(value, hardMin, hardMax uint64) error {
+	if hardMin == 0 {
+		return fmt.Errorf("hard min epoch length blocks must be positive")
+	}
+	if hardMin > hardMax {
+		return fmt.Errorf(
+			"hard min epoch length %d exceeds hard max epoch length %d", hardMin, hardMax,
+		)
+	}
+	if value < hardMin || value > hardMax {
+		return fmt.Errorf(
+			"epoch length is %d blocks, must be in [%d, %d]", value, hardMin, hardMax,
+		)
+	}
+	return nil
+}

@@ -6,6 +6,8 @@ import (
 
 	"cosmossdk.io/collections"
 
+	sdk "github.com/cosmos/cosmos-sdk/types"
+
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
@@ -25,6 +27,16 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 	if err := k.validateGenesisEconomicAddresses(genState); err != nil {
 		return err
 	}
+	// The height-bearing half of fresh-genesis validation, which only a caller
+	// that knows the chain's first block can decide. Run as part of the same
+	// total preflight, before the first write.
+	initialHeight, err := effectiveInitialHeight(ctx)
+	if err != nil {
+		return err
+	}
+	if err := types.ValidateFreshGenesisInitialHeight(&genState, initialHeight); err != nil {
+		return err
+	}
 	if err := k.SetParams(ctx, *genState.Params); err != nil {
 		return err
 	}
@@ -32,6 +44,17 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 		return err
 	}
 	if err := k.SetCurrentEpochConfig(ctx, *genState.CurrentEpochConfig); err != nil {
+		return err
+	}
+	if err := k.initEpochHistoryGenesis(ctx, genState); err != nil {
+		return err
+	}
+	if err := k.SetPauseState(ctx, *genState.PauseState); err != nil {
+		return err
+	}
+	// Written explicitly rather than left to a default. After genesis an absent
+	// counter is corruption, and GetOpenRewardEnabledBlocks refuses to invent one.
+	if err := k.SetOpenRewardEnabledBlocks(ctx, genState.OpenRewardEnabledBlocks); err != nil {
 		return err
 	}
 	if genState.HasPendingParams {
@@ -113,7 +136,35 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 	if err != nil {
 		return nil, err
 	}
-	genesis := &types.GenesisState{Params: &params, State: &state, CurrentEpochConfig: &config}
+	pauseState, err := k.GetPauseState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	openBlocks, err := k.GetOpenRewardEnabledBlocks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	genesis := &types.GenesisState{
+		Params:                  &params,
+		State:                   &state,
+		CurrentEpochConfig:      &config,
+		PauseState:              &pauseState,
+		OpenRewardEnabledBlocks: openBlocks,
+	}
+	if err := k.EpochConfigVersions.Walk(ctx, nil, func(_ uint64, version types.EpochConfigVersion) (bool, error) {
+		value := version
+		genesis.EpochConfigVersions = append(genesis.EpochConfigVersions, &value)
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := k.ScheduledEpochConfigs.Walk(ctx, nil, func(_ uint64, scheduled types.ScheduledEpochConfig) (bool, error) {
+		value := scheduled
+		genesis.ScheduledEpochConfigs = append(genesis.ScheduledEpochConfigs, &value)
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
 	if pending, found, err := k.GetPendingParams(ctx); err != nil {
 		return nil, err
 	} else if found {
@@ -135,4 +186,58 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		return nil, err
 	}
 	return genesis, nil
+}
+
+// initEpochHistoryGenesis imports the canonical epoch-configuration history and
+// its schedule.
+//
+// Both collections route their duplicate/ordering treatment through
+// importGenesisCollection, the single named seam described there.
+func (k Keeper) initEpochHistoryGenesis(ctx context.Context, genState types.GenesisState) error {
+	for _, version := range genState.EpochConfigVersions {
+		if err := importGenesisCollection(ctx, k.EpochConfigVersions, version.EffectiveEpoch, *version); err != nil {
+			return err
+		}
+	}
+	for _, scheduled := range genState.ScheduledEpochConfigs {
+		if err := importGenesisCollection(ctx, k.ScheduledEpochConfigs, scheduled.EffectiveEpoch, *scheduled); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// importGenesisCollection is the single seam through which every genesis
+// collection introduced by the canonical epoch timeline is written.
+//
+// It exists because the general policy for malformed genesis collections —
+// whether duplicate or non-canonically-ordered entries are rejected, normalized,
+// or resolved last-wins — is an open architecture question that this module must
+// not settle by accident. Routing every such write through one function makes the
+// eventual ratified rule a one-place change instead of an audit of every import
+// loop, and keeps the current behavior from hardening into protocol through
+// repetition.
+//
+// Deliberately note what this does NOT do: it takes no position on that policy,
+// and no test asserts one. The older finalized-epoch and claim-record collections
+// predate this seam and carry their own long-standing rejection behavior, which
+// is left untouched; that asymmetry is intentional while the question is open.
+func importGenesisCollection[K, V any](
+	ctx context.Context, collection collections.Map[K, V], key K, value V,
+) error {
+	return collection.Set(ctx, key, value)
+}
+
+// effectiveInitialHeight applies the SDK's initial-height convention: an absent
+// or zero height means the chain starts at height 1, anything else is exact, and
+// a negative height is refused.
+func effectiveInitialHeight(ctx context.Context) (int64, error) {
+	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
+	if height < 0 {
+		return 0, types.ErrInvalidGenesis.Wrapf("initial height %d is negative", height)
+	}
+	if height == 0 {
+		return 1, nil
+	}
+	return height, nil
 }

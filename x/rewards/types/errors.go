@@ -13,4 +13,10 @@ var (
 	// malformed, empty, module account, bank-blocked — is carried in the wrapped
 	// message.
 	ErrInvalidAddress = errorsmod.Register(ModuleName, 7, "invalid economic address")
+	// ErrEpochConfigNotFound is the ONLY ordinary absence in epoch-geometry
+	// resolution: no configuration version is effective at or before the
+	// requested epoch, or the epoch lies beyond the supported projection horizon.
+	// Every other failure to resolve a boundary is state that exists and cannot
+	// be trusted, and is reported as ErrInvalidState.
+	ErrEpochConfigNotFound = errorsmod.Register(ModuleName, 8, "epoch configuration not found")
 )

@@ -147,6 +147,15 @@ func ValidateUpdate(current, next Params) error {
 	if current.MaxSupply != next.MaxSupply {
 		return ErrImmutableParam.Wrap("max supply")
 	}
+	// Epoch geometry belongs to the canonical EpochConfigVersion history, which
+	// has its own effective-epoch scheduling rules. Allowing the generic params
+	// path to move this mirror would be a second, unversioned way to change epoch
+	// length — one that takes effect immediately and leaves no history entry, so
+	// every already-derived boundary would silently disagree with it.
+	if current.EpochLengthBlocks != next.EpochLengthBlocks {
+		return ErrImmutableParam.Wrap(
+			"epoch length is governed by the canonical epoch configuration history and cannot be changed through a params update")
+	}
 	return next.Validate()
 }
 

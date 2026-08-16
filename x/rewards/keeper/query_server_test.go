@@ -23,6 +23,7 @@ func setupQueryServer(t *testing.T) (types.QueryServer, sdk.Context, keeper.Keep
 	cfg, err := keeper.BuildEpochConfigSnapshot(params)
 	require.NoError(t, err)
 	require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
+	seedEpochTimeline(t, k, ctx, params, types.RewardsState{CurrentEpoch: 3, CurrentEpochStartHeight: 50})
 	require.NoError(t, k.SetFinalizedEpoch(ctx, validEpoch(1, params)))
 	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 1)))
 	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 2)))

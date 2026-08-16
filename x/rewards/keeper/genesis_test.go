@@ -24,7 +24,7 @@ func TestPopulatedGenesisInitExportRoundTrip(t *testing.T) {
 	k, ctx, bank := setupKeeper(t, &coreSlotKeeperMock{})
 	genesis := types.DefaultGenesis()
 	pending := types.DefaultParams()
-	pending.EpochLengthBlocks++
+	pending.MaxClaimEpochsPerTx++
 	genesis.HasPendingParams = true
 	genesis.PendingParams = &pending
 	epoch := validEpoch(1, *genesis.Params)

@@ -36,6 +36,17 @@ func DefaultParams() Params {
 	}
 }
 
+// DefaultEpochConfigVersion returns the original-genesis epoch anchor for a
+// chain starting at initialHeight: version 1, effective at epoch 1 (§11).
+func DefaultEpochConfigVersion(params Params, initialHeight uint64) EpochConfigVersion {
+	return EpochConfigVersion{
+		Version:              1,
+		EffectiveEpoch:       1,
+		EffectiveStartHeight: initialHeight,
+		EpochLengthBlocks:    params.EpochLengthBlocks,
+	}
+}
+
 func DefaultEpochConfigSnapshot(params Params) EpochConfigSnapshot {
 	return EpochConfigSnapshot{
 		SnapshotVersion:          DefaultEpochSnapshotVersion,

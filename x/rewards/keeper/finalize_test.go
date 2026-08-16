@@ -34,8 +34,10 @@ func TestEndBlockFinalizesAndAllocatesEpoch(t *testing.T) {
 
 	state, err := k.GetState(ctx)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), state.CurrentEpoch)
-	require.Equal(t, uint64(3), state.CurrentEpochStartHeight)
+	// Finalization does not advance the epoch; the next epoch opens at its own
+	// first BeginBlock, which is also where a scheduled configuration is consumed.
+	require.Equal(t, uint64(1), state.CurrentEpoch)
+	require.Equal(t, uint64(1), state.CurrentEpochStartHeight)
 	require.Equal(t, "20", state.CumulativeEmitted)
 	_, err = k.GetActiveBlocks(ctx, 1, 1)
 	require.ErrorIs(t, err, collections.ErrNotFound)
@@ -54,25 +56,60 @@ func TestFinalizeRejectsUnsupportedSnapshotModes(t *testing.T) {
 	require.False(t, found)
 }
 
-func TestEndBlockReadinessAndSettlementPause(t *testing.T) {
+// TestEndBlockFinalizesRegardlessOfPause replaces the retired settlement-pause
+// readiness gate.
+//
+// A paused epoch must still close. If it did not, the boundary would pass, the
+// next epoch would open at BeginBlock, and the skipped epoch could never be
+// finalized under a later block's clock — a permanent hole in the finalized
+// sequence rather than a delayed record.
+func TestEndBlockFinalizesRegardlessOfPause(t *testing.T) {
 	k, ctx, bank, _ := setupFinalization(t, false)
+
+	// Before the boundary nothing happens.
 	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(1)))
 	require.Zero(t, bank.mintCalls)
 
-	params, err := k.GetParams(ctx)
-	require.NoError(t, err)
-	params.EpochSettlementEnabled = false
-	require.NoError(t, k.SetParams(ctx, params))
-	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(5)))
-	require.Zero(t, bank.mintCalls)
+	// Paused, at the boundary: the epoch still finalizes.
+	require.NoError(t, k.SetPauseState(ctx, types.RewardsPauseState{CurrentPaused: true}))
+	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(2)))
 
-	params.EpochSettlementEnabled = true
-	require.NoError(t, k.SetParams(ctx, params))
-	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(5)))
-	require.Equal(t, 1, bank.mintCalls)
+	epoch, found, err := k.GetFinalizedEpoch(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, found, "a paused epoch must still produce a finalized record")
+	require.Equal(t, uint64(2), epoch.RewardEnabledBlocks,
+		"the fixture's counter is preserved on the finalized record")
+}
+
+// TestFullyPausedEpochFinalizesWithoutEmissionOrEpochHole is the canonical
+// zero-accrual case: an epoch that counted no reward-enabled blocks.
+func TestFullyPausedEpochFinalizesWithoutEmissionOrEpochHole(t *testing.T) {
+	k, ctx, bank, _ := setupFinalization(t, true)
+	// A fully paused epoch accrues nothing. That is the only input emission needs
+	// — no separate switch suppresses the mint.
+	require.NoError(t, k.SetOpenRewardEnabledBlocks(ctx, 0))
+	require.NoError(t, k.SetPauseState(ctx, types.RewardsPauseState{CurrentPaused: true}))
+
+	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(2)))
+
+	require.Zero(t, bank.mintCalls, "zero reward-enabled blocks must mint nothing")
+	epoch, found, err := k.GetFinalizedEpoch(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, found, "the epoch must still close")
+	require.Equal(t, "0", epoch.MintedEmission)
+	require.Zero(t, epoch.RewardEnabledBlocks)
+
 	state, err := k.GetState(ctx)
 	require.NoError(t, err)
-	require.Equal(t, uint64(3), state.CurrentEpochStartHeight)
+	require.Equal(t, "0", state.CumulativeEmitted)
+	// Carry is preserved rather than consumed: with no participation there is
+	// nothing to allocate, so the pool rolls forward whole.
+	require.Equal(t, "0", state.CarryForwardRemainder)
+
+	// And the sequence is contiguous: epoch 1 exists, so epoch 2 can follow it.
+	_, found, err = k.GetFinalizedEpoch(ctx, 2)
+	require.NoError(t, err)
+	require.False(t, found)
 }
 
 func TestFinalizeEmptyActiveSetMintsAndCarries(t *testing.T) {
@@ -91,17 +128,20 @@ func TestFinalizeEmptyActiveSetMintsAndCarries(t *testing.T) {
 }
 
 func TestFinalizeEmissionsDisabledAndMintFailureAtomicity(t *testing.T) {
-	t.Run("emissions disabled", func(t *testing.T) {
+	t.Run("the retired emissions switch no longer suppresses the mint", func(t *testing.T) {
+		// emissions_enabled was one of three independent pause authorities and
+		// carries none now. Emission follows the canonical counter alone, so an
+		// epoch that accrued blocks mints even with the deprecated flag cleared.
 		k, ctx, bank, _ := setupFinalization(t, true)
 		params, err := k.GetParams(ctx)
 		require.NoError(t, err)
 		params.EmissionsEnabled = false
 		require.NoError(t, k.SetParams(ctx, params))
 		require.NoError(t, k.EndBlock(ctx.WithBlockHeight(2)))
-		require.Zero(t, bank.mintCalls)
+		require.Equal(t, 1, bank.mintCalls)
 		state, err := k.GetState(ctx)
 		require.NoError(t, err)
-		require.Equal(t, "0", state.CumulativeEmitted)
+		require.Equal(t, "20", state.CumulativeEmitted)
 	})
 
 	t.Run("mint failure", func(t *testing.T) {
@@ -122,17 +162,23 @@ func TestFinalizeActivatesPendingParamsAfterBoundary(t *testing.T) {
 	current, err := k.GetParams(ctx)
 	require.NoError(t, err)
 	pending := current
-	pending.EpochLengthBlocks = 7
+	// Epoch length is governed by the canonical history and can no longer travel
+	// through pending params; the subsidy still can.
 	pending.InitialBlockSubsidy = "3"
 	require.NoError(t, k.SetPendingParams(ctx, pending))
 
 	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(2)))
 	active, err := k.GetParams(ctx)
 	require.NoError(t, err)
-	require.Equal(t, uint64(7), active.EpochLengthBlocks)
+	require.Equal(t, "3", active.InitialBlockSubsidy)
 	cfg, err := k.GetCurrentEpochConfig(ctx)
 	require.NoError(t, err)
-	require.Equal(t, uint64(7), cfg.EpochLengthBlocks)
+	require.Equal(t, "3", cfg.InitialBlockSubsidy)
+	// The snapshot's epoch-length mirror is repopulated from canonical history,
+	// never from the promoted params, so it keeps the authoritative value.
+	length, err := k.EpochLengthForEpoch(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, length, cfg.EpochLengthBlocks)
 	_, found, err := k.GetPendingParams(ctx)
 	require.NoError(t, err)
 	require.False(t, found)
@@ -200,6 +246,11 @@ func setupFinalization(t *testing.T, empty bool) (keeper.Keeper, sdk.Context, *b
 		},
 	}
 	k, ctx, bank := setupAccountingKeeper(t, core, 1, params)
+	// Emission is driven by the epoch's reward-enabled block count, which
+	// BeginBlock would have accrued. These fixtures write participation directly,
+	// so they must also state the count; a fully enabled epoch counts one per
+	// block of its configured length.
+	require.NoError(t, k.SetOpenRewardEnabledBlocks(ctx, params.EpochLengthBlocks))
 	if !empty {
 		require.NoError(t, k.SetActiveBlocks(ctx, 1, 1, 1))
 		require.NoError(t, k.SetActiveBlocks(ctx, 1, 2, 3))

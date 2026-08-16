@@ -149,10 +149,19 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 		state, err := a.RewardsKeeper.GetState(ctx)
 		require.NoError(t, err)
 		sumEmission, sumTreasury, sumAllocated := math.ZeroInt(), math.ZeroInt(), math.ZeroInt()
-		for e := uint64(1); e < state.CurrentEpoch; e++ {
+		// Walk the finalized records themselves rather than deriving the range from
+		// CurrentEpoch. The epoch counter advances at BeginBlock, so an epoch
+		// finalized at its boundary is still "current" until the next block opens;
+		// a range of e < CurrentEpoch would silently omit it and under-count the
+		// emission the conservation identity is checking.
+		for e := uint64(1); e <= state.CurrentEpoch; e++ {
 			epoch, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, e)
 			require.NoError(t, err)
-			require.Truef(t, found, "seed %d: epoch %d must be finalized (< currentEpoch)", seed, e)
+			if !found {
+				require.Equalf(t, state.CurrentEpoch, e,
+					"seed %d: only the open epoch may be unfinalized", seed)
+				continue
+			}
 			sumEmission = sumEmission.Add(intStr(t, epoch.MintedEmission))
 			sumTreasury = sumTreasury.Add(intStr(t, epoch.TreasuryAmount))
 			sumAllocated = sumAllocated.Add(intStr(t, epoch.AllocatedAmount))
@@ -277,8 +286,6 @@ func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ ui
 	if state.CurrentEpoch <= 1 {
 		return // nothing finalized yet
 	}
-	params, err := a.RewardsKeeper.GetParams(ctx)
-	require.NoError(t, err)
 	slot := uint64(1 + rng.Intn(3))
 	start := uint64(1 + rng.Intn(int(state.CurrentEpoch-1)))
 	end := start + uint64(rng.Intn(6)) // delta 0..5 so the cap boundary is reachable for caps 2..5
@@ -288,8 +295,8 @@ func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ ui
 	// -> nonpositive). Empty reason == predicted valid.
 	reason := ""
 	switch {
-	case !params.ClaimsEnabled:
-		reason = "claims are disabled"
+	case !releaseEnabled(t, a, ctx):
+		reason = "rewards release is paused"
 	case end-start >= cap_:
 		reason = "claim range exceeds maximum"
 	default:
@@ -341,31 +348,43 @@ func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ ui
 			cov.capReject++
 		case "already claimed":
 			cov.replayReject++
-		case "claims are disabled":
+		case "rewards release is paused":
 			cov.pauseClaimReject++
 		}
 	}
 }
 
-// pauseResume toggles a random subset of the three runtime flags via the
-// emergency authority.
-func pauseResume(t *testing.T, a *app.App, ctx sdk.Context, emer string, pause bool, rng *rand.Rand) error {
+// pauseResume drives the canonical global pause through the emergency authority.
+//
+// The message schedules the value for H+1. This simulation does not step a block
+// between the transaction and the steps that observe it, so it then settles the
+// transition directly: the simulation is about what a paused or resumed chain
+// does, and the H+1 timing itself is pinned by dedicated keeper and app tests
+// rather than sampled randomly here.
+//
+// The deprecated per-area selectors on the messages are left at their zero values
+// deliberately — a pause is global, and passing them would suggest otherwise.
+func pauseResume(t *testing.T, a *app.App, ctx sdk.Context, emer string, pause bool, _ *rand.Rand) error {
 	t.Helper()
-	em := rng.Intn(2) == 0
-	se := rng.Intn(2) == 0
-	cl := rng.Intn(2) == 0
-	if !em && !se && !cl {
-		em = true
-	}
 	srv := rewardskeeper.NewMsgServer(a.RewardsKeeper)
 	if pause {
-		_, err := srv.PauseRewards(ctx, &rewardstypes.MsgPauseRewards{
-			EmergencyAuthority: emer, PauseEmissions: em, PauseEpochSettlement: se, PauseClaims: cl,
-		})
-		return err
+		if _, err := srv.PauseRewards(ctx, &rewardstypes.MsgPauseRewards{EmergencyAuthority: emer}); err != nil {
+			return err
+		}
+	} else {
+		if _, err := srv.ResumeRewards(ctx, &rewardstypes.MsgResumeRewards{EmergencyAuthority: emer}); err != nil {
+			return err
+		}
 	}
-	_, err := srv.ResumeRewards(ctx, &rewardstypes.MsgResumeRewards{
-		EmergencyAuthority: emer, ResumeEmissions: em, ResumeEpochSettlement: se, ResumeClaims: cl,
-	})
-	return err
+	return a.RewardsKeeper.SetPauseState(ctx, rewardstypes.RewardsPauseState{CurrentPaused: pause})
+}
+
+// releaseEnabled reports the canonical release state, which is what now governs
+// whether the legacy claim path may move funds. The retired claims_enabled switch
+// carries no authority and must not be used to predict a rejection.
+func releaseEnabled(t *testing.T, a *app.App, ctx sdk.Context) bool {
+	t.Helper()
+	enabled, err := a.RewardsKeeper.SettlementReleaseEnabled(ctx)
+	require.NoError(t, err)
+	return enabled
 }

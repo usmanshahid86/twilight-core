@@ -53,6 +53,30 @@ type Keeper struct {
 	ActiveBlocks       collections.Map[collections.Pair[uint64, uint64], uint64]
 	FinalizedEpochs    collections.Map[uint64, types.EpochReward]
 	ClaimRecords       collections.Map[collections.Pair[uint64, uint64], types.EligibleSlotReward]
+
+	// EpochConfigVersions is the immutable epoch-configuration history keyed by
+	// effective epoch, and the sole authority for epoch geometry.
+	//
+	// collections.Uint64Key is big-endian, so iteration is ascending by effective
+	// epoch and a reverse iteration bounded above by N lands on the greatest
+	// effective_epoch <= N. That predecessor seek is how a boundary is resolved:
+	// history is never scanned in full, so resolution cost does not track chain
+	// age.
+	EpochConfigVersions collections.Map[uint64, types.EpochConfigVersion]
+
+	// ScheduledEpochConfigs holds future epoch lengths keyed by the epoch at
+	// which they become effective. A schedule entry is consumed at the first
+	// BeginBlock of that epoch, which is where it becomes an immutable history
+	// version. Fresh genesis carries none.
+	ScheduledEpochConfigs collections.Map[uint64, types.ScheduledEpochConfig]
+
+	// PauseState is the single canonical rewards-pause state.
+	PauseState collections.Item[types.RewardsPauseState]
+
+	// OpenRewardEnabledBlocks counts the reward-enabled blocks of the open epoch
+	// and is the block-count input to epoch emission. It is reset when an epoch
+	// opens and read at that epoch's finalization.
+	OpenRewardEnabledBlocks collections.Item[uint64]
 }
 
 func NewKeeper(
@@ -78,6 +102,12 @@ func NewKeeper(
 		ActiveBlocks:       collections.NewMap(sb, types.ActiveBlocksPrefix, "active_blocks", pairKey, collections.Uint64Value),
 		FinalizedEpochs:    collections.NewMap(sb, types.FinalizedEpochsPrefix, "finalized_epochs", collections.Uint64Key, codec.CollValue[types.EpochReward](cdc)),
 		ClaimRecords:       collections.NewMap(sb, types.ClaimRecordsPrefix, "claim_records", pairKey, codec.CollValue[types.EligibleSlotReward](cdc)),
+		EpochConfigVersions: collections.NewMap(sb, types.EpochConfigVersionsPrefix, "epoch_config_versions",
+			collections.Uint64Key, codec.CollValue[types.EpochConfigVersion](cdc)),
+		ScheduledEpochConfigs: collections.NewMap(sb, types.ScheduledEpochConfigsPrefix, "scheduled_epoch_configs",
+			collections.Uint64Key, codec.CollValue[types.ScheduledEpochConfig](cdc)),
+		PauseState:              collections.NewItem(sb, types.RewardsPauseStateKey, "pause_state", codec.CollValue[types.RewardsPauseState](cdc)),
+		OpenRewardEnabledBlocks: collections.NewItem(sb, types.OpenRewardEnabledBlocksKey, "open_reward_enabled_blocks", collections.Uint64Value),
 	}
 	schema, err := sb.Build()
 	if err != nil {

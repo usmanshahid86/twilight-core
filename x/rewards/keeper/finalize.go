@@ -3,7 +3,6 @@ package keeper
 import (
 	"context"
 
-	"cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/twilight-project/twilight-core/x/rewards/types"
@@ -40,12 +39,18 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 		cfg.FeeDistributionMode != types.FeeDistributionMode_FEE_DISTRIBUTION_MODE_NONE {
 		return types.ErrUnsupportedFeature.Wrap("fee collection and distribution are disabled in v1")
 	}
-	endHeight, err := ConfiguredEpochEndHeight(state, cfg)
+	// Canonical geometry. The deprecated snapshot mirror is never consulted here.
+	endHeight, err := k.EpochEndHeight(ctx, state.CurrentEpoch)
 	if err != nil {
 		return err
 	}
-	if endHeight == ^uint64(0) {
-		return types.ErrInvalidState.Wrap("cannot advance epoch beyond maximum height")
+
+	// The block-count input to emission is the epoch's reward-enabled blocks, not
+	// its configured length (§30). The two coincide only when the epoch was never
+	// paused; a paused epoch counted fewer, and a fully paused epoch counted none.
+	rewardEnabledBlocks, err := k.GetOpenRewardEnabledBlocks(ctx)
+	if err != nil {
+		return err
 	}
 
 	cumulative, err := types.ParseAmountString("cumulative emitted", state.CumulativeEmitted)
@@ -60,19 +65,19 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	emission := math.ZeroInt()
-	cumulativeAfter := cumulative
-	if params.EmissionsEnabled {
-		emission, cumulativeAfter, err = ComputeEpochEmission(
-			cumulative,
-			cfg.EpochLengthBlocks,
-			maxSupply,
-			initialSubsidy,
-			cfg.HalvingMode,
-		)
-		if err != nil {
-			return err
-		}
+	// No emissions_enabled gate: that switch was one of three independent pause
+	// authorities and is retired. Emission now follows the canonical counter, so a
+	// paused epoch emits nothing because it counted no reward-enabled blocks —
+	// not because a separate boolean suppressed the mint.
+	emission, cumulativeAfter, err := ComputeEpochEmission(
+		cumulative,
+		rewardEnabledBlocks,
+		maxSupply,
+		initialSubsidy,
+		cfg.HalvingMode,
+	)
+	if err != nil {
+		return err
 	}
 	if cumulativeAfter.GT(maxSupply) {
 		return types.ErrInvalidState.Wrap("cumulative emitted plus epoch emission exceeds max supply")
@@ -149,6 +154,7 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 		Rewards:                     epochRewards,
 		CumulativeEmittedAfterEpoch: cumulativeAfter.String(),
 		Config:                      &cfgCopy,
+		RewardEnabledBlocks:         rewardEnabledBlocks,
 	}
 	if err := k.SetFinalizedEpoch(ctx, epoch); err != nil {
 		return err
@@ -173,15 +179,17 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 		nextParams = pending
 		emitRewardsEvent(ctx, types.EventTypeParamsActivated)
 	}
-	nextCfg, err := BuildEpochConfigSnapshot(nextParams)
+	nextCfg, err := k.buildEpochConfigSnapshot(ctx, nextParams)
 	if err != nil {
 		return err
 	}
 	if err := k.SetCurrentEpochConfig(ctx, nextCfg); err != nil {
 		return err
 	}
-	state.CurrentEpoch++
-	state.CurrentEpochStartHeight = endHeight + 1
+	// The epoch counter is NOT advanced here. It advances at the first BeginBlock
+	// of the next epoch, which is also where a scheduled configuration is consumed
+	// (§11, §95). Advancing it here would make every scheduled epoch-length change
+	// unreachable, because the schedule is keyed to the epoch being opened.
 	state.CumulativeEmitted = cumulativeAfter.String()
 	state.CarryForwardRemainder = carryOut.String()
 	if err := k.SetState(ctx, state); err != nil {

@@ -37,9 +37,13 @@ message MsgPauseRewards {
   option (cosmos.msg.v1.signer) = "emergency_authority";
   option (amino.name) = "twilight/rewards/MsgPauseRewards";
   string emergency_authority = 1;
-  bool pause_emissions = 2;
-  bool pause_epoch_settlement = 3;
-  bool pause_claims = 4;
+  // The three selectors are superseded by the single canonical pause state.
+  // A pause is global: it is scheduled for H+1 and governs reward accrual and
+  // monetary release together. The fields remain on the wire for compatibility,
+  // carry no partial-pause semantics, and their numbers are never recycled.
+  bool pause_emissions = 2 [deprecated = true];
+  bool pause_epoch_settlement = 3 [deprecated = true];
+  bool pause_claims = 4 [deprecated = true];
 }
 message MsgPauseRewardsResponse {}
 
@@ -47,8 +51,9 @@ message MsgResumeRewards {
   option (cosmos.msg.v1.signer) = "emergency_authority";
   option (amino.name) = "twilight/rewards/MsgResumeRewards";
   string emergency_authority = 1;
-  bool resume_emissions = 2;
-  bool resume_epoch_settlement = 3;
-  bool resume_claims = 4;
+  // Superseded exactly as for MsgPauseRewards above.
+  bool resume_emissions = 2 [deprecated = true];
+  bool resume_epoch_settlement = 3 [deprecated = true];
+  bool resume_claims = 4 [deprecated = true];
 }
 message MsgResumeRewardsResponse {}

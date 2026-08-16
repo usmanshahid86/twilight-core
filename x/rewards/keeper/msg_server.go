@@ -35,10 +35,14 @@ func (m msgServer) UpdateRewardsParams(ctx context.Context, msg *types.MsgUpdate
 		return nil, err
 	}
 	next := *msg.Params
+	// The retired pause switches carry no authority, but they must still not drift
+	// through this path: a params document that flipped one would read as though
+	// the chain had a second pause authority beside the canonical state.
 	if next.EmissionsEnabled != current.EmissionsEnabled ||
 		next.EpochSettlementEnabled != current.EpochSettlementEnabled ||
 		next.ClaimsEnabled != current.ClaimsEnabled {
-		return nil, types.ErrInvalidParams.Wrap("pause flags may only be changed by emergency authority")
+		return nil, types.ErrInvalidParams.Wrap(
+			"the deprecated pause flags are not authoritative and may not be changed; use the canonical pause transactions")
 	}
 	if err := m.SetPendingParams(ctx, next); err != nil {
 		return nil, err
@@ -49,27 +53,38 @@ func (m msgServer) UpdateRewardsParams(ctx context.Context, msg *types.MsgUpdate
 	return &types.MsgUpdateRewardsParamsResponse{}, nil
 }
 
+// PauseRewards schedules a global rewards pause for H+1.
+//
+// The three selector fields on the message are deprecated and ignored: a pause is
+// global. Honoring them would preserve exactly the partial-pause semantics §16
+// retired, and would let a caller pause accrual while leaving release enabled.
 func (m msgServer) PauseRewards(ctx context.Context, msg *types.MsgPauseRewards) (*types.MsgPauseRewardsResponse, error) {
 	if msg == nil {
 		return nil, types.ErrInvalidParams.Wrap("pause request is required")
 	}
-	if err := m.setEmergencyFlags(ctx, msg.EmergencyAuthority, false, msg.PauseEmissions, msg.PauseEpochSettlement, msg.PauseClaims); err != nil {
+	if err := m.schedulePause(ctx, msg.EmergencyAuthority, true); err != nil {
 		return nil, err
 	}
 	return &types.MsgPauseRewardsResponse{}, nil
 }
 
+// ResumeRewards schedules a global rewards resume for H+1.
 func (m msgServer) ResumeRewards(ctx context.Context, msg *types.MsgResumeRewards) (*types.MsgResumeRewardsResponse, error) {
 	if msg == nil {
 		return nil, types.ErrInvalidParams.Wrap("resume request is required")
 	}
-	if err := m.setEmergencyFlags(ctx, msg.EmergencyAuthority, true, msg.ResumeEmissions, msg.ResumeEpochSettlement, msg.ResumeClaims); err != nil {
+	if err := m.schedulePause(ctx, msg.EmergencyAuthority, false); err != nil {
 		return nil, err
 	}
 	return &types.MsgResumeRewardsResponse{}, nil
 }
 
-func (m msgServer) setEmergencyFlags(ctx context.Context, signer string, enabled, emissions, settlement, claims bool) error {
+// schedulePause authorizes and records a pause transition for the next block.
+//
+// The transition is scheduled, never applied here. A value applied mid-block
+// would make a block's reward treatment depend on where in the block the
+// transaction landed; scheduling it for H+1 makes it a property of the block.
+func (m msgServer) schedulePause(ctx context.Context, signer string, paused bool) error {
 	authority, err := m.coreSlotKeeper.GetEmergencyAuthority(ctx)
 	if err != nil {
 		return err
@@ -77,24 +92,12 @@ func (m msgServer) setEmergencyFlags(ctx context.Context, signer string, enabled
 	if signer != authority {
 		return types.ErrInvalidParams.Wrap("unauthorized rewards emergency action")
 	}
-	params, err := m.GetParams(ctx)
-	if err != nil {
-		return err
-	}
-	if emissions {
-		params.EmissionsEnabled = enabled
-	}
-	if settlement {
-		params.EpochSettlementEnabled = enabled
-	}
-	if claims {
-		params.ClaimsEnabled = enabled
-	}
-	if err := m.SetParams(ctx, params); err != nil {
+	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
+	if err := m.SchedulePauseTransition(ctx, height, paused); err != nil {
 		return err
 	}
 	eventType := types.EventTypePaused
-	if enabled {
+	if !paused {
 		eventType = types.EventTypeResumed
 	}
 	emitRewardsEvent(ctx, eventType, sdk.NewAttribute(types.AttributeKeyAuthority, signer))

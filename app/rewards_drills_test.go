@@ -157,11 +157,29 @@ func rewardsParams(t *testing.T, mutate func(p *rewardstypes.Params)) (rewardsty
 }
 
 func genesisState(p rewardstypes.Params, snap rewardstypes.EpochConfigSnapshot) rewardstypes.GenesisState {
-	return rewardstypes.GenesisState{
+	gen := rewardstypes.GenesisState{
 		Params:             &p,
 		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig: &snap,
 	}
+	return *canonicalRewardsTimeline(&gen, 1)
+}
+
+// canonicalRewardsTimeline fills the canonical epoch-timeline fields every fresh
+// rewards genesis now requires: the original-genesis epoch anchor, the single
+// pause state, and the open reward-enabled block counter.
+//
+// None of the three has a runtime default — after genesis an absent one is
+// corruption rather than a zero value — so a fixture that omitted them would be
+// testing against state no chain is ever in.
+func canonicalRewardsTimeline(gen *rewardstypes.GenesisState, initialHeight uint64) *rewardstypes.GenesisState {
+	anchor := rewardstypes.DefaultEpochConfigVersion(*gen.Params, initialHeight)
+	anchor.EffectiveEpoch = gen.State.CurrentEpoch
+	anchor.EffectiveStartHeight = gen.State.CurrentEpochStartHeight
+	gen.EpochConfigVersions = []*rewardstypes.EpochConfigVersion{&anchor}
+	gen.PauseState = &rewardstypes.RewardsPauseState{}
+	gen.OpenRewardEnabledBlocks = 0
+	return gen
 }
 
 // ===========================================================================

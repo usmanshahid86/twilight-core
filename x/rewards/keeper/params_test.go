@@ -23,7 +23,9 @@ func TestParamsAndPendingParamsStorage(t *testing.T) {
 	require.False(t, found)
 
 	pending := params
-	pending.EpochLengthBlocks++
+	// Epoch length is no longer movable through this path; use a field the
+	// generic params update still owns.
+	pending.MaxClaimEpochsPerTx++
 	require.NoError(t, k.SetPendingParams(ctx, pending))
 	gotPending, found, err := k.GetPendingParams(ctx)
 	require.NoError(t, err)

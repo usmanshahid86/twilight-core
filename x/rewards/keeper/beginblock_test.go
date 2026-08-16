@@ -116,12 +116,15 @@ func TestBeginBlockRequiresStateConfigAndCoreSlotRead(t *testing.T) {
 		require.ErrorIs(t, k.BeginBlock(ctx), collections.ErrNotFound)
 	})
 
-	t.Run("missing config", func(t *testing.T) {
+	t.Run("missing epoch history", func(t *testing.T) {
+		// BeginBlock resolves the next epoch's start from canonical history, not
+		// from the deprecated snapshot. With no history it cannot decide whether
+		// this block opens an epoch, and must fail closed rather than assume not.
 		k, ctx, _ := setupKeeper(t, &coreSlotKeeperMock{})
 		params := types.DefaultParams()
 		require.NoError(t, k.SetParams(ctx, params))
 		require.NoError(t, k.SetState(ctx, accountingState(1)))
-		require.ErrorIs(t, k.BeginBlock(ctx), collections.ErrNotFound)
+		require.ErrorIs(t, k.BeginBlock(ctx), types.ErrEpochConfigNotFound)
 	})
 
 	t.Run("CoreSlot read failure", func(t *testing.T) {
@@ -150,10 +153,12 @@ func setupAccountingKeeper(
 	t.Helper()
 	k, ctx, bank := setupKeeper(t, coreSlots)
 	require.NoError(t, k.SetParams(ctx, params))
-	require.NoError(t, k.SetState(ctx, accountingState(epoch)))
+	state := accountingState(epoch)
+	require.NoError(t, k.SetState(ctx, state))
 	cfg, err := keeper.BuildEpochConfigSnapshot(params)
 	require.NoError(t, err)
 	require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
+	seedEpochTimeline(t, k, ctx, params, state)
 	return k, ctx, bank
 }
 

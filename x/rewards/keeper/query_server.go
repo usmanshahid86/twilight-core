@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"errors"
 
 	"cosmossdk.io/collections"
 	sdkmath "cosmossdk.io/math"
@@ -10,8 +11,15 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/twilight-project/twilight-core/internal/checked"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
+
+// epochProjectionHorizon bounds how far ahead a boundary query will walk the
+// schedule. Beyond it the query returns a deterministic not-found rather than an
+// approximated or clamped height (§68). It bounds query work only and is not a
+// protocol value: no consensus path projects boundaries.
+const epochProjectionHorizon = 1_000
 
 type queryServer struct{ Keeper }
 
@@ -36,14 +44,31 @@ func (q queryServer) EpochInfo(ctx context.Context, _ *types.QueryEpochInfoReque
 	if err != nil {
 		return nil, err
 	}
-	endHeight, err := ConfiguredEpochEndHeight(state, cfg)
+	// Canonical geometry, from EpochConfigVersion history rather than from the
+	// deprecated snapshot mirror the response still carries for compatibility.
+	startHeight, err := q.EpochStartHeight(ctx, state.CurrentEpoch)
 	if err != nil {
-		return nil, err
+		return nil, epochQueryError(err)
+	}
+	endHeight, err := q.EpochEndHeight(ctx, state.CurrentEpoch)
+	if err != nil {
+		return nil, epochQueryError(err)
+	}
+	length, err := q.EpochLengthForEpoch(ctx, state.CurrentEpoch)
+	if err != nil {
+		return nil, epochQueryError(err)
+	}
+	openBlocks, err := q.GetOpenRewardEnabledBlocks(ctx)
+	if err != nil {
+		return nil, epochQueryError(err)
 	}
 	resp := &types.QueryEpochInfoResponse{
-		State:                 &state,
-		CurrentEpochConfig:    &cfg,
-		CurrentEpochEndHeight: endHeight,
+		State:                    &state,
+		CurrentEpochConfig:       &cfg,
+		CurrentEpochEndHeight:    endHeight,
+		CurrentEpochStartHeight:  startHeight,
+		CurrentEpochLengthBlocks: length,
+		OpenRewardEnabledBlocks:  openBlocks,
 	}
 	if pending, found, err := q.GetPendingParams(ctx); err != nil {
 		return nil, err
@@ -243,4 +268,113 @@ func (q queryServer) nextHalvingInfo(ctx context.Context) (*types.NextHalvingInf
 		MaxSupply:                 maxSupply.String(),
 		HasNextHalving:            hasNext,
 	}, nil
+}
+
+// epochQueryError maps an epoch-geometry failure onto the public query contract.
+//
+// The distinction the module maintains internally has to survive to the caller:
+// an epoch with no applicable configuration version, or one beyond the supported
+// projection horizon, is an ordinary answer and reaches a client as NotFound.
+// History that exists and cannot be trusted is a state-integrity failure and must
+// not be flattened into "not found", which would tell a client the epoch was
+// never configured when in fact the database holding it is broken.
+//
+// Anything already carrying a transport code — a canceled or timed-out query —
+// is passed through untouched rather than relabelled.
+func epochQueryError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, types.ErrEpochConfigNotFound):
+		return status.Error(codes.NotFound, err.Error())
+	case errors.Is(err, types.ErrInvalidState):
+		return status.Error(codes.Internal, err.Error())
+	default:
+		return err
+	}
+}
+
+// EpochConfigVersions returns the canonical epoch-configuration history together
+// with any future schedule.
+func (q queryServer) EpochConfigVersions(
+	ctx context.Context, req *types.QueryEpochConfigVersionsRequest,
+) (*types.QueryEpochConfigVersionsResponse, error) {
+	var pageReq *query.PageRequest
+	if req != nil {
+		pageReq = req.Pagination
+	}
+	versions, pageRes, err := query.CollectionPaginate(
+		ctx, q.Keeper.EpochConfigVersions, pageReq,
+		func(_ uint64, version types.EpochConfigVersion) (*types.EpochConfigVersion, error) {
+			value := version
+			return &value, nil
+		},
+	)
+	if err != nil {
+		return nil, epochQueryError(err)
+	}
+	resp := &types.QueryEpochConfigVersionsResponse{Versions: versions, Pagination: pageRes}
+	if err := q.ScheduledEpochConfigs.Walk(ctx, nil, func(_ uint64, scheduled types.ScheduledEpochConfig) (bool, error) {
+		value := scheduled
+		resp.Scheduled = append(resp.Scheduled, &value)
+		return false, nil
+	}); err != nil {
+		return nil, epochQueryError(err)
+	}
+	return resp, nil
+}
+
+// EpochBoundaries returns the canonical start and end height of one epoch.
+//
+// Boundaries beyond the supported derivation horizon are refused rather than
+// clamped or invented (§68).
+func (q queryServer) EpochBoundaries(
+	ctx context.Context, req *types.QueryEpochBoundariesRequest,
+) (*types.QueryEpochBoundariesResponse, error) {
+	if req == nil || req.EpochNumber == 0 {
+		return nil, status.Error(codes.InvalidArgument, "epoch number must be positive")
+	}
+	start, err := q.ProjectEpochStartHeight(ctx, req.EpochNumber, epochProjectionHorizon)
+	if err != nil {
+		return nil, epochQueryError(err)
+	}
+	next, err := q.ProjectEpochStartHeight(ctx, req.EpochNumber+1, epochProjectionHorizon)
+	if err != nil {
+		return nil, epochQueryError(err)
+	}
+	length, err := q.EpochLengthForEpoch(ctx, req.EpochNumber)
+	if err != nil {
+		return nil, epochQueryError(err)
+	}
+	// Checked like every other boundary step. A validated history cannot produce a
+	// zero start height, but deriving an end by subtracting from a value this
+	// function did not compute itself is exactly where an unchecked operation
+	// would go unnoticed.
+	end, err := checked.SubUint64(next, 1)
+	if err != nil {
+		return nil, epochQueryError(types.ErrInvalidState.Wrapf(
+			"epoch %d end height underflows", req.EpochNumber))
+	}
+	return &types.QueryEpochBoundariesResponse{
+		EpochNumber:       req.EpochNumber,
+		StartHeight:       start,
+		EndHeight:         end,
+		EpochLengthBlocks: length,
+	}, nil
+}
+
+// RewardsPauseState returns the canonical pause state and whether monetary
+// release is permitted for the current block.
+func (q queryServer) RewardsPauseState(
+	ctx context.Context, _ *types.QueryRewardsPauseStateRequest,
+) (*types.QueryRewardsPauseStateResponse, error) {
+	state, err := q.GetPauseState(ctx)
+	if err != nil {
+		return nil, epochQueryError(err)
+	}
+	enabled, err := q.SettlementReleaseEnabled(ctx)
+	if err != nil {
+		return nil, epochQueryError(err)
+	}
+	return &types.QueryRewardsPauseStateResponse{PauseState: &state, ReleaseEnabled: enabled}, nil
 }

@@ -22,7 +22,10 @@ var (
 	_ func(math.Int, uint64, math.Int, math.Int, types.HalvingMode) (math.Int, math.Int, error) = keeper.ComputeEpochEmission
 	_ func(keeper.Keeper, context.Context) error                                                = keeper.Keeper.BeginBlock
 	_ func(types.RewardsState, types.EpochConfigSnapshot) (uint64, error)                       = keeper.ConfiguredEpochEndHeight
-	_ func(uint64, types.RewardsState, types.EpochConfigSnapshot, bool) (bool, error)           = keeper.ShouldFinalizeAtHeight
+	// ShouldFinalizeAtHeight is now a keeper method: the epoch end is derived from
+	// canonical EpochConfigVersion history rather than from a passed-in snapshot,
+	// and it takes no pause argument because finalization is unconditional.
+	_ func(keeper.Keeper, context.Context, uint64) (bool, error) = keeper.Keeper.ShouldFinalizeAtHeight
 )
 
 func TestEmissionMathAlwaysRespectsThresholdAndSupplyCaps(t *testing.T) {

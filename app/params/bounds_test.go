@@ -414,3 +414,58 @@ func TestCalibratedBoundsValidateStructural(t *testing.T) {
 		}
 	})
 }
+
+// TestValidateEpochLengthBlocks exercises the epoch-length relation with values
+// that are deliberately, visibly LOCAL TO THIS TEST.
+//
+// The two immutable bounds this relation is measured against are not ratified,
+// and nothing in this file may become their de-facto source. These literals are
+// chosen to be obviously arbitrary — they are not a default, a recommendation, a
+// genesis value, or anything a consensus path reads — so that when the real
+// numbers arrive they are wired at the single call site the relation is designed
+// for, not discovered here.
+func TestValidateEpochLengthBlocks(t *testing.T) {
+	const (
+		testHardMin uint64 = 10
+		testHardMax uint64 = 100
+	)
+
+	for _, tc := range []struct {
+		name  string
+		value uint64
+		ok    bool
+	}{
+		{name: "below the floor", value: testHardMin - 1},
+		{name: "at the floor", value: testHardMin, ok: true},
+		{name: "inside the window", value: 50, ok: true},
+		{name: "at the ceiling", value: testHardMax, ok: true},
+		{name: "above the ceiling", value: testHardMax + 1},
+		{name: "zero", value: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateEpochLengthBlocks(tc.value, testHardMin, testHardMax)
+			if tc.ok {
+				if err != nil {
+					t.Fatalf("epoch length %d rejected: %v", tc.value, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("epoch length %d accepted", tc.value)
+			}
+		})
+	}
+}
+
+// TestValidateEpochLengthBlocksRejectsIncoherentBounds covers the bound pair
+// itself. A zero floor would admit a zero-length epoch, which makes the canonical
+// start-height recurrence stationary: every epoch would begin at the same block
+// and no boundary would ever be reached.
+func TestValidateEpochLengthBlocksRejectsIncoherentBounds(t *testing.T) {
+	if err := ValidateEpochLengthBlocks(5, 0, 100); err == nil {
+		t.Error("a zero floor must be refused")
+	}
+	if err := ValidateEpochLengthBlocks(5, 100, 10); err == nil {
+		t.Error("an inverted window must be refused")
+	}
+}

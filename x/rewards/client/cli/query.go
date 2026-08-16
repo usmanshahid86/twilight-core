@@ -58,6 +58,15 @@ func GetQueryCmd() *cobra.Command {
 			return buildCurrentActiveBlocksRequest(cmd.Flags())
 		}),
 		add("module-balances", cobra.NoArgs, false, func(*cobra.Command, []string) (interface{}, error) { return &types.QueryModuleBalancesRequest{}, nil }),
+		add("epoch-config-versions", cobra.NoArgs, true, func(cmd *cobra.Command, _ []string) (interface{}, error) {
+			return buildEpochConfigVersionsRequest(cmd.Flags())
+		}),
+		add("epoch-boundaries [epoch]", cobra.ExactArgs(1), false, func(_ *cobra.Command, a []string) (interface{}, error) {
+			return buildEpochBoundariesRequest(a)
+		}),
+		add("pause-state", cobra.NoArgs, false, func(*cobra.Command, []string) (interface{}, error) {
+			return &types.QueryRewardsPauseStateRequest{}, nil
+		}),
 	)
 	return cmd
 }
@@ -131,4 +140,20 @@ func buildCurrentActiveBlocksRequest(fs *pflag.FlagSet) (*types.QueryCurrentEpoc
 		return nil, err
 	}
 	return &types.QueryCurrentEpochActiveBlocksRequest{Pagination: page}, nil
+}
+
+func buildEpochConfigVersionsRequest(fs *pflag.FlagSet) (*types.QueryEpochConfigVersionsRequest, error) {
+	page, err := client.ReadPageRequest(fs)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryEpochConfigVersionsRequest{Pagination: page}, nil
+}
+
+func buildEpochBoundariesRequest(args []string) (*types.QueryEpochBoundariesRequest, error) {
+	epoch, err := strconv.ParseUint(args[0], 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryEpochBoundariesRequest{EpochNumber: epoch}, nil
 }

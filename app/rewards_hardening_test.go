@@ -91,11 +91,11 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	rParams := rewardstypes.DefaultParams()
 	rParams.EpochLengthBlocks = 2 // short epoch so it closes within the test
 	rSnap := rewardstypes.DefaultEpochConfigSnapshot(rParams)
-	rewardsGen := &rewardstypes.GenesisState{
+	rewardsGen := canonicalRewardsTimeline(&rewardstypes.GenesisState{
 		Params:             &rParams,
 		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig: &rSnap,
-	}
+	}, 1)
 	initChainWithRewards(t, a, rewardsGen)
 
 	blockTime := time.Unix(1_700_000_000, 0).UTC()
@@ -128,7 +128,24 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	require.True(t, found, "runtime-dispatched EndBlock must finalize the epoch at the boundary")
 	state, err := a.RewardsKeeper.GetState(ctx2)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), state.CurrentEpoch, "CurrentEpoch must advance after finalization")
+	// Finalization does NOT advance the epoch. The next epoch opens at its own
+	// first BeginBlock, which is also where a scheduled configuration is consumed;
+	// advancing here would make every scheduled change unreachable.
+	require.Equal(t, uint64(1), state.CurrentEpoch, "finalization must not advance the epoch")
+
+	// Block 3 opens the next epoch through the runtime BeginBlocker.
+	_, err = a.Commit()
+	require.NoError(t, err)
+	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 3, Time: blockTime})
+	require.NoError(t, err)
+	ctx3 := a.NewContextLegacy(false, cmtproto.Header{Height: 3, Time: blockTime})
+	state, err = a.RewardsKeeper.GetState(ctx3)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), state.CurrentEpoch, "the epoch advances at BeginBlock")
+	open, err := a.RewardsKeeper.GetOpenRewardEnabledBlocks(ctx3)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), open,
+		"the first enabled block of the new epoch counts 1, not the previous epoch total plus one")
 
 	// 1 slot × 2 active blocks × 416190 subsidy = 832380 minted into real supply.
 	const mintedEmission = "832380"
@@ -190,10 +207,14 @@ func TestRewardsAuthorityMsgRoutedThroughApp(t *testing.T) {
 	require.NoError(t, a.RewardsKeeper.SetState(ctx, rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"}))
 	snap := rewardstypes.DefaultEpochConfigSnapshot(rParams)
 	require.NoError(t, a.RewardsKeeper.SetCurrentEpochConfig(ctx, snap))
+	require.NoError(t, a.RewardsKeeper.SetPauseState(ctx, rewardstypes.RewardsPauseState{}))
 
 	// --- MsgUpdateRewardsParams routed through the app MsgServiceRouter. ---
 	queued := rewardstypes.DefaultParams()
-	queued.EpochLengthBlocks = 3 // mutable economic change
+	// A mutable economic change. Epoch length is deliberately NOT usable here:
+	// geometry belongs to the canonical epoch-configuration history, so the
+	// generic params path refuses it.
+	queued.InitialBlockSubsidy = "3"
 	updateMsg := &rewardstypes.MsgUpdateRewardsParams{Authority: app.AuthorityAddress(), Params: &queued}
 	handler := a.MsgServiceRouter().Handler(updateMsg)
 	require.NotNil(t, handler, "rewards MsgUpdateRewardsParams must be registered on the app router")
@@ -204,7 +225,7 @@ func TestRewardsAuthorityMsgRoutedThroughApp(t *testing.T) {
 	pending, found, err := a.RewardsKeeper.GetPendingParams(ctx)
 	require.NoError(t, err)
 	require.True(t, found, "update must queue PendingParams")
-	require.Equal(t, uint64(3), pending.EpochLengthBlocks)
+	require.Equal(t, "3", pending.InitialBlockSubsidy)
 	// Current epoch config is NOT mutated immediately.
 	cfg, err := a.RewardsKeeper.GetCurrentEpochConfig(ctx)
 	require.NoError(t, err)
@@ -219,11 +240,23 @@ func TestRewardsAuthorityMsgRoutedThroughApp(t *testing.T) {
 	pauseMsg := &rewardstypes.MsgPauseRewards{EmergencyAuthority: app.EmergencyAuthorityAddress(), PauseEmissions: true}
 	_, err = a.MsgServiceRouter().Handler(pauseMsg)(ctx, pauseMsg)
 	require.NoError(t, err, "CoreSlot emergency authority must be able to pause via the app router")
-	paused, err := a.RewardsKeeper.GetParams(ctx)
+	// The pause is global and scheduled for H+1: the deprecated per-area selector
+	// on the message is ignored, and the block that accepted it is still governed
+	// by the state effective at its own start.
+	pauseState, err := a.RewardsKeeper.GetPauseState(ctx)
 	require.NoError(t, err)
-	require.False(t, paused.EmissionsEnabled, "pause must toggle only the requested flag")
-	require.True(t, paused.EpochSettlementEnabled, "settlement flag must be untouched")
-	require.True(t, paused.ClaimsEnabled, "claims flag must be untouched")
+	require.False(t, pauseState.CurrentPaused, "the accepting block keeps its own effective state")
+	require.True(t, pauseState.HasPending)
+	require.True(t, pauseState.PendingValue)
+	require.Equal(t, uint64(2), pauseState.PendingEffectiveHeight)
+
+	// The retired Params switches are untouched by a pause: they carry no
+	// authority and must not drift into looking like a second pause surface.
+	retired, err := a.RewardsKeeper.GetParams(ctx)
+	require.NoError(t, err)
+	require.True(t, retired.EmissionsEnabled)
+	require.True(t, retired.EpochSettlementEnabled)
+	require.True(t, retired.ClaimsEnabled)
 
 	// Non-emergency-authority rejected (the normal authority cannot pause).
 	badPause := &rewardstypes.MsgPauseRewards{EmergencyAuthority: app.AuthorityAddress(), PauseClaims: true}
@@ -255,15 +288,23 @@ func TestRewardsAppGenesisExportImportRoundTrip(t *testing.T) {
 
 	params := rewardstypes.DefaultParams()
 	pending := rewardstypes.DefaultParams()
-	pending.EpochLengthBlocks = 9 // a queued, mutable economic change
+	// A queued, mutable economic change. Epoch length is deliberately not used:
+	// geometry is owned by the canonical epoch-configuration history.
+	pending.InitialBlockSubsidy = "9"
 	snap := rewardstypes.DefaultEpochConfigSnapshot(params)
-	rGen := &rewardstypes.GenesisState{
+	// Rewards genesis import is fresh-only, exactly as CoreSlot's became: the
+	// original-genesis epoch anchor must be version 1 effective at epoch 1, so a
+	// mid-life exported state no longer re-imports unchanged. Reconstructing a
+	// live chain's rewards state is continuation work and is out of scope here, so
+	// this round trip uses a fresh-genesis-shaped document with non-default
+	// economics rather than a synthetic mid-life epoch.
+	rGen := canonicalRewardsTimeline(&rewardstypes.GenesisState{
 		Params:             &params,
-		State:              &rewardstypes.RewardsState{CurrentEpoch: 5, CurrentEpochStartHeight: 100, CumulativeEmitted: "1000000", CarryForwardRemainder: "250"},
+		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "1000000", CarryForwardRemainder: "250"},
 		CurrentEpochConfig: &snap,
 		HasPendingParams:   true,
 		PendingParams:      &pending,
-	}
+	}, 1)
 
 	// Import into app A through the real app genesis path.
 	a := bootApp(t)
@@ -285,13 +326,13 @@ func TestRewardsAppGenesisExportImportRoundTrip(t *testing.T) {
 
 	stateB, err := b.RewardsKeeper.GetState(ctxB)
 	require.NoError(t, err)
-	require.Equal(t, uint64(5), stateB.CurrentEpoch)
+	require.Equal(t, uint64(1), stateB.CurrentEpoch)
 	require.Equal(t, "1000000", stateB.CumulativeEmitted)
 	require.Equal(t, "250", stateB.CarryForwardRemainder)
 	pendingB, found, err := b.RewardsKeeper.GetPendingParams(ctxB)
 	require.NoError(t, err)
 	require.True(t, found, "pending params must survive the app export/import round trip")
-	require.Equal(t, uint64(9), pendingB.EpochLengthBlocks)
+	require.Equal(t, "9", pendingB.InitialBlockSubsidy)
 }
 
 // TestRewardsEndBlockFailClosedNoHalfCommit proves the fail-closed failure mode

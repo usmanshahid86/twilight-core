@@ -112,6 +112,9 @@ for node in 0 1 2 3; do
   jq --arg epoch "$EPOCH_LENGTH" '
     .app_state.rewards.params.epoch_length_blocks = $epoch
     | .app_state.rewards.current_epoch_config.epoch_length_blocks = $epoch
+    # EpochConfigVersion is the sole epoch-geometry authority; the two lines above
+    # are deprecated mirrors that fresh genesis requires to agree with it.
+    | .app_state.rewards.epoch_config_versions[0].epoch_length_blocks = $epoch
   ' "$genesis" >"$tmp" && mv "$tmp" "$genesis"
 done
 

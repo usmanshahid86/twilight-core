@@ -36,6 +36,27 @@ func (k Keeper) SetState(ctx context.Context, state types.RewardsState) error {
 	return k.State.Set(ctx, state)
 }
 
+// GetOpenRewardEnabledBlocks returns the open epoch's reward-enabled block count.
+//
+// There is deliberately no default. Genesis writes zero explicitly, and the
+// counter is rewritten whenever an epoch opens, so after initialization an absent
+// or unreadable value is corruption. Defaulting it to zero would silently reset
+// the block count that drives emission for the epoch being finalized — the chain
+// would mint as though the epoch had accrued nothing.
+func (k Keeper) GetOpenRewardEnabledBlocks(ctx context.Context) (uint64, error) {
+	blocks, err := k.OpenRewardEnabledBlocks.Get(ctx)
+	if err != nil {
+		return 0, types.ErrInvalidState.Wrapf(
+			"open reward-enabled block count could not be read: %v", err)
+	}
+	return blocks, nil
+}
+
+// SetOpenRewardEnabledBlocks writes the open epoch's reward-enabled block count.
+func (k Keeper) SetOpenRewardEnabledBlocks(ctx context.Context, blocks uint64) error {
+	return k.OpenRewardEnabledBlocks.Set(ctx, blocks)
+}
+
 func (k Keeper) GetCurrentEpochConfig(ctx context.Context) (types.EpochConfigSnapshot, error) {
 	return k.CurrentEpochConfig.Get(ctx)
 }

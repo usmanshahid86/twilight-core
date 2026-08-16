@@ -203,6 +203,9 @@ if [[ "$RESUME" != "on" ]]; then
     jq --arg e "$EPOCH_LENGTH" '
       .app_state.rewards.params.epoch_length_blocks = $e
       | .app_state.rewards.current_epoch_config.epoch_length_blocks = $e
+      # EpochConfigVersion is the sole epoch-geometry authority; the two lines above
+      # are deprecated mirrors that fresh genesis requires to agree with it.
+      | .app_state.rewards.epoch_config_versions[0].epoch_length_blocks = $e
     ' "$genesis" >"$tmp" && mv "$tmp" "$genesis"
     if [[ "$PREMINE" == "off" ]]; then
       jq '.app_state.bank.balances = [] | .app_state.bank.supply = []' "$genesis" >"$tmp" && mv "$tmp" "$genesis"

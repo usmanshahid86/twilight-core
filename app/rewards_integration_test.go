@@ -143,11 +143,11 @@ func TestRewardsShortEpochFinalizeSuspendClaim(t *testing.T) {
 	rParams := rewardstypes.DefaultParams()
 	rParams.EpochLengthBlocks = 2
 	snapshot := rewardstypes.DefaultEpochConfigSnapshot(rParams)
-	require.NoError(t, a.RewardsKeeper.InitGenesis(base, rewardstypes.GenesisState{
+	require.NoError(t, a.RewardsKeeper.InitGenesis(base, *canonicalRewardsTimeline(&rewardstypes.GenesisState{
 		Params:             &rParams,
 		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig: &snapshot,
-	}))
+	}, 1)))
 
 	// === Block 1: credit both active slots; not yet at the epoch boundary. ===
 	ctx1 := base.WithBlockHeight(1)

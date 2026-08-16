@@ -2322,6 +2322,68 @@
         ]
       }
     },
+    "/twilight/rewards/v1/epoch-config-versions": {
+      "get": {
+        "operationId": "Query_EpochConfigVersions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryEpochConfigVersionsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
     "/twilight/rewards/v1/epoch-info": {
       "get": {
         "operationId": "Query_EpochInfo",
@@ -2352,6 +2414,37 @@
             "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/v1QueryEpochRewardResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "epoch_number",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/epochs/{epoch_number}/boundaries": {
+      "get": {
+        "operationId": "Query_EpochBoundaries",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryEpochBoundariesResponse"
             }
           },
           "default": {
@@ -2427,6 +2520,28 @@
             "description": "A successful response.",
             "schema": {
               "$ref": "#/definitions/twilightRewardsV1QueryParamsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/rewards/v1/pause-state": {
+      "get": {
+        "operationId": "Query_RewardsPauseState",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryRewardsPauseStateResponse"
             }
           },
           "default": {
@@ -3006,8 +3121,32 @@
         },
         "config": {
           "$ref": "#/definitions/v1EpochConfigSnapshot"
+        },
+        "reward_enabled_blocks": {
+          "type": "string",
+          "format": "uint64",
+          "description": "reward_enabled_blocks is the count of reward-enabled blocks the epoch\nactually accrued, and is the block-count input the emission recurrence used.\n\nThe open counter is reset when the next epoch opens, so persisting it here\nis what keeps the epoch's accounting observable afterwards. This field is an\nimplementation representation chosen for auditability; the architecture\nrequires the counter to exist and to drive emission, not that the finalized\nrecord carry it."
         }
       }
+    },
+    "rewardsV1RewardsPauseState": {
+      "type": "object",
+      "properties": {
+        "current_paused": {
+          "type": "boolean"
+        },
+        "has_pending": {
+          "type": "boolean"
+        },
+        "pending_value": {
+          "type": "boolean"
+        },
+        "pending_effective_height": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "RewardsPauseState is the single canonical rewards-pause state.\n\nIt replaces the three independent pause booleans on Params. A pause or resume\naccepted in block H schedules its value for H+1: the value is held in\npending_value with pending_effective_height = H+1, and becomes current at the\nbeginning of that block, before any reward sampling. has_pending separates a\nscheduled resume (pending_value = false) from the absence of any schedule,\nwhich a bare bool cannot express."
     },
     "tendermintTypesBlock": {
       "type": "object",
@@ -3295,7 +3434,8 @@
       "type": "object",
       "properties": {
         "emissions_enabled": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Fields 2, 3 and 4 were the three independent pause authorities. They are\nsuperseded by the single canonical RewardsPauseState and carry no authority:\nemission follows reward_enabled_blocks (a paused epoch counts zero and so\nemits zero), epoch finalization is unconditional at the canonical boundary,\nand monetary release is governed by the canonical release state. They remain\non the wire for compatibility and their numbers are never recycled."
         },
         "epoch_settlement_enabled": {
           "type": "boolean"
@@ -3318,7 +3458,8 @@
         },
         "epoch_length_blocks": {
           "type": "string",
-          "format": "uint64"
+          "format": "uint64",
+          "description": "Superseded by EpochConfigVersion, which is the sole epoch-geometry\nauthority. Retained as genesis/compatibility data only: fresh genesis\nrequires it to agree with the version-1 history entry, and the generic\nruntime params-update path cannot change it."
         },
         "halving_mode": {
           "$ref": "#/definitions/v1HalvingMode"
@@ -3791,7 +3932,8 @@
         },
         "epoch_length_blocks": {
           "type": "string",
-          "format": "uint64"
+          "format": "uint64",
+          "description": "Deprecated mirror of the canonical epoch length. EpochConfigVersion is the\nsole epoch-geometry authority; nothing derives a boundary from this value\nafter genesis. It is repopulated from canonical history whenever the\nsnapshot is rebuilt, so the mirror cannot drift from the authority."
         },
         "distribution_method": {
           "$ref": "#/definitions/v1DistributionMethod"
@@ -3832,6 +3974,28 @@
           "format": "uint64"
         }
       }
+    },
+    "v1EpochConfigVersion": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "effective_epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "effective_start_height": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "epoch_length_blocks": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "EpochConfigVersion is one immutable entry in the canonical epoch-configuration\nhistory and is the SOLE authority for epoch geometry.\n\nVersion 1 is created at fresh genesis, anchored to the chain's original\ninitial height, and is never rewritten. Every later version is created when a\nscheduled configuration becomes effective, taking that block's height as its\neffective start height. Boundaries are derived from this history and are never\nstored per epoch."
     },
     "v1FeeDistributionMode": {
       "type": "string",
@@ -4039,6 +4203,49 @@
         }
       }
     },
+    "v1QueryEpochBoundariesResponse": {
+      "type": "object",
+      "properties": {
+        "epoch_number": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "start_height": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "end_height": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "epoch_length_blocks": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "v1QueryEpochConfigVersionsResponse": {
+      "type": "object",
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EpochConfigVersion"
+          }
+        },
+        "scheduled": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ScheduledEpochConfig"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse"
+        }
+      }
+    },
     "v1QueryEpochInfoResponse": {
       "type": "object",
       "properties": {
@@ -4057,6 +4264,20 @@
         },
         "pending_params": {
           "$ref": "#/definitions/twilightRewardsV1Params"
+        },
+        "current_epoch_start_height": {
+          "type": "string",
+          "format": "uint64",
+          "description": "Canonical geometry for the open epoch, derived from EpochConfigVersion\nhistory rather than from the deprecated snapshot mirror."
+        },
+        "current_epoch_length_blocks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "open_reward_enabled_blocks": {
+          "type": "string",
+          "format": "uint64",
+          "description": "Reward-enabled blocks accrued so far in the open epoch."
         }
       }
     },
@@ -4130,6 +4351,18 @@
         }
       }
     },
+    "v1QueryRewardsPauseStateResponse": {
+      "type": "object",
+      "properties": {
+        "pause_state": {
+          "$ref": "#/definitions/rewardsV1RewardsPauseState"
+        },
+        "release_enabled": {
+          "type": "boolean",
+          "description": "Whether settlement/monetary release is permitted for the current block,\ni.e. the already-effective state. A pending H+1 transition is not applied."
+        }
+      }
+    },
     "v1QuerySelectionPolicyResponse": {
       "type": "object",
       "properties": {
@@ -4192,6 +4425,20 @@
           "type": "string"
         }
       }
+    },
+    "v1ScheduledEpochConfig": {
+      "type": "object",
+      "properties": {
+        "effective_epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "epoch_length_blocks": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "ScheduledEpochConfig is one future epoch-length change, keyed by the epoch it\nbecomes effective at.\n\nIt stores the future LENGTH and never a precomputed future start height:\nreplacing an earlier scheduled value would leave any cached later boundary\nstale, so projected boundaries are always derived from immutable history plus\nthe ordered schedule."
     },
     "v1SlotActiveBlocks": {
       "type": "object",

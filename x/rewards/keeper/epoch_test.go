@@ -28,31 +28,61 @@ func TestConfiguredEpochEndHeightUsesCurrentSnapshot(t *testing.T) {
 	require.Equal(t, uint64(119), endHeightAfterParamChange)
 }
 
-func TestShouldFinalizeAtHeightAndSettlementPause(t *testing.T) {
-	state := accountingState(1)
-	state.CurrentEpochStartHeight = 10
-	cfg := types.DefaultEpochConfigSnapshot(types.DefaultParams())
-	cfg.EpochLengthBlocks = 5
+// TestShouldFinalizeAtHeightUsesCanonicalHistory replaces the retired
+// settlement-pause gate.
+//
+// Two properties are asserted together because they are the same decision: the
+// boundary comes from EpochConfigVersion history rather than a passed-in
+// snapshot, and reaching it finalizes regardless of the pause state.
+func TestShouldFinalizeAtHeightUsesCanonicalHistory(t *testing.T) {
+	params := types.DefaultParams()
+	params.EpochLengthBlocks = 5
+	core := &coreSlotKeeperMock{}
+	k, ctx, _ := setupAccountingKeeper(t, core, 1, params)
 
-	shouldFinalize, err := keeper.ShouldFinalizeAtHeight(13, state, cfg, true)
-	require.NoError(t, err)
-	require.False(t, shouldFinalize)
+	// accountingState opens epoch 1 at height 1, so with length 5 the epoch runs
+	// heights 1..5.
+	for _, tc := range []struct {
+		height uint64
+		want   bool
+	}{
+		{height: 4, want: false},
+		{height: 5, want: true},
+		{height: 6, want: true},
+	} {
+		got, err := k.ShouldFinalizeAtHeight(ctx, tc.height)
+		require.NoError(t, err)
+		require.Equalf(t, tc.want, got, "height %d", tc.height)
+	}
 
-	shouldFinalize, err = keeper.ShouldFinalizeAtHeight(14, state, cfg, true)
+	// A pause does not move the boundary. Epoch time continues while paused, and
+	// gating finalization here would strand the epoch permanently once the next
+	// one opens at BeginBlock.
+	require.NoError(t, k.SetPauseState(ctx, types.RewardsPauseState{CurrentPaused: true}))
+	got, err := k.ShouldFinalizeAtHeight(ctx, 5)
 	require.NoError(t, err)
-	require.True(t, shouldFinalize)
+	require.True(t, got, "a paused epoch still reaches its canonical boundary")
+}
 
-	shouldFinalize, err = keeper.ShouldFinalizeAtHeight(20, state, cfg, true)
-	require.NoError(t, err)
-	require.True(t, shouldFinalize)
+// TestEpochGeometryComesFromHistoryNotTheDeprecatedMirror proves the snapshot
+// mirror is inert: corrupting it cannot move a boundary.
+func TestEpochGeometryComesFromHistoryNotTheDeprecatedMirror(t *testing.T) {
+	params := types.DefaultParams()
+	params.EpochLengthBlocks = 5
+	k, ctx, _ := setupAccountingKeeper(t, &coreSlotKeeperMock{}, 1, params)
 
-	shouldFinalize, err = keeper.ShouldFinalizeAtHeight(20, state, cfg, false)
+	end, err := k.EpochEndHeight(ctx, 1)
 	require.NoError(t, err)
-	require.False(t, shouldFinalize)
+	require.Equal(t, uint64(5), end)
 
-	shouldFinalize, err = keeper.ShouldFinalizeAtHeight(20, state, cfg, true)
+	cfg, err := k.GetCurrentEpochConfig(ctx)
 	require.NoError(t, err)
-	require.True(t, shouldFinalize)
+	cfg.EpochLengthBlocks = 999
+	require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
+
+	end, err = k.EpochEndHeight(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), end, "the deprecated mirror must not influence canonical geometry")
 }
 
 func TestConfiguredEpochEndHeightRejectsInvalidInputs(t *testing.T) {

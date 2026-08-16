@@ -39,14 +39,24 @@ enum FeeDistributionMode {
 
 message Params {
   reserved 1;
-  bool emissions_enabled = 2;
-  bool epoch_settlement_enabled = 3;
-  bool claims_enabled = 4;
+  // Fields 2, 3 and 4 were the three independent pause authorities. They are
+  // superseded by the single canonical RewardsPauseState and carry no authority:
+  // emission follows reward_enabled_blocks (a paused epoch counts zero and so
+  // emits zero), epoch finalization is unconditional at the canonical boundary,
+  // and monetary release is governed by the canonical release state. They remain
+  // on the wire for compatibility and their numbers are never recycled.
+  bool emissions_enabled = 2 [deprecated = true];
+  bool epoch_settlement_enabled = 3 [deprecated = true];
+  bool claims_enabled = 4 [deprecated = true];
   string native_denom = 5;
   string max_supply = 6;
   string initial_block_subsidy = 7;
   uint64 target_block_time_seconds = 8;
-  uint64 epoch_length_blocks = 9;
+  // Superseded by EpochConfigVersion, which is the sole epoch-geometry
+  // authority. Retained as genesis/compatibility data only: fresh genesis
+  // requires it to agree with the version-1 history entry, and the generic
+  // runtime params-update path cannot change it.
+  uint64 epoch_length_blocks = 9 [deprecated = true];
   HalvingMode halving_mode = 10;
   DistributionMethod distribution_method = 11;
   RemainderPolicy remainder_policy = 12;
@@ -63,7 +73,11 @@ message Params {
 
 message EpochConfigSnapshot {
   uint64 snapshot_version = 1;
-  uint64 epoch_length_blocks = 2;
+  // Deprecated mirror of the canonical epoch length. EpochConfigVersion is the
+  // sole epoch-geometry authority; nothing derives a boundary from this value
+  // after genesis. It is repopulated from canonical history whenever the
+  // snapshot is rebuilt, so the mirror cannot drift from the authority.
+  uint64 epoch_length_blocks = 2 [deprecated = true];
   DistributionMethod distribution_method = 3;
   RemainderPolicy remainder_policy = 4;
   string initial_block_subsidy = 5;
