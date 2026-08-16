@@ -147,6 +147,30 @@ func TestWireLedgersArePinned(t *testing.T) {
 			9:  "consensus_key_reuse_lockout:TYPE_UINT64",
 			10: "allow_self_registration:TYPE_BOOL",
 			11: "allow_emergency_below_min_active:TYPE_BOOL",
+			12: "selection_policy_update_cooldown_blocks:TYPE_UINT64",
+		}},
+		{"MsgUpdateSelectionPolicy", &types.MsgUpdateSelectionPolicy{}, fieldLedger{
+			1: "operator:TYPE_STRING",
+			2: "slot_id:TYPE_UINT64",
+			3: "selection_rate_bps:TYPE_UINT64",
+			4: "max_selected_participants:TYPE_UINT64",
+		}},
+		{"MsgUpdateSelectionPolicyResponse", &types.MsgUpdateSelectionPolicyResponse{}, fieldLedger{
+			1: "policy_version:TYPE_UINT64",
+		}},
+		{"QuerySelectionPolicyRequest", &types.QuerySelectionPolicyRequest{}, fieldLedger{
+			1: "slot_id:TYPE_UINT64",
+		}},
+		{"QuerySelectionPolicyVersionRequest", &types.QuerySelectionPolicyVersionRequest{}, fieldLedger{
+			1: "slot_id:TYPE_UINT64",
+			2: "policy_version:TYPE_UINT64",
+		}},
+		{"QuerySelectionPolicyAtHeightRequest", &types.QuerySelectionPolicyAtHeightRequest{}, fieldLedger{
+			1: "slot_id:TYPE_UINT64",
+			2: "at_height:TYPE_INT64",
+		}},
+		{"QuerySelectionPolicyResponse", &types.QuerySelectionPolicyResponse{}, fieldLedger{
+			1: "policy:.twilight.coreslot.v1.SelectionPolicyVersion",
 		}},
 		{"SelectionPolicyVersion", &types.SelectionPolicyVersion{}, fieldLedger{
 			1: "slot_id:TYPE_UINT64",

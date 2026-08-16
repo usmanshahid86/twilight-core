@@ -516,6 +516,105 @@ func (m msgServer) UpdateSettlementAddress(ctx context.Context, msg *types.MsgUp
 	return &types.MsgUpdateSettlementAddressResponse{}, nil
 }
 
+func (m msgServer) UpdateSelectionPolicy(ctx context.Context, msg *types.MsgUpdateSelectionPolicy) (*types.MsgUpdateSelectionPolicyResponse, error) {
+	params, err := m.Params.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	slot, err := m.getSlot(ctx, msg.SlotId)
+	if err != nil {
+		return nil, err
+	}
+	if msg.Operator != slot.OperatorAddress {
+		return nil, types.ErrUnauthorized
+	}
+	if err := operatorMutationAllowed(slot); err != nil {
+		return nil, err
+	}
+	// §27 LOCAL validity only. There is no global ceiling on
+	// max_selected_participants, and whether a policy must additionally satisfy a
+	// global operational envelope is unresolved — x/coreslot cannot see those
+	// parameters and must not read x/mining to find them.
+	if err := types.ValidateSelectionPolicyValues(msg.SelectionRateBps, msg.MaxSelectedParticipants); err != nil {
+		return nil, err
+	}
+	current, err := m.currentPolicy(ctx, slot)
+	if err != nil {
+		return nil, err
+	}
+	// §26 rejects an identical replacement. Checked before the cooldown so a no-op
+	// is reported as a no-op rather than as a rate-limit failure.
+	if current.SelectionRateBps == msg.SelectionRateBps && current.MaxSelectedParticipants == msg.MaxSelectedParticipants {
+		return nil, types.ErrNoOpUpdate.Wrapf("slot %d already uses this selection policy", slot.SlotId)
+	}
+
+	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
+	// The cooldown reads the CURRENT STORED configured value, never a compile-time
+	// default, and never derives its input from the policy history: the canonical
+	// source is the stored CoreSlot field. A zero means the slot has had no
+	// post-registration update, which §26 exempts — registration's version 1 does
+	// not consume the cooldown, so exactly one immediate corrective update is
+	// unrestricted.
+	if slot.LastSelectionPolicyUpdateHeight != 0 {
+		cooldown, err := checked.Int64FromUint64(params.SelectionPolicyUpdateCooldownBlocks)
+		if err != nil {
+			return nil, types.ErrInvalidParams.Wrapf("selection policy update cooldown is not representable: %v", err)
+		}
+		earliest, err := checked.AddInt64(slot.LastSelectionPolicyUpdateHeight, cooldown)
+		if err != nil {
+			return nil, types.ErrSelectionPolicyCooldown.Wrapf("slot %d cooldown window overflows: %v", slot.SlotId, err)
+		}
+		if height < earliest {
+			return nil, types.ErrSelectionPolicyCooldown.Wrapf(
+				"slot %d may update at height %d, current height %d", slot.SlotId, earliest, height)
+		}
+	}
+
+	// Both increments are checked and computed BEFORE any write, so an exhausted
+	// height or version space leaves the whole transition unperformed rather than
+	// half-applied.
+	effective, err := checked.AddInt64(height, 1)
+	if err != nil {
+		return nil, types.ErrInvalidSelectionPolicy.Wrapf("slot %d policy effective height overflows: %v", slot.SlotId, err)
+	}
+	nextVersion, err := checked.AddUint64(current.PolicyVersion, 1)
+	if err != nil {
+		return nil, types.ErrInvalidSelectionPolicy.Wrapf("slot %d policy version space exhausted: %v", slot.SlotId, err)
+	}
+
+	// Everything that can fail has now failed. From here the six writes of the
+	// transition are performed together.
+	//
+	// Closing the outgoing version is the ONE permitted write to an existing
+	// history row: its exclusive end moves 0 -> H+1 and nothing else about it
+	// changes. Once closed it is immutable forever.
+	closed := current
+	closed.ValidUntilHeightExclusive = effective
+	if err := m.SelectionPolicies.Set(ctx, policyKey(closed.SlotId, closed.PolicyVersion), closed); err != nil {
+		return nil, err
+	}
+	if err := m.writePolicyVersion(ctx, types.SelectionPolicyVersion{
+		SlotId:                    slot.SlotId,
+		PolicyVersion:             nextVersion,
+		SelectionRateBps:          msg.SelectionRateBps,
+		MaxSelectedParticipants:   msg.MaxSelectedParticipants,
+		ValidFromHeight:           effective,
+		ValidUntilHeightExclusive: 0,
+	}); err != nil {
+		return nil, err
+	}
+	slot.CurrentSelectionPolicyVersion = nextVersion
+	// The transaction height H, not the version's effective height H+1. §26's
+	// cooldown is measured from when the update was accepted.
+	slot.LastSelectionPolicyUpdateHeight = height
+	slot.UpdatedHeight = height
+	if err := m.Slots.Set(ctx, slot.SlotId, slot); err != nil {
+		return nil, err
+	}
+	emitSelectionPolicyUpdated(ctx, slot.SlotId, slot.OperatorAddress, nextVersion, effective)
+	return &types.MsgUpdateSelectionPolicyResponse{PolicyVersion: nextVersion}, nil
+}
+
 func (m msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {
 	if msg.Params == nil {
 		return nil, types.ErrInvalidParams.Wrap("params are required")

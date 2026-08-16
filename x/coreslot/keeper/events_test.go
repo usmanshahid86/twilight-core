@@ -309,6 +309,13 @@ func TestEventAttributesComplete(t *testing.T) {
 	// rejected as a no-op and would emit nothing.
 	_, err = msgs.UpdateSettlementAddress(ctx, &types.MsgUpdateSettlementAddress{Operator: op3, SlotId: res3.SlotId, SettlementAddress: testAccount(45)})
 	require.NoError(t, err)
+	// Also through the real message path. Slot 3 was registered in this block, so
+	// its last-update height is still zero and the one free post-registration
+	// update applies — no cooldown wait is needed to observe the event.
+	_, err = msgs.UpdateSelectionPolicy(ctx, &types.MsgUpdateSelectionPolicy{
+		Operator: op3, SlotId: res3.SlotId, SelectionRateBps: 1_500, MaxSelectedParticipants: 15,
+	})
+	require.NoError(t, err)
 	updated := types.DefaultParams(authority, emergency)
 	_, err = msgs.UpdateParams(ctx, &types.MsgUpdateParams{Authority: authority, Params: &updated})
 	require.NoError(t, err)
@@ -349,7 +356,13 @@ func TestEventAttributesComplete(t *testing.T) {
 		// records that the authorizing credential changed, and the current value is
 		// read from the slot record. Pinning only what production emits keeps this
 		// a test of the contract rather than a wish for a different one.
-		types.EventTypeSettlementUpdated:      {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress},
+		types.EventTypeSettlementUpdated: {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress},
+		// Compact by design: the resulting version and its effective height locate
+		// the change; the policy payload is read from the version the event names.
+		types.EventTypeSelectionPolicyUpdated: {
+			types.AttributeKeySlotID, types.AttributeKeyOperatorAddress,
+			types.AttributeKeyPolicyVersion, types.AttributeKeyEffectiveHeight,
+		},
 		types.EventTypeParamsUpdated:          {types.AttributeKeyAuthority},
 		types.EventTypeValidatorUpdateEmitted: {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyConsensusAddress, types.AttributeKeyPower, types.AttributeKeyHeight},
 		types.EventTypeRotationCancelled:      {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldConsensusAddress, types.AttributeKeyNewConsensusAddress, types.AttributeKeyReason, types.AttributeKeyHeight},

@@ -50,6 +50,16 @@ type Keeper struct {
 	//
 	// collections.Uint64Key is big-endian, so iteration is ascending slot ID.
 	ActiveSlots collections.KeySet[uint64]
+
+	// PolicyStarts is the Selection-policy seek index: (slot_id,
+	// valid_from_height) -> policy_version. It is derived, rebuildable state over
+	// SelectionPolicies, written wherever a version is created, and read only to
+	// resolve the version applicable at a height.
+	//
+	// Both key components use order-preserving encodings, so a reverse iteration
+	// bounded above by (slot_id, H) lands on the greatest valid_from_height <= H
+	// for that slot and cannot cross into another slot's range.
+	PolicyStarts collections.Map[collections.Pair[uint64, int64], uint64]
 }
 
 // NewKeeper builds the CoreSlot keeper. economicAddresses is required: an
@@ -73,6 +83,8 @@ func NewKeeper(cdc codec.Codec, storeService storetypes.KVStoreService, economic
 		SelectionPolicies: collections.NewMap(sb, collections.NewPrefix(types.SelectionPoliciesPrefix), "selection_policies",
 			collections.PairKeyCodec(collections.Uint64Key, collections.Uint64Key), codec.CollValue[types.SelectionPolicyVersion](cdc)),
 		ActiveSlots: collections.NewKeySet(sb, collections.NewPrefix(types.ActiveSlotsPrefix), "active_slots", collections.Uint64Key),
+		PolicyStarts: collections.NewMap(sb, collections.NewPrefix(types.PolicyStartsPrefix), "policy_starts",
+			collections.PairKeyCodec(collections.Uint64Key, collections.Int64Key), collections.Uint64Value),
 	}
 	schema, err := sb.Build()
 	if err != nil {

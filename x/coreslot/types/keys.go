@@ -25,4 +25,12 @@ var (
 	// ActiveSlotsPrefix holds the membership-only ACTIVE slot index, keyed by
 	// slot_id with no value payload. CoreSlot remains the authority for slot data.
 	ActiveSlotsPrefix = []byte{0x0B}
+	// PolicyStartsPrefix holds the Selection-policy seek index, keyed by
+	// (slot_id, valid_from_height) with the policy version as its value.
+	//
+	// This is DERIVED, rebuildable indexing state over the canonical policy
+	// history at SelectionPoliciesPrefix — it is not canonical state and is not a
+	// genesis collection. It exists so resolving "the version applicable at height
+	// H" is one predecessor seek rather than a walk over a slot's whole history.
+	PolicyStartsPrefix = []byte{0x0C}
 )

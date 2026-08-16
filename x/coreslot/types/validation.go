@@ -14,6 +14,14 @@ import (
 const (
 	DefaultSlotVotingPower = int64(1)
 	DefaultRewardWeight    = "1.000000000000000000"
+
+	// DefaultSelectionPolicyUpdateCooldownBlocks is the shipped configured
+	// cooldown. It is a DEFAULT, not a maximum: governance may configure any value
+	// at or above the immutable floor, including well above this one.
+	//
+	// Like the floor, this is current pre-mainnet calibration and is subject to
+	// the calibration review that must complete before production-genesis freeze.
+	DefaultSelectionPolicyUpdateCooldownBlocks = uint64(720)
 )
 
 func DefaultParams(authority, emergencyAuthority string) Params {
@@ -29,6 +37,8 @@ func DefaultParams(authority, emergencyAuthority string) Params {
 		ConsensusKeyReuseLockout:     100_000,
 		AllowSelfRegistration:        false,
 		AllowEmergencyBelowMinActive: false,
+
+		SelectionPolicyUpdateCooldownBlocks: DefaultSelectionPolicyUpdateCooldownBlocks,
 	}
 }
 
@@ -67,6 +77,14 @@ func (p Params) Validate() error {
 	}
 	if p.AllowSelfRegistration {
 		return ErrInvalidParams.Wrap("allow_self_registration is deprecated and must be false")
+	}
+	// The configured Selection-policy update cooldown must sit at or above the
+	// immutable floor. This is the single validation path: defaults, genesis
+	// admission and MsgUpdateParams all reach it through Params.Validate, so there
+	// is no second place a configured value could enter unchecked.
+	if err := appparams.ValidateSelectionPolicyUpdateCooldownBlocks(
+		p.SelectionPolicyUpdateCooldownBlocks, appparams.HardMinSelectionPolicyUpdateCooldownBlocks); err != nil {
+		return ErrInvalidParams.Wrapf("%v", err)
 	}
 	return nil
 }

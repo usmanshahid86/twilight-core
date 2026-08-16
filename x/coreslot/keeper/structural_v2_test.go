@@ -878,6 +878,36 @@ func TestFreshGenesisRejectsPendingKeyRotations(t *testing.T) {
 	}
 }
 
+// TestRegistrationIndexesVersionOnePolicy proves the seek index is complete from
+// a slot's first version. Runtime registration and fresh genesis both create
+// version 1, and an index that covered only later versions would leave the
+// original silently unresolvable by height while still being current.
+func TestRegistrationIndexesVersionOnePolicy(t *testing.T) {
+	k, ctx, authority, emergency := setup(t)
+	oneSlotGenesis(t, k, ctx, authority, emergency)
+
+	// Fresh genesis: version 1 indexed from the admitted row.
+	genesisPolicy, err := k.SelectionPolicyAtHeight(ctx, 1, testInitialHeight)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), genesisPolicy.PolicyVersion)
+
+	// Runtime registration: version 1 indexed at the registration height.
+	msgs := keeper.NewMsgServer(k)
+	op2 := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
+	registerCtx := ctx.WithBlockHeight(25)
+	res, err := msgs.RegisterCoreSlot(registerCtx, registerMsg(t, authority, op2, op2, 2))
+	require.NoError(t, err)
+
+	registered, err := k.SelectionPolicyAtHeight(registerCtx, res.SlotId, 25)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), registered.PolicyVersion)
+	require.Equal(t, int64(25), registered.ValidFromHeight)
+
+	// Before its registration height the slot has no policy.
+	_, err = k.SelectionPolicyAtHeight(registerCtx, res.SlotId, 24)
+	require.ErrorIs(t, err, types.ErrSelectionPolicyNotFound)
+}
+
 // TestGenesisValidatorSetsAgreeInBothDirections covers the CoreSlot-expressible
 // half of the §80 validator-set contract.
 func TestGenesisValidatorSetsAgreeInBothDirections(t *testing.T) {
@@ -962,6 +992,7 @@ func TestStorePrefixLedgerHasNoCollisions(t *testing.T) {
 		"next_slot_id":       types.NextSlotIDKey,
 		"selection_policies": types.SelectionPoliciesPrefix,
 		"active_slots":       types.ActiveSlotsPrefix,
+		"policy_starts":      types.PolicyStartsPrefix,
 	}
 	seen := map[byte]string{}
 	for name, prefix := range ledger {
@@ -974,4 +1005,5 @@ func TestStorePrefixLedgerHasNoCollisions(t *testing.T) {
 	// The two this change introduces, pinned by value.
 	require.Equal(t, []byte{0x0A}, types.SelectionPoliciesPrefix)
 	require.Equal(t, []byte{0x0B}, types.ActiveSlotsPrefix)
+	require.Equal(t, []byte{0x0C}, types.PolicyStartsPrefix)
 }

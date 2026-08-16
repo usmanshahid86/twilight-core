@@ -47,6 +47,12 @@ func GetQueryCmd() *cobra.Command {
 				response, err = query.ReservedConsensusAddress(cmd.Context(), v)
 			case *types.QueryRewardWeightRequest:
 				response, err = query.RewardWeight(cmd.Context(), v)
+			case *types.QuerySelectionPolicyRequest:
+				response, err = query.SelectionPolicy(cmd.Context(), v)
+			case *types.QuerySelectionPolicyVersionRequest:
+				response, err = query.SelectionPolicyVersion(cmd.Context(), v)
+			case *types.QuerySelectionPolicyAtHeightRequest:
+				response, err = query.SelectionPolicyAtHeight(cmd.Context(), v)
 			}
 			if err != nil {
 				return err
@@ -79,6 +85,26 @@ func GetQueryCmd() *cobra.Command {
 		add("reward-weight [slot-id]", cobra.ExactArgs(1), func(a []string) (interface{}, error) {
 			id, e := parseID(a)
 			return &types.QueryRewardWeightRequest{SlotId: id}, e
+		}),
+		add("selection-policy [slot-id]", cobra.ExactArgs(1), func(a []string) (interface{}, error) {
+			id, e := parseID(a)
+			return &types.QuerySelectionPolicyRequest{SlotId: id}, e
+		}),
+		add("selection-policy-version [slot-id] [policy-version]", cobra.ExactArgs(2), func(a []string) (interface{}, error) {
+			id, e := parseID(a)
+			if e != nil {
+				return nil, e
+			}
+			version, e := strconv.ParseUint(a[1], 10, 64)
+			return &types.QuerySelectionPolicyVersionRequest{SlotId: id, PolicyVersion: version}, e
+		}),
+		add("selection-policy-at-height [slot-id] [height]", cobra.ExactArgs(2), func(a []string) (interface{}, error) {
+			id, e := parseID(a)
+			if e != nil {
+				return nil, e
+			}
+			height, e := strconv.ParseInt(a[1], 10, 64)
+			return &types.QuerySelectionPolicyAtHeightRequest{SlotId: id, AtHeight: height}, e
 		}),
 	)
 	return cmd

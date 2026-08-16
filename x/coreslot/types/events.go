@@ -14,6 +14,7 @@ const (
 	EventTypePayoutUpdated          = "coreslot_payout_updated"
 	EventTypeMetadataUpdated        = "coreslot_metadata_updated"
 	EventTypeSettlementUpdated      = "coreslot_settlement_updated"
+	EventTypeSelectionPolicyUpdated = "coreslot_selection_policy_updated"
 	EventTypeParamsUpdated          = "coreslot_params_updated"
 	EventTypeValidatorUpdateEmitted = "coreslot_validator_update_emitted"
 	EventTypeRotationCancelled      = "coreslot_rotation_cancelled"
@@ -31,6 +32,7 @@ const (
 	AttributeKeyPower               = "power"
 	AttributeKeyHeight              = "height"
 	AttributeKeyEffectiveHeight     = "effective_height"
+	AttributeKeyPolicyVersion       = "policy_version"
 	AttributeKeyReason              = "reason"
 	AttributeKeyAuthority           = "authority"
 )

@@ -119,6 +119,42 @@ func (q queryServer) ReservedConsensusAddress(ctx context.Context, req *types.Qu
 	return &types.QueryReservedConsensusAddressResponse{Reservation: &reservation}, err
 }
 
+// SelectionPolicy returns the version a slot currently points at. It resolves
+// through the stored pointer rather than by scanning history, so it answers the
+// same question the ACTIVE-slot invariant asks.
+func (q queryServer) SelectionPolicy(ctx context.Context, req *types.QuerySelectionPolicyRequest) (*types.QuerySelectionPolicyResponse, error) {
+	slot, err := q.getSlot(ctx, req.SlotId)
+	if err != nil {
+		return nil, err
+	}
+	policy, err := q.currentPolicy(ctx, slot)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QuerySelectionPolicyResponse{Policy: &policy}, nil
+}
+
+// SelectionPolicyVersion returns one exact historical version. Absence is
+// reported as not-found rather than as an empty response, so a caller cannot
+// mistake "no such version" for "a version with zero values".
+func (q queryServer) SelectionPolicyVersion(ctx context.Context, req *types.QuerySelectionPolicyVersionRequest) (*types.QuerySelectionPolicyResponse, error) {
+	policy, err := q.SelectionPolicies.Get(ctx, policyKey(req.SlotId, req.PolicyVersion))
+	if err != nil {
+		return nil, types.ErrSelectionPolicyNotFound.Wrapf("slot %d version %d", req.SlotId, req.PolicyVersion)
+	}
+	return &types.QuerySelectionPolicyResponse{Policy: &policy}, nil
+}
+
+// SelectionPolicyAtHeight returns the version whose half-open interval contains
+// the requested height, resolved through the seek index.
+func (q queryServer) SelectionPolicyAtHeight(ctx context.Context, req *types.QuerySelectionPolicyAtHeightRequest) (*types.QuerySelectionPolicyResponse, error) {
+	policy, err := q.Keeper.SelectionPolicyAtHeight(ctx, req.SlotId, req.AtHeight)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QuerySelectionPolicyResponse{Policy: &policy}, nil
+}
+
 func (q queryServer) RewardWeight(ctx context.Context, req *types.QueryRewardWeightRequest) (*types.QueryRewardWeightResponse, error) {
 	weight, err := q.RewardWeights.Get(ctx, req.SlotId)
 	return &types.QueryRewardWeightResponse{RewardWeight: &weight}, err

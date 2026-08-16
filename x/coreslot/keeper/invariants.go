@@ -34,7 +34,7 @@ func (k Keeper) writeInitialPolicy(ctx context.Context, slotID uint64, validFrom
 	if err := types.ValidateSelectionPolicyValues(input.SelectionRateBps, input.MaxSelectedParticipants); err != nil {
 		return err
 	}
-	return k.SelectionPolicies.Set(ctx, policyKey(slotID, initialPolicyVersion), types.SelectionPolicyVersion{
+	return k.writePolicyVersion(ctx, types.SelectionPolicyVersion{
 		SlotId:                    slotID,
 		PolicyVersion:             initialPolicyVersion,
 		SelectionRateBps:          input.SelectionRateBps,
@@ -42,6 +42,87 @@ func (k Keeper) writeInitialPolicy(ctx context.Context, slotID uint64, validFrom
 		ValidFromHeight:           validFrom,
 		ValidUntilHeightExclusive: 0,
 	})
+}
+
+// policyStartKey is the canonical (slot_id, valid_from_height) seek-index key.
+func policyStartKey(slotID uint64, validFrom int64) collections.Pair[uint64, int64] {
+	return collections.Join(slotID, validFrom)
+}
+
+// writePolicyVersion stores a policy version and its seek-index entry together.
+//
+// Every path that creates a version goes through here — runtime registration,
+// fresh genesis and policy updates — so the index cannot be complete for some
+// creation paths and missing for others. A version written without its index
+// entry would be invisible to height resolution while still being current, which
+// is precisely the divergence the resolver refuses to paper over.
+func (k Keeper) writePolicyVersion(ctx context.Context, policy types.SelectionPolicyVersion) error {
+	if err := k.SelectionPolicies.Set(ctx, policyKey(policy.SlotId, policy.PolicyVersion), policy); err != nil {
+		return err
+	}
+	return k.PolicyStarts.Set(ctx, policyStartKey(policy.SlotId, policy.ValidFromHeight), policy.PolicyVersion)
+}
+
+// SelectionPolicyAtHeight resolves the policy version whose half-open validity
+// interval contains height, using the seek index rather than a history scan.
+//
+// The index gives the greatest valid_from_height <= height for the slot; the
+// canonical row it names is then loaded and checked to actually contain the
+// height. Both steps are required: the index answers "which version started most
+// recently", and only the row itself can say whether that version was still
+// current at the requested height.
+//
+// Absence of a predecessor is an ordinary not-found — a height before the slot's
+// first version simply has no policy. Any DISAGREEMENT between index and history
+// is different in kind and fails closed: the index is derived state, so a
+// mismatch means the two have diverged, and silently repairing it or falling back
+// to a full history walk would hide that while defeating the bound the index
+// exists to provide.
+func (k Keeper) SelectionPolicyAtHeight(ctx context.Context, slotID uint64, height int64) (types.SelectionPolicyVersion, error) {
+	// Prefixed by slot, so the range can never cross into another slot's keys, and
+	// bounded above by the requested height so the first descending entry is the
+	// greatest valid_from_height <= height.
+	rng := collections.NewPrefixedPairRange[uint64, int64](slotID).
+		EndInclusive(height).
+		Descending()
+
+	iter, err := k.PolicyStarts.Iterate(ctx, rng)
+	if err != nil {
+		return types.SelectionPolicyVersion{}, err
+	}
+	defer iter.Close()
+
+	if !iter.Valid() {
+		return types.SelectionPolicyVersion{}, types.ErrSelectionPolicyNotFound.Wrapf(
+			"slot %d has no selection policy at height %d", slotID, height)
+	}
+	key, err := iter.Key()
+	if err != nil {
+		return types.SelectionPolicyVersion{}, err
+	}
+	version, err := iter.Value()
+	if err != nil {
+		return types.SelectionPolicyVersion{}, err
+	}
+
+	policy, err := k.SelectionPolicies.Get(ctx, policyKey(slotID, version))
+	if err != nil {
+		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d policy index names missing version %d", slotID, version)
+	}
+	if policy.SlotId != slotID || policy.PolicyVersion != version || policy.ValidFromHeight != key.K2() {
+		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d policy index entry disagrees with version %d", slotID, version)
+	}
+	if policy.ValidFromHeight > height {
+		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d policy version %d starts after height %d", slotID, version, height)
+	}
+	if policy.ValidUntilHeightExclusive != 0 && height >= policy.ValidUntilHeightExclusive {
+		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d policy version %d does not contain height %d", slotID, version, height)
+	}
+	return policy, nil
 }
 
 // currentPolicy returns the policy version a slot currently points at, failing

@@ -103,6 +103,14 @@ message Params {
   // field number is retained.
   bool allow_self_registration = 10 [deprecated = true];
   bool allow_emergency_below_min_active = 11;
+  // selection_policy_update_cooldown_blocks is the minimum number of blocks
+  // between two accepted Selection policy updates for the same slot. It bounds
+  // permanent, non-prunable policy history growth (section 26) and is denominated
+  // in block height so admission never reads epoch state.
+  //
+  // It is bounded below by an immutable implementation floor; governance may
+  // configure any value at or above that floor.
+  uint64 selection_policy_update_cooldown_blocks = 12;
 }
 
 message PendingKeyRotation {

@@ -20,6 +20,7 @@ service Msg {
   rpc UpdatePayoutAddress(MsgUpdatePayoutAddress) returns (MsgUpdatePayoutAddressResponse);
   rpc UpdateOperatorMetadata(MsgUpdateOperatorMetadata) returns (MsgUpdateOperatorMetadataResponse);
   rpc UpdateSettlementAddress(MsgUpdateSettlementAddress) returns (MsgUpdateSettlementAddressResponse);
+  rpc UpdateSelectionPolicy(MsgUpdateSelectionPolicy) returns (MsgUpdateSelectionPolicyResponse);
   rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
 }
 
@@ -111,6 +112,23 @@ message MsgUpdateSettlementAddress {
   string settlement_address = 3;
 }
 message MsgUpdateSettlementAddressResponse {}
+
+// MsgUpdateSelectionPolicy replaces a slot's Selection policy with a new
+// immutable version (section 26). Permitted in PENDING/ACTIVE/INACTIVE, rejected
+// while SUSPENDED and after REMOVED; an identical no-op replacement is rejected.
+//
+// The two payload values are the only Slot-selectable policy fields (r6 section
+// 13). Version numbering and the validity window are assigned by consensus.
+message MsgUpdateSelectionPolicy {
+  option (cosmos.msg.v1.signer) = "operator";
+  string operator = 1;
+  uint64 slot_id = 2;
+  uint64 selection_rate_bps = 3;
+  uint64 max_selected_participants = 4;
+}
+message MsgUpdateSelectionPolicyResponse {
+  uint64 policy_version = 1;
+}
 
 message MsgUpdateParams {
   option (cosmos.msg.v1.signer) = "authority";
