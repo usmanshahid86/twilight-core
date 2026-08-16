@@ -21,6 +21,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgUpdatePayoutAddress{},
 		&MsgUpdateOperatorMetadata{},
 		&MsgUpdateSettlementAddress{},
+		&MsgUpdateSelectionPolicy{},
 		&MsgUpdateParams{},
 	)
 	cryptocodec.RegisterInterfaces(registry)

@@ -36,4 +36,12 @@ var (
 	// one already stored. §24 requires an identical settlement-address
 	// replacement to be rejected rather than silently accepted.
 	ErrNoOpUpdate = errorsmod.Register(ModuleName, 16, "update would not change stored state")
+	// ErrSelectionPolicyNotFound is returned when no policy version exists for a
+	// requested slot, version or height. It is distinct from
+	// ErrInvalidSelectionPolicy: absence is an ordinary answer, whereas an invalid
+	// policy means stored state disagrees with itself.
+	ErrSelectionPolicyNotFound = errorsmod.Register(ModuleName, 17, "selection policy not found")
+	// ErrSelectionPolicyCooldown is returned when a policy update arrives before
+	// the configured cooldown has elapsed since the slot's last update.
+	ErrSelectionPolicyCooldown = errorsmod.Register(ModuleName, 18, "selection policy update cooldown has not elapsed")
 )

@@ -40,6 +40,15 @@ service Query {
   rpc RewardWeight(QueryRewardWeightRequest) returns (QueryRewardWeightResponse) {
     option (google.api.http).get = "/twilight/coreslot/v1/slots/{slot_id}/reward-weight";
   }
+  rpc SelectionPolicy(QuerySelectionPolicyRequest) returns (QuerySelectionPolicyResponse) {
+    option (google.api.http).get = "/twilight/coreslot/v1/slots/{slot_id}/selection-policy";
+  }
+  rpc SelectionPolicyVersion(QuerySelectionPolicyVersionRequest) returns (QuerySelectionPolicyResponse) {
+    option (google.api.http).get = "/twilight/coreslot/v1/slots/{slot_id}/selection-policy/version/{policy_version}";
+  }
+  rpc SelectionPolicyAtHeight(QuerySelectionPolicyAtHeightRequest) returns (QuerySelectionPolicyResponse) {
+    option (google.api.http).get = "/twilight/coreslot/v1/slots/{slot_id}/selection-policy/height/{at_height}";
+  }
 }
 
 message QueryParamsRequest {}
@@ -65,3 +74,20 @@ message QueryReservedConsensusAddressRequest { string consensus_address = 1; }
 message QueryReservedConsensusAddressResponse { ReservedConsensusAddress reservation = 1; }
 message QueryRewardWeightRequest { uint64 slot_id = 1; }
 message QueryRewardWeightResponse { OperatorRewardWeight reward_weight = 1; }
+
+// Selection policy is queryable by version and by height (section 26). The three
+// requests share one response so a caller handles a single shape whichever way it
+// located the version.
+message QuerySelectionPolicyRequest { uint64 slot_id = 1; }
+message QuerySelectionPolicyVersionRequest {
+  uint64 slot_id = 1;
+  uint64 policy_version = 2;
+}
+message QuerySelectionPolicyAtHeightRequest {
+  uint64 slot_id = 1;
+  // Named at_height rather than height: the SDK reserves a universal --height
+  // query flag, and a request field of that name collides with it in the
+  // generated CLI.
+  int64 at_height = 2;
+}
+message QuerySelectionPolicyResponse { SelectionPolicyVersion policy = 1; }

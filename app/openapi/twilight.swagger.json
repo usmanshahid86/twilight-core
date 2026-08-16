@@ -2130,6 +2130,114 @@
         ]
       }
     },
+    "/twilight/coreslot/v1/slots/{slot_id}/selection-policy": {
+      "get": {
+        "operationId": "Query_SelectionPolicy",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySelectionPolicyResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/slots/{slot_id}/selection-policy/height/{at_height}": {
+      "get": {
+        "operationId": "Query_SelectionPolicyAtHeight",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySelectionPolicyResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "at_height",
+            "description": "Named at_height rather than height: the SDK reserves a universal --height\nquery flag, and a request field of that name collides with it in the\ngenerated CLI.",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/coreslot/v1/slots/{slot_id}/selection-policy/version/{policy_version}": {
+      "get": {
+        "operationId": "Query_SelectionPolicyVersion",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySelectionPolicyResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "policy_version",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
     "/twilight/rewards/v1/cumulative-emitted": {
       "get": {
         "operationId": "Query_CumulativeEmitted",
@@ -2638,6 +2746,37 @@
         }
       }
     },
+    "coreslotV1SelectionPolicyVersion": {
+      "type": "object",
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "policy_version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "selection_rate_bps": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "max_selected_participants": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "valid_from_height": {
+          "type": "string",
+          "format": "int64"
+        },
+        "valid_until_height_exclusive": {
+          "type": "string",
+          "format": "int64",
+          "description": "valid_until_height_exclusive is 0 for the current version."
+        }
+      },
+      "description": "SelectionPolicyVersion is one entry in a slot's immutable Selection policy\nhistory (section 26), keyed by (slot_id, policy_version). A superseded row is\nnever rewritten."
+    },
     "cosmosAuthV1beta1Params": {
       "type": "object",
       "properties": {
@@ -3136,6 +3275,11 @@
         },
         "allow_emergency_below_min_active": {
           "type": "boolean"
+        },
+        "selection_policy_update_cooldown_blocks": {
+          "type": "string",
+          "format": "uint64",
+          "description": "selection_policy_update_cooldown_blocks is the minimum number of blocks\nbetween two accepted Selection policy updates for the same slot. It bounds\npermanent, non-prunable policy history growth (section 26) and is denominated\nin block height so admission never reads epoch state.\n\nIt is bounded below by an immutable implementation floor; governance may\nconfigure any value at or above that floor."
         }
       }
     },
@@ -3983,6 +4127,14 @@
       "properties": {
         "reward_weight": {
           "$ref": "#/definitions/v1OperatorRewardWeight"
+        }
+      }
+    },
+    "v1QuerySelectionPolicyResponse": {
+      "type": "object",
+      "properties": {
+        "policy": {
+          "$ref": "#/definitions/coreslotV1SelectionPolicyVersion"
         }
       }
     },

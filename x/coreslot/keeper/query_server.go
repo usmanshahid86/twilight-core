@@ -3,11 +3,67 @@ package keeper
 import (
 	"context"
 	"encoding/hex"
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+
+	"cosmossdk.io/collections"
 
 	"github.com/cosmos/cosmos-sdk/types/query"
 
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
+
+// grpcStatusError attaches a gRPC status code to a module error without
+// discarding the error itself.
+//
+// Returning a bare status would throw away the very thing being reported: the
+// module distinguishes ordinary absence from state corruption, and an in-process
+// caller comparing with errors.Is is entitled to see which one it got. Wrapping
+// keeps that chain intact while status.FromError — used by the gRPC server and by
+// the REST gateway to pick an HTTP code — finds the code through GRPCStatus.
+type grpcStatusError struct {
+	code codes.Code
+	err  error
+}
+
+func (e grpcStatusError) Error() string { return e.err.Error() }
+
+func (e grpcStatusError) Unwrap() error { return e.err }
+
+func (e grpcStatusError) GRPCStatus() *grpcstatus.Status {
+	return grpcstatus.New(e.code, e.err.Error())
+}
+
+// policyQueryError maps a keeper-level Selection-policy error onto the public
+// query contract.
+//
+// A slot or version that does not exist is an ordinary answer and must reach a
+// caller as NotFound — a REST 404 rather than a server error. State that exists
+// and cannot be trusted is categorically different: a history/index
+// contradiction, or a stored value that will not decode, stays a fail-closed
+// internal fault and must never be flattened into "not found", which would tell
+// a client the data was never written when the database holding it is broken.
+//
+// Unreadable stored state is classified where it is READ, not here, for two
+// reasons. The read site knows which collection failed and can say so, and
+// deciding it here would mean a blanket default that swallowed errors already
+// carrying a meaningful transport code — a canceled or timed-out query would be
+// reported as chain corruption. So anything still unclassified by the time it
+// reaches this mapper is passed through with whatever code it already has.
+func policyQueryError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, types.ErrSlotNotFound), errors.Is(err, types.ErrSelectionPolicyNotFound):
+		return grpcStatusError{code: codes.NotFound, err: err}
+	case errors.Is(err, types.ErrInvalidSelectionPolicy):
+		return grpcStatusError{code: codes.Internal, err: err}
+	default:
+		return err
+	}
+}
 
 type queryServer struct{ Keeper }
 
@@ -117,6 +173,66 @@ func (q queryServer) LastAppliedValidators(ctx context.Context, _ *types.QueryLa
 func (q queryServer) ReservedConsensusAddress(ctx context.Context, req *types.QueryReservedConsensusAddressRequest) (*types.QueryReservedConsensusAddressResponse, error) {
 	reservation, err := q.Reserved.Get(ctx, req.ConsensusAddress)
 	return &types.QueryReservedConsensusAddressResponse{Reservation: &reservation}, err
+}
+
+// SelectionPolicy returns the version a slot currently points at. It resolves
+// through the stored pointer rather than by scanning history, so it answers the
+// same question the ACTIVE-slot invariant asks.
+func (q queryServer) SelectionPolicy(ctx context.Context, req *types.QuerySelectionPolicyRequest) (*types.QuerySelectionPolicyResponse, error) {
+	slot, err := q.getSlot(ctx, req.SlotId)
+	if err != nil && !errors.Is(err, types.ErrSlotNotFound) {
+		// The record is present but unreadable. getSlot deliberately propagates
+		// that rather than calling it absence, and the classification belongs
+		// here: to this query it is a failure to resolve a policy, not an answer
+		// about whether the slot exists. Message handlers keep the raw error.
+		return nil, policyQueryError(types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d record could not be read: %v", req.SlotId, err))
+	}
+	if err != nil {
+		return nil, policyQueryError(err)
+	}
+	policy, err := q.currentPolicy(ctx, slot)
+	if err != nil {
+		return nil, policyQueryError(err)
+	}
+	return &types.QuerySelectionPolicyResponse{Policy: &policy}, nil
+}
+
+// SelectionPolicyVersion returns one exact historical version. Absence is
+// reported as not-found rather than as an empty response, so a caller cannot
+// mistake "no such version" for "a version with zero values".
+func (q queryServer) SelectionPolicyVersion(ctx context.Context, req *types.QuerySelectionPolicyVersionRequest) (*types.QuerySelectionPolicyResponse, error) {
+	policy, err := q.SelectionPolicies.Get(ctx, policyKey(req.SlotId, req.PolicyVersion))
+	if err != nil {
+		// Only an absent key is "no such version". A present key whose bytes will
+		// not decode is a storage failure, and reporting it as absence would tell
+		// a client the version was never written when in fact it cannot be read.
+		if errors.Is(err, collections.ErrNotFound) {
+			return nil, policyQueryError(types.ErrSelectionPolicyNotFound.Wrapf("slot %d version %d", req.SlotId, req.PolicyVersion))
+		}
+		return nil, policyQueryError(types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d version %d could not be read: %v", req.SlotId, req.PolicyVersion, err))
+	}
+	// The row was addressed by (slot, version), so its stored identity has to
+	// agree with the key it was found under. A row that disagrees is corruption
+	// rather than an answer: returning it would hand the caller some other slot's
+	// or version's policy under the identity it asked about, and reporting it as
+	// not-found would hide a contradiction behind an ordinary absence.
+	if policy.SlotId != req.SlotId || policy.PolicyVersion != req.PolicyVersion {
+		return nil, policyQueryError(types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d version %d row identity does not match its key", req.SlotId, req.PolicyVersion))
+	}
+	return &types.QuerySelectionPolicyResponse{Policy: &policy}, nil
+}
+
+// SelectionPolicyAtHeight returns the version whose half-open interval contains
+// the requested height, resolved through the seek index.
+func (q queryServer) SelectionPolicyAtHeight(ctx context.Context, req *types.QuerySelectionPolicyAtHeightRequest) (*types.QuerySelectionPolicyResponse, error) {
+	policy, err := q.Keeper.SelectionPolicyAtHeight(ctx, req.SlotId, req.AtHeight)
+	if err != nil {
+		return nil, policyQueryError(err)
+	}
+	return &types.QuerySelectionPolicyResponse{Policy: &policy}, nil
 }
 
 func (q queryServer) RewardWeight(ctx context.Context, req *types.QueryRewardWeightRequest) (*types.QueryRewardWeightResponse, error) {

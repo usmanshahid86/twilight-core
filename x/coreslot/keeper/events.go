@@ -111,6 +111,20 @@ func emitSettlementUpdated(ctx context.Context, slotID uint64, operator string) 
 	)
 }
 
+// emitSelectionPolicyUpdated announces a new Selection policy version. It stays
+// compact deliberately: the resulting version and the height it becomes effective
+// are what an observer needs to locate the change, and the policy payload itself
+// is read from the version the event names rather than duplicated into the event
+// log.
+func emitSelectionPolicyUpdated(ctx context.Context, slotID uint64, operator string, version uint64, effectiveHeight int64) {
+	emit(ctx, types.EventTypeSelectionPolicyUpdated,
+		sdk.NewAttribute(types.AttributeKeySlotID, u64(slotID)),
+		sdk.NewAttribute(types.AttributeKeyOperatorAddress, operator),
+		sdk.NewAttribute(types.AttributeKeyPolicyVersion, u64(version)),
+		sdk.NewAttribute(types.AttributeKeyEffectiveHeight, i64(effectiveHeight)),
+	)
+}
+
 func emitMetadataUpdated(ctx context.Context, slotID uint64, operator string) {
 	emit(ctx, types.EventTypeMetadataUpdated,
 		sdk.NewAttribute(types.AttributeKeySlotID, u64(slotID)),

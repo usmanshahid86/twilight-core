@@ -19,7 +19,7 @@ func GetTxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "coreslot", Short: "Core-slot lifecycle transactions", DisableFlagParsing: true, SuggestionsMinimumDistance: 2}
 	cmd.AddCommand(
 		registerCmd(), activateCmd(), inactivateCmd(), suspendCmd(), removeCmd(), rotateCmd(),
-		updatePayoutCmd(), updateMetadataCmd(), updateSettlementCmd(), updateParamsCmd(),
+		updatePayoutCmd(), updateMetadataCmd(), updateSettlementCmd(), updateSelectionPolicyCmd(), updateParamsCmd(),
 	)
 	return cmd
 }
@@ -77,6 +77,30 @@ func registerCmd() *cobra.Command {
 	cmd.Flags().Uint64("selection-rate-bps", 2_500, "initial selection rate in basis points")
 	cmd.Flags().Uint64("max-selected-participants", 10, "initial per-slot maximum selected participants")
 	return cmd
+}
+
+func updateSelectionPolicyCmd() *cobra.Command {
+	return txCmd("update-selection-policy [slot-id] [selection-rate-bps] [max-selected-participants]", cobra.ExactArgs(3), func(cmd *cobra.Command, args []string) error {
+		from, err := signer(cmd)
+		if err != nil {
+			return err
+		}
+		id, err := strconv.ParseUint(args[0], 10, 64)
+		if err != nil {
+			return err
+		}
+		rateBps, err := strconv.ParseUint(args[1], 10, 64)
+		if err != nil {
+			return err
+		}
+		maxSelected, err := strconv.ParseUint(args[2], 10, 64)
+		if err != nil {
+			return err
+		}
+		return broadcast(cmd, &types.MsgUpdateSelectionPolicy{
+			Operator: from, SlotId: id, SelectionRateBps: rateBps, MaxSelectedParticipants: maxSelected,
+		})
+	})
 }
 
 func updateSettlementCmd() *cobra.Command {

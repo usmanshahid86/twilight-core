@@ -248,9 +248,9 @@ func ValidateFreshGenesisInitialHeight(genesis *GenesisState, initialHeight int6
 
 // indexGenesisPolicies groups the genesis Selection policy rows by slot.
 //
-// This is the single seam through which PR4's new genesis collection is read, and
-// it is deliberately narrow. It enforces only rules the architecture states
-// explicitly: §26 requires exactly one current version per slot, so two rows for
+// This is the single seam through which the genesis Selection-policy collection
+// is read, and it is deliberately narrow. It enforces only rules the architecture
+// states explicitly: §26 requires exactly one current version per slot, so two rows for
 // the same slot cannot both be current and are rejected. It decides nothing about
 // the unresolved general question (B4/Y-3) of how a genesis collection with
 // duplicate keys or non-canonical ordering is treated across the module — when

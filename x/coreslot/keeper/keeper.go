@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 
 	"cosmossdk.io/collections"
 	storetypes "cosmossdk.io/core/store"
@@ -38,8 +39,10 @@ type Keeper struct {
 	NextSlotID    collections.Item[uint64]
 
 	// SelectionPolicies is the immutable per-slot policy history keyed by
-	// (slot_id, policy_version). PR4 writes version 1 only and never supersedes
-	// it; runtime updates belong to a later change.
+	// (slot_id, policy_version). Registration and fresh genesis create version 1;
+	// a runtime policy update closes the current version and appends the next.
+	// Closing an open version's exclusive end is the only write ever made to an
+	// existing row — a closed version is immutable from then on.
 	SelectionPolicies collections.Map[collections.Pair[uint64, uint64], types.SelectionPolicyVersion]
 
 	// ActiveSlots is a membership-only index of ACTIVE slot IDs. It is a key set
@@ -50,6 +53,16 @@ type Keeper struct {
 	//
 	// collections.Uint64Key is big-endian, so iteration is ascending slot ID.
 	ActiveSlots collections.KeySet[uint64]
+
+	// PolicyStarts is the Selection-policy seek index: (slot_id,
+	// valid_from_height) -> policy_version. It is derived, rebuildable state over
+	// SelectionPolicies, written wherever a version is created, and read only to
+	// resolve the version applicable at a height.
+	//
+	// Both key components use order-preserving encodings, so a reverse iteration
+	// bounded above by (slot_id, H) lands on the greatest valid_from_height <= H
+	// for that slot and cannot cross into another slot's range.
+	PolicyStarts collections.Map[collections.Pair[uint64, int64], uint64]
 }
 
 // NewKeeper builds the CoreSlot keeper. economicAddresses is required: an
@@ -73,6 +86,8 @@ func NewKeeper(cdc codec.Codec, storeService storetypes.KVStoreService, economic
 		SelectionPolicies: collections.NewMap(sb, collections.NewPrefix(types.SelectionPoliciesPrefix), "selection_policies",
 			collections.PairKeyCodec(collections.Uint64Key, collections.Uint64Key), codec.CollValue[types.SelectionPolicyVersion](cdc)),
 		ActiveSlots: collections.NewKeySet(sb, collections.NewPrefix(types.ActiveSlotsPrefix), "active_slots", collections.Uint64Key),
+		PolicyStarts: collections.NewMap(sb, collections.NewPrefix(types.PolicyStartsPrefix), "policy_starts",
+			collections.PairKeyCodec(collections.Uint64Key, collections.Int64Key), collections.Uint64Value),
 	}
 	schema, err := sb.Build()
 	if err != nil {
@@ -165,10 +180,21 @@ func (k Keeper) clearSlotActive(ctx context.Context, slotID uint64) error {
 	return k.ActiveSlots.Remove(ctx, slotID)
 }
 
+// getSlot reads a slot record, reporting a genuinely absent key as
+// ErrSlotNotFound and propagating everything else unchanged.
+//
+// The distinction is the point. Only collections.ErrNotFound means "no such
+// slot"; a decode failure, or any other storage error, means the key IS there
+// and the stored bytes could not be read. Relabelling that as absence would tell
+// a caller — and, through the query surface, the outside world — that a slot
+// does not exist when in fact the database holding it is broken.
 func (k Keeper) getSlot(ctx context.Context, id uint64) (types.CoreSlot, error) {
 	slot, err := k.Slots.Get(ctx, id)
 	if err != nil {
-		return types.CoreSlot{}, types.ErrSlotNotFound.Wrapf("%d", id)
+		if errors.Is(err, collections.ErrNotFound) {
+			return types.CoreSlot{}, types.ErrSlotNotFound.Wrapf("%d", id)
+		}
+		return types.CoreSlot{}, err
 	}
 	return slot, nil
 }

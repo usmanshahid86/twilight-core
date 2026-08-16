@@ -64,6 +64,25 @@ const (
 	// ceiling. That coreslot's DefaultParams happens to ship MaxActiveSlots: 100
 	// is a coincidence of the V1 operating model, not the source of this value.
 	HardMaxActiveCoreSlots uint64 = 100
+
+	// HardMinSelectionPolicyUpdateCooldownBlocks is the immutable floor on the
+	// configured Selection-policy update cooldown. Governance may configure any
+	// value at or above it; it can never configure below it, and within a running
+	// network the floor itself is not a parameter.
+	//
+	// What it protects is permanent state: an accepted policy update writes a new
+	// immutable, non-prunable history version, so an unbounded update surface is a
+	// permanent state-growth primitive that no-op rejection alone does not close.
+	//
+	// This is the CURRENT PRE-MAINNET calibration. The relation
+	// (configured >= floor > 0) is fixed by the architecture; this number is not
+	// yet final mainnet calibration and a mandatory calibration review — measuring
+	// real per-update database growth, hostile churn, larger registered
+	// populations and observed operator behavior — must confirm or replace it
+	// before production-genesis freeze. It is deliberately NOT described as "one
+	// epoch": epoch length is independently configurable and its own minimum is
+	// not yet fixed.
+	HardMinSelectionPolicyUpdateCooldownBlocks uint64 = 360
 )
 
 // ValidateMaxActiveSlots enforces

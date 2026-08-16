@@ -62,8 +62,12 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) ([
 			}
 		}
 	}
+	// The seek index is derived from the admitted policy rows rather than carried
+	// in genesis: it is rebuildable indexing state, not canonical state, so
+	// GenesisState gains no field for it. Deriving it here is what keeps the index
+	// complete from the chain's very first version.
 	for _, policy := range genesis.SelectionPolicies {
-		if err := k.SelectionPolicies.Set(ctx, policyKey(policy.SlotId, policy.PolicyVersion), *policy); err != nil {
+		if err := k.writePolicyVersion(ctx, *policy); err != nil {
 			return nil, err
 		}
 	}
