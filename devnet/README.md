@@ -111,7 +111,9 @@ echo "operator=$OPERATOR"; echo "pubkey=$PUBKEY"; echo "moniker=<your-moniker>"
 ```
 
 Send the devnet authority your **operator address**, a **payout address** (can be
-the same), your **consensus pubkey (base64)**, and a **moniker**.
+the same), a **settlement address** (also can be the same — it is the operational
+credential you sign settlement-side messages with, and it is mandatory), your
+**consensus pubkey (base64)**, and a **moniker**.
 
 **On the devnet authority (the seed operator runs this):**
 
@@ -119,11 +121,17 @@ the same), your **consensus pubkey (base64)**, and a **moniker**.
 H=~/.twilight-devnet; COMMON="--from validator --keyring-backend test --home $H \
   --chain-id twilight-devnet-1 --node http://localhost:26657 --gas 400000 --fees 0utwlt -y"
 
-twilightd coreslot register <operator> <payout> <consensus-pubkey-base64> "<moniker>" $COMMON
+twilightd coreslot register <operator> <payout> <settlement> <consensus-pubkey-base64> "<moniker>" $COMMON
 twilightd coreslot-query slots --node http://localhost:26657 -o json | jq   # find the new slot id
 twilightd coreslot activate <slot-id> $COMMON                                # if not already active
 twilightd coreslot-query active --node http://localhost:26657 -o json | jq
 ```
+
+Registration also records the slot's initial Selection policy. The example relies
+on the command's defaults (`--selection-rate-bps 2500`,
+`--max-selected-participants 10`); both are operator configuration and carry no
+protocol significance, so pass the flags explicitly if the slot needs different
+values.
 
 Once your consensus key is active, your **already-running node starts validating
 automatically** — CometBFT applies the validator-set change live, no restart

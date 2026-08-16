@@ -54,9 +54,23 @@ The manual genesis workflow (for a fresh chain) is:
 twilightd init node0 --chain-id twilight-1
 twilightd coreslot-genesis set-authorities <authority> <emergency-authority>
 twilightd add-genesis-account <authority> 1000000000000utwlt
-twilightd coreslot-genesis add <operator> <payout> <ed25519-pubkey-base64> <moniker>
+twilightd coreslot-genesis add <operator> <payout> <settlement> <ed25519-pubkey-base64> <moniker>
 twilightd coreslot-genesis validate
 twilightd start
+```
+
+`<settlement>` is the slot's settlement address — the operational credential the
+operator signs settlement-side messages with. It is mandatory and has no default;
+it may be the same account as the operator or payout address, which is what the
+localnet scripts do.
+
+`add` also writes the slot's initial Selection policy. Both values are operator
+configuration with no protocol significance, and the command supplies defaults if
+you omit the flags:
+
+```bash
+--selection-rate-bps 2500              # initial selection rate, basis points
+--max-selected-participants 10         # initial per-slot cap on selected participants
 ```
 
 ## 2. Common signing flags
@@ -76,13 +90,24 @@ EMER="--from operator1 --keyring-backend test --home /tmp/twilight-localnet/node
 
 ## 3. Adding a new core-slot operator
 
-A new slot needs a unique operator address and a fresh consensus key:
+A new slot needs a unique operator address, a settlement address and a fresh
+consensus key:
 
 ```bash
 twilightd keys add newop --keyring-backend test --home /tmp/twilight-localnet/node0
 NEWOP=$(twilightd keys show newop -a --keyring-backend test --home /tmp/twilight-localnet/node0)
 PUB=$(./scripts/localnet/gen-consensus-key.sh newslot | cut -f1)   # fresh ed25519 pubkey (base64)
-twilightd coreslot register "$NEWOP" "$NEWOP" "$PUB" "moniker" $AUTH
+# operator, payout and settlement may be the same account; settlement is mandatory.
+twilightd coreslot register "$NEWOP" "$NEWOP" "$NEWOP" "$PUB" "moniker" $AUTH
+```
+
+Registration also records the slot's initial Selection policy. As with genesis
+authoring these are operator configuration, not protocol constants, and the
+command supplies defaults when the flags are omitted:
+
+```bash
+--selection-rate-bps 2500              # initial selection rate, basis points
+--max-selected-participants 10         # initial per-slot cap on selected participants
 ```
 
 The slot is created in `SLOT_STATUS_PENDING` (power 0, not yet in the validator

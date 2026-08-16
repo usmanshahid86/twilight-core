@@ -302,6 +302,13 @@ func TestEventAttributesComplete(t *testing.T) {
 	require.NoError(t, err)
 	_, err = msgs.UpdateOperatorMetadata(ctx, &types.MsgUpdateOperatorMetadata{Operator: op3, SlotId: res3.SlotId, Metadata: &types.OperatorMetadata{Moniker: "n"}})
 	require.NoError(t, err)
+	// Driven through the real message so the event is produced by the production
+	// path rather than emitted directly. Slot 3 is ACTIVE here, which is one of the
+	// statuses that permit an operator mutation, and the destination is an ordinary
+	// account distinct from the one registration set — an identical replacement is
+	// rejected as a no-op and would emit nothing.
+	_, err = msgs.UpdateSettlementAddress(ctx, &types.MsgUpdateSettlementAddress{Operator: op3, SlotId: res3.SlotId, SettlementAddress: testAccount(45)})
+	require.NoError(t, err)
 	updated := types.DefaultParams(authority, emergency)
 	_, err = msgs.UpdateParams(ctx, &types.MsgUpdateParams{Authority: authority, Params: &updated})
 	require.NoError(t, err)
@@ -329,15 +336,20 @@ func TestEventAttributesComplete(t *testing.T) {
 	require.NoError(t, err)
 
 	required := map[string][]string{
-		types.EventTypeRegistered:             {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyConsensusAddress, types.AttributeKeyNewStatus},
-		types.EventTypeActivated:              {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldStatus, types.AttributeKeyNewStatus, types.AttributeKeyConsensusAddress, types.AttributeKeyPower},
-		types.EventTypeInactivated:            {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyConsensusAddress, types.AttributeKeyOldStatus, types.AttributeKeyNewStatus, types.AttributeKeyPower, types.AttributeKeyReason},
-		types.EventTypeSuspended:              {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyConsensusAddress, types.AttributeKeyOldStatus, types.AttributeKeyNewStatus, types.AttributeKeyPower, types.AttributeKeyReason},
-		types.EventTypeRemoved:                {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldStatus, types.AttributeKeyNewStatus, types.AttributeKeyConsensusAddress, types.AttributeKeyReason},
-		types.EventTypeKeyRotationRequested:   {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldConsensusAddress, types.AttributeKeyNewConsensusAddress, types.AttributeKeyEffectiveHeight},
-		types.EventTypeKeyRotated:             {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldConsensusAddress, types.AttributeKeyNewConsensusAddress, types.AttributeKeyPower, types.AttributeKeyEffectiveHeight},
-		types.EventTypePayoutUpdated:          {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress},
-		types.EventTypeMetadataUpdated:        {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress},
+		types.EventTypeRegistered:           {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyConsensusAddress, types.AttributeKeyNewStatus},
+		types.EventTypeActivated:            {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldStatus, types.AttributeKeyNewStatus, types.AttributeKeyConsensusAddress, types.AttributeKeyPower},
+		types.EventTypeInactivated:          {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyConsensusAddress, types.AttributeKeyOldStatus, types.AttributeKeyNewStatus, types.AttributeKeyPower, types.AttributeKeyReason},
+		types.EventTypeSuspended:            {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyConsensusAddress, types.AttributeKeyOldStatus, types.AttributeKeyNewStatus, types.AttributeKeyPower, types.AttributeKeyReason},
+		types.EventTypeRemoved:              {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldStatus, types.AttributeKeyNewStatus, types.AttributeKeyConsensusAddress, types.AttributeKeyReason},
+		types.EventTypeKeyRotationRequested: {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldConsensusAddress, types.AttributeKeyNewConsensusAddress, types.AttributeKeyEffectiveHeight},
+		types.EventTypeKeyRotated:           {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldConsensusAddress, types.AttributeKeyNewConsensusAddress, types.AttributeKeyPower, types.AttributeKeyEffectiveHeight},
+		types.EventTypePayoutUpdated:        {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress},
+		types.EventTypeMetadataUpdated:      {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress},
+		// The settlement address itself is deliberately NOT an attribute: the event
+		// records that the authorizing credential changed, and the current value is
+		// read from the slot record. Pinning only what production emits keeps this
+		// a test of the contract rather than a wish for a different one.
+		types.EventTypeSettlementUpdated:      {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress},
 		types.EventTypeParamsUpdated:          {types.AttributeKeyAuthority},
 		types.EventTypeValidatorUpdateEmitted: {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyConsensusAddress, types.AttributeKeyPower, types.AttributeKeyHeight},
 		types.EventTypeRotationCancelled:      {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldConsensusAddress, types.AttributeKeyNewConsensusAddress, types.AttributeKeyReason, types.AttributeKeyHeight},

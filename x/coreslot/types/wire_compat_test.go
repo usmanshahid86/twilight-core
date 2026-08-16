@@ -81,10 +81,12 @@ func decompressDescriptor(gzipped []byte) ([]byte, error) {
 // extended. It pins the pre-existing numbers and wire kinds AND the additions, so
 // a renumbering, a retype, a removal or an unreviewed new number all fail here.
 //
-// This is what lets the decode test below make an accurate claim: that test
-// exercises a subset of the old fields, while this one proves none of the old
-// fields moved or changed kind — including the two the decode fixture cannot
-// carry (the Any-typed consensus key and the nested metadata message).
+// It pairs with the decode test below, and the two prove different things. That
+// test round-trips representative legacy VALUES across all of old fields 1-13,
+// including the Any-typed consensus key (3) and the nested metadata message (13);
+// this one pins the complete field-number and wire-kind SCHEMA, which no amount of
+// value round-tripping can establish because a renumbering moves both sides
+// together.
 func TestWireLedgersArePinned(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
