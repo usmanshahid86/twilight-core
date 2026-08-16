@@ -1,6 +1,10 @@
 package types
 
-import sdkmath "cosmossdk.io/math"
+import (
+	sdkmath "cosmossdk.io/math"
+
+	appparams "github.com/twilight-project/twilight-core/app/params"
+)
 
 // DefaultGenesis returns the fresh-genesis document for a chain whose first
 // block is height 1.
@@ -136,6 +140,13 @@ func (g GenesisState) validateEpochTimeline() error {
 		return ErrInvalidGenesis.Wrap("epoch configuration version is nil")
 	}
 	if err := anchor.Validate(); err != nil {
+		return ErrInvalidGenesis.Wrap(err.Error())
+	}
+	// The canonical bound is enforced on the AUTHORITY, not on either deprecated
+	// mirror. The mirrors are pinned to the anchor immediately below, so checking
+	// the anchor is what makes all three admissible; checking a mirror instead
+	// would leave the value that actually governs geometry unchecked.
+	if err := appparams.ValidateEpochLengthBlocks(anchor.EpochLengthBlocks); err != nil {
 		return ErrInvalidGenesis.Wrap(err.Error())
 	}
 	if anchor.Version != 1 || anchor.EffectiveEpoch != 1 {

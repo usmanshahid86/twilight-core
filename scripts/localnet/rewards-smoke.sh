@@ -14,7 +14,11 @@ BIN="${BIN:-$ROOT/build/twilightd}"
 NET="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-rewards-localnet}"
 CHAIN_ID="${CHAIN_ID:-twilight-rewards-localnet-1}"
 NODE_COUNT=4
-EPOCH_LENGTH="${REWARDS_EPOCH_LENGTH:-10}"
+# The epoch length must sit inside the ratified immutable interval
+# [360, 720]; genesis refuses anything outside it. These localnets therefore run
+# a fast block time instead of a short epoch — block time is node-local
+# configuration and is not a protocol value.
+EPOCH_LENGTH="${REWARDS_EPOCH_LENGTH:-360}"
 SUBSIDY=416190
 EXPECTED_EMISSION=$((EPOCH_LENGTH * SUBSIDY))
 EXPECTED_PER_SLOT=$((EXPECTED_EMISSION / NODE_COUNT))
@@ -23,6 +27,11 @@ GENESIS_FUNDED_BALANCE=1000000000000
 EXPECTED_PAYOUT_AFTER_CLAIM=$((GENESIS_FUNDED_BALANCE + EXPECTED_PER_SLOT))
 EXPECTED_SUPPLY_AFTER_FINALIZE=$((2 * GENESIS_FUNDED_BALANCE + EXPECTED_EMISSION))
 KEYRING=(--keyring-backend test)
+
+# Wait budgets scale with the epoch length. The ratified minimum epoch is 360
+# blocks, so an epoch is minutes of chain time even at the fast localnet block
+# rate; a fixed 90-second budget was sized for the retired 10-block epoch.
+EPOCH_WAIT_SECONDS=$(( 120 + EPOCH_LENGTH ))
 
 export BIN NET CHAIN_ID TWILIGHT_LOCALNET_HOME="$NET"
 
@@ -36,7 +45,7 @@ latest_height() {
   curl -fsS "$(http_url "$1")/status" 2>/dev/null | jq -r '.result.sync_info.latest_block_height | tonumber' 2>/dev/null || echo 0
 }
 wait_all_height() {
-  local target="$1" deadline=$((SECONDS + 90)) node
+  local target="$1" deadline=$((SECONDS + EPOCH_WAIT_SECONDS)) node
   while ((SECONDS < deadline)); do
     local ready=1
     for node in 0 1 2 3; do
@@ -49,7 +58,7 @@ wait_all_height() {
   return 1
 }
 wait_current_epoch() {
-  local target="$1" deadline=$((SECONDS + 90)) current
+  local target="$1" deadline=$((SECONDS + EPOCH_WAIT_SECONDS)) current
   while ((SECONDS < deadline)); do
     current="$(rq epoch-info 2>/dev/null | jq -r '.state.current_epoch | tonumber' 2>/dev/null || echo 0)"
     ((current >= target)) && return 0

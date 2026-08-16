@@ -34,6 +34,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/twilight-project/twilight-core/app"
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	rewardskeeper "github.com/twilight-project/twilight-core/x/rewards/keeper"
@@ -91,8 +92,11 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 	// end; odd seeds run effectively uncapped (no halving). Treasury split on/off;
 	// varied subsidy/epoch/cap.
 	subsidy := int64(100 + rng.Intn(900)) // 100..999 (odd values exercise carry)
-	epochLen := uint64(1 + rng.Intn(4))   // 1..4
-	cap_ := uint64(2 + rng.Intn(4))       // 2..5
+	// Epoch length is randomized inside the RATIFIED admission interval. Toy
+	// lengths can no longer boot a chain, and a simulation that used one would be
+	// exercising a configuration the protocol refuses.
+	epochLen := appparams.HardMinEpochLengthBlocks + uint64(rng.Intn(4))
+	cap_ := uint64(2 + rng.Intn(4)) // 2..5
 	if seed <= 4 {
 		cap_ = uint64(seed + 1) // seeds 1-4 deterministically cover caps 2,3,4,5
 	}
@@ -105,7 +109,9 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 	smallSupply := seed%2 == 0
 	maxSupply := "21000000000000"
 	if smallSupply {
-		maxSupply = fmt.Sprintf("%d", subsidy*40) // half == subsidy*20 -> crossed within the drain
+		// Half of this is one epoch's emission, so the first supply threshold is
+		// crossed at the epoch-1 boundary and the drain runs well past it.
+		maxSupply = fmt.Sprintf("%d", subsidy*int64(epochLen)*2)
 	}
 	rp, snap := rewardsParams(t, func(p *rewardstypes.Params) {
 		p.InitialBlockSubsidy = fmt.Sprintf("%d", subsidy)
@@ -181,11 +187,20 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 
 	reconcile(ctx)
 
+	// Sized so a handful of advance steps closes an epoch, which is what makes
+	// several epochs finalize within the step budget.
+	advanceChunk := int64(epochLen) / 4
 	for step := 0; step < steps; step++ {
 		switch rng.Intn(6) {
-		case 0, 1, 2: // advance a block (the dominant op)
-			driveBlock(t, a, base, height) // side effect only; ctx is refreshed to the new height below
-			height++
+		case 0, 1, 2: // advance the chain (the dominant op)
+			// A CHUNK of blocks, not one. Epochs are now hundreds of blocks long,
+			// so advancing singly would never close one and the claim, cap and
+			// replay branches below would never become reachable — the simulation
+			// would still pass while exercising almost nothing.
+			for i := int64(0); i < advanceChunk; i++ {
+				driveBlock(t, a, base, height) // side effect only; ctx is refreshed below
+				height++
+			}
 			ctx = base.WithBlockHeight(height) // subsequent ops act at the new current block height
 
 		case 3: // churn: suspend an active slot or reactivate a suspended one (floor-respecting).
@@ -222,7 +237,8 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 	})
 	drain := int(epochLen)*2 + 2
 	if smallSupply {
-		drain = 60 // > 40 block-subsidies => past maxSupply (cap) => crossed the halving
+		// Three full epochs: past the maxSupply cap, so the halving is crossed.
+		drain = int(epochLen) * 3
 	}
 	for i := 0; i < drain; i++ {
 		ctx = driveBlock(t, a, base, height)

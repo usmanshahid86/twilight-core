@@ -63,6 +63,7 @@ for i in 0 1 2 3; do
     -e "s#persistent_peers = \"\"#persistent_peers = \"${peers}\"#" \
     -e "s#pex = true#pex = false#" \
     -e "s#allow_duplicate_ip = false#allow_duplicate_ip = true#" \
+    -e "s#^timeout_commit = .*#timeout_commit = \"${TWILIGHT_LOCALNET_TIMEOUT_COMMIT:-200ms}\"#" \
     "$home/config/config.toml"
   sed -i.bak -e "s#address = \"localhost:9090\"#address = \"localhost:${grpc}\"#" "$home/config/app.toml"
   rm -f "$home/config/"*.bak

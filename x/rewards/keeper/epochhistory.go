@@ -6,6 +6,7 @@ import (
 
 	"cosmossdk.io/collections"
 
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	"github.com/twilight-project/twilight-core/internal/checked"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
@@ -229,6 +230,14 @@ func (k Keeper) latestEpochConfigVersion(ctx context.Context) (types.EpochConfig
 func (k Keeper) appendEpochConfigVersion(ctx context.Context, version types.EpochConfigVersion) error {
 	if err := version.Validate(); err != nil {
 		return err
+	}
+	// The other admission point for canonical geometry. Fresh genesis checks the
+	// anchor; this checks every version created afterwards, which today means a
+	// consumed schedule entry. There is no schedule writer in this change, so the
+	// path is unreachable — that is exactly why the bound belongs here rather
+	// than only at the writer that does not exist yet.
+	if err := appparams.ValidateEpochLengthBlocks(version.EpochLengthBlocks); err != nil {
+		return types.ErrInvalidState.Wrap(err.Error())
 	}
 	exists, err := k.EpochConfigVersions.Has(ctx, version.EffectiveEpoch)
 	if err != nil {

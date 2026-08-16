@@ -415,35 +415,29 @@ func TestCalibratedBoundsValidateStructural(t *testing.T) {
 	})
 }
 
-// TestValidateEpochLengthBlocks exercises the epoch-length relation with values
-// that are deliberately, visibly LOCAL TO THIS TEST.
+// TestValidateEpochLengthBlocks exercises the ratified admission interval
 //
-// The two immutable bounds this relation is measured against are not ratified,
-// and nothing in this file may become their de-facto source. These literals are
-// chosen to be obviously arbitrary — they are not a default, a recommendation, a
-// genesis value, or anything a consensus path reads — so that when the real
-// numbers arrive they are wired at the single call site the relation is designed
-// for, not discovered here.
+//	HardMinEpochLengthBlocks <= epoch_length_blocks <= HardMaxEpochLengthBlocks
+//
+// against the real constants. The bounds are consensus values now, so a test that
+// injected its own numbers would prove the relation while saying nothing about
+// what the chain actually admits.
 func TestValidateEpochLengthBlocks(t *testing.T) {
-	const (
-		testHardMin uint64 = 10
-		testHardMax uint64 = 100
-	)
-
 	for _, tc := range []struct {
 		name  string
 		value uint64
 		ok    bool
 	}{
-		{name: "below the floor", value: testHardMin - 1},
-		{name: "at the floor", value: testHardMin, ok: true},
-		{name: "inside the window", value: 50, ok: true},
-		{name: "at the ceiling", value: testHardMax, ok: true},
-		{name: "above the ceiling", value: testHardMax + 1},
+		{name: "one below the floor", value: HardMinEpochLengthBlocks - 1},
+		{name: "at the floor", value: HardMinEpochLengthBlocks, ok: true},
+		{name: "one above the floor", value: HardMinEpochLengthBlocks + 1, ok: true},
+		{name: "one below the ceiling", value: HardMaxEpochLengthBlocks - 1, ok: true},
+		{name: "at the ceiling", value: HardMaxEpochLengthBlocks, ok: true},
+		{name: "one above the ceiling", value: HardMaxEpochLengthBlocks + 1},
 		{name: "zero", value: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidateEpochLengthBlocks(tc.value, testHardMin, testHardMax)
+			err := ValidateEpochLengthBlocks(tc.value)
 			if tc.ok {
 				if err != nil {
 					t.Fatalf("epoch length %d rejected: %v", tc.value, err)
@@ -457,15 +451,42 @@ func TestValidateEpochLengthBlocks(t *testing.T) {
 	}
 }
 
-// TestValidateEpochLengthBlocksRejectsIncoherentBounds covers the bound pair
-// itself. A zero floor would admit a zero-length epoch, which makes the canonical
-// start-height recurrence stationary: every epoch would begin at the same block
-// and no boundary would ever be reached.
-func TestValidateEpochLengthBlocksRejectsIncoherentBounds(t *testing.T) {
-	if err := ValidateEpochLengthBlocks(5, 0, 100); err == nil {
-		t.Error("a zero floor must be refused")
+// TestRatifiedEpochLengthBoundsLocked freezes the two ratified values.
+//
+// They are immutable within a running network, so a later edit is a consensus
+// change rather than a calibration tweak. The literals are spelled out here
+// deliberately: the test must fail if the constants move, not track them.
+func TestRatifiedEpochLengthBoundsLocked(t *testing.T) {
+	if HardMinEpochLengthBlocks != 360 {
+		t.Errorf("HardMinEpochLengthBlocks = %d, want 360", HardMinEpochLengthBlocks)
 	}
-	if err := ValidateEpochLengthBlocks(5, 100, 10); err == nil {
-		t.Error("an inverted window must be refused")
+	if HardMaxEpochLengthBlocks != 720 {
+		t.Errorf("HardMaxEpochLengthBlocks = %d, want 720", HardMaxEpochLengthBlocks)
+	}
+	if HardMinEpochLengthBlocks > HardMaxEpochLengthBlocks {
+		t.Fatal("the admission interval is inverted")
+	}
+}
+
+// TestRecommendedBeaconGeometryFitsTheHardMinimum is the relation the floor was
+// chosen to satisfy: r6's recommended geometry must fit inside the SHORTEST
+// permitted epoch, and must keep fitting as geometries change.
+func TestRecommendedBeaconGeometryFitsTheHardMinimum(t *testing.T) {
+	recommended := SelectionParams{
+		MaxSelectionRateBps:          2_500,
+		BeaconStartOffsetBlocks:      48,
+		BeaconWindowBlocks:           24,
+		MinExternalBeaconBlocks:      12,
+		MinDistinctExternalProposers: 4,
+	}
+	if err := recommended.Validate(HardMinEpochLengthBlocks); err != nil {
+		t.Fatalf("recommended beacon geometry must fit the hard minimum: %v", err)
+	}
+
+	// And a geometry that does not fit is refused, so the check is load-bearing.
+	tooWide := recommended
+	tooWide.BeaconWindowBlocks = HardMinEpochLengthBlocks
+	if err := tooWide.Validate(HardMinEpochLengthBlocks); err == nil {
+		t.Error("a beacon window as long as the shortest epoch must be refused")
 	}
 }

@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 
 	"github.com/twilight-project/twilight-core/app"
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
@@ -89,7 +91,10 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	require.Equal(t, []string{"rewards"}, a.ModuleManager.OrderBeginBlockers)
 
 	rParams := rewardstypes.DefaultParams()
-	rParams.EpochLengthBlocks = 2 // short epoch so it closes within the test
+	// The shortest admissible epoch, so it still closes within the test. Toy
+	// lengths are no longer bootable: the ratified interval is [360, 720].
+	rParams.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
+	epochLen := int64(rParams.EpochLengthBlocks)
 	rSnap := rewardstypes.DefaultEpochConfigSnapshot(rParams)
 	rewardsGen := canonicalRewardsTimeline(&rewardstypes.GenesisState{
 		Params:             &rParams,
@@ -117,10 +122,18 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	_, err = a.Commit()
 	require.NoError(t, err)
 
-	// === Block 2 via the runtime block loop (the configured epoch boundary). ===
-	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 2, Time: blockTime})
-	require.NoError(t, err)
-	ctx2 := a.NewContextLegacy(false, cmtproto.Header{Height: 2, Time: blockTime})
+	// === Drive to the configured epoch boundary through the runtime loop. ===
+	// Block 1 was already committed above; each iteration finalizes one block and
+	// commits it, leaving the boundary block uncommitted so its state is readable.
+	for height := int64(2); height <= epochLen; height++ {
+		_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: height, Time: blockTime})
+		require.NoError(t, err)
+		if height < epochLen {
+			_, err = a.Commit()
+			require.NoError(t, err)
+		}
+	}
+	ctx2 := a.NewContextLegacy(false, cmtproto.Header{Height: epochLen, Time: blockTime})
 
 	// Runtime-dispatched EndBlock must have finalized the epoch exactly once.
 	epoch, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx2, 1)
@@ -133,12 +146,12 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	// advancing here would make every scheduled change unreachable.
 	require.Equal(t, uint64(1), state.CurrentEpoch, "finalization must not advance the epoch")
 
-	// Block 3 opens the next epoch through the runtime BeginBlocker.
+	// The next block opens the next epoch through the runtime BeginBlocker.
 	_, err = a.Commit()
 	require.NoError(t, err)
-	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 3, Time: blockTime})
+	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: epochLen + 1, Time: blockTime})
 	require.NoError(t, err)
-	ctx3 := a.NewContextLegacy(false, cmtproto.Header{Height: 3, Time: blockTime})
+	ctx3 := a.NewContextLegacy(false, cmtproto.Header{Height: epochLen + 1, Time: blockTime})
 	state, err = a.RewardsKeeper.GetState(ctx3)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), state.CurrentEpoch, "the epoch advances at BeginBlock")
@@ -147,8 +160,8 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	require.Equal(t, uint64(1), open,
 		"the first enabled block of the new epoch counts 1, not the previous epoch total plus one")
 
-	// 1 slot × 2 active blocks × 416190 subsidy = 832380 minted into real supply.
-	const mintedEmission = "832380"
+	// One slot, one full epoch of reward-enabled blocks, at the default subsidy.
+	mintedEmission := strconv.FormatInt(epochLen*416190, 10)
 	supplyAfter := a.BankKeeper.GetSupply(ctx2, app.BaseDenom).Amount
 	require.Equal(t, mintedEmission, supplyAfter.Sub(supplyBefore).String(),
 		"supply delta must equal the minted epoch emission")

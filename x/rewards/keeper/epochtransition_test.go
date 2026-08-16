@@ -8,6 +8,7 @@ import (
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	"github.com/twilight-project/twilight-core/x/rewards/keeper"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
@@ -98,8 +99,11 @@ func TestOpenCounterResetsBeforeSamplingTheNewEpoch(t *testing.T) {
 // governs from there.
 func TestScheduledConfigIsConsumedBeforeSamplingTheFirstBlock(t *testing.T) {
 	k, ctx := transitionKeeper(t, 2)
+	// The scheduled length must itself be admissible: consuming a schedule entry
+	// creates canonical geometry, so it is an admission point like genesis.
+	scheduledLen := appparams.HardMinEpochLengthBlocks
 	require.NoError(t, k.ScheduledEpochConfigs.Set(ctx, 2, types.ScheduledEpochConfig{
-		EffectiveEpoch: 2, EpochLengthBlocks: 5,
+		EffectiveEpoch: 2, EpochLengthBlocks: scheduledLen,
 	}))
 
 	require.NoError(t, k.BeginBlock(ctx.WithBlockHeight(1)))
@@ -116,12 +120,13 @@ func TestScheduledConfigIsConsumedBeforeSamplingTheFirstBlock(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), version.Version)
 	require.Equal(t, uint64(3), version.EffectiveStartHeight)
-	require.Equal(t, uint64(5), version.EpochLengthBlocks)
+	require.Equal(t, scheduledLen, version.EpochLengthBlocks)
 
-	// And epoch 2 now runs heights 3..7 under the new length.
+	// And epoch 2 now runs under the new length, starting at the block that
+	// consumed the schedule.
 	end, err := k.EpochEndHeight(ctx, 2)
 	require.NoError(t, err)
-	require.Equal(t, uint64(7), end)
+	require.Equal(t, 3+scheduledLen-1, end)
 
 	// Sampling still happened for the opening block.
 	blocks, err := k.GetOpenRewardEnabledBlocks(ctx)
@@ -296,4 +301,31 @@ func TestOpenCounterIsNeverDefaulted(t *testing.T) {
 	_, err := k.GetOpenRewardEnabledBlocks(ctx)
 	require.ErrorIs(t, err, types.ErrInvalidState)
 	require.ErrorIs(t, k.EndBlock(ctx.WithBlockHeight(2)), types.ErrInvalidState)
+}
+
+// TestScheduledConfigOutsideTheRatifiedBoundsIsRefused proves the schedule is an
+// admission point, not just a carrier.
+//
+// Consuming an entry creates a canonical EpochConfigVersion, so a length outside
+// the ratified interval would install geometry the protocol forbids — and unlike
+// genesis, it would do so at runtime with no operator review.
+func TestScheduledConfigOutsideTheRatifiedBoundsIsRefused(t *testing.T) {
+	for _, length := range []uint64{
+		appparams.HardMinEpochLengthBlocks - 1,
+		appparams.HardMaxEpochLengthBlocks + 1,
+	} {
+		k, ctx := transitionKeeper(t, 2)
+		require.NoError(t, k.ScheduledEpochConfigs.Set(ctx, 2, types.ScheduledEpochConfig{
+			EffectiveEpoch: 2, EpochLengthBlocks: length,
+		}))
+
+		err := k.BeginBlock(ctx.WithBlockHeight(3))
+		require.Errorf(t, err, "scheduled length %d is outside the ratified interval", length)
+		require.ErrorIs(t, err, types.ErrInvalidState)
+
+		// And nothing of the transition survived.
+		state, err := k.GetState(ctx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), state.CurrentEpoch, "a refused schedule must not open the epoch")
+	}
 }

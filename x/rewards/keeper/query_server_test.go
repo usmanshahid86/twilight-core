@@ -46,7 +46,7 @@ func TestQueryServerReadsAndErrors(t *testing.T) {
 	einfo, err := qs.EpochInfo(ctx, &types.QueryEpochInfoRequest{})
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), einfo.State.CurrentEpoch)
-	require.Equal(t, uint64(50+17280-1), einfo.CurrentEpochEndHeight)
+	require.Equal(t, 50+types.DefaultEpochLengthBlocks-1, einfo.CurrentEpochEndHeight)
 	require.False(t, einfo.HasPendingParams)
 
 	// NextHalving (tier 0, full subsidy, first threshold ahead)

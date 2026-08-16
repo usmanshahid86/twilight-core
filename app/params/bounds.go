@@ -83,6 +83,40 @@ const (
 	// epoch": epoch length is independently configurable and its own minimum is
 	// not yet fixed.
 	HardMinSelectionPolicyUpdateCooldownBlocks uint64 = 360
+
+	// HardMinEpochLengthBlocks and HardMaxEpochLengthBlocks are the immutable
+	// bounds on a configured epoch length:
+	//
+	//	HardMinEpochLengthBlocks <= epoch_length_blocks <= HardMaxEpochLengthBlocks
+	//
+	// They are ratified consensus bounds within a running network, not
+	// governance-configurable ceilings and not node-local configuration.
+	// Governance chooses an epoch length only inside this interval.
+	//
+	// Why 360 is the floor. Every valid Selection beacon geometry must fit inside
+	// the SHORTEST permitted epoch, without x/rewards ever reading x/mining to
+	// find out — the r6 recommended geometry of 48 + 24 + 1 = 73 blocks fits
+	// comfortably, and future geometries must continue to. The floor also bounds
+	// how often permanent epoch-derived state can be created: without it
+	// governance could shorten epochs indefinitely and raise that cadence past the
+	// recommended 360-block one.
+	//
+	// Why 720 is the ceiling. It leaves real configurability above the recommended
+	// 360 while bounding the maximum-churn participation envelope, whose
+	// worst case is HardMaxActiveCoreSlots * HardMaxEpochLengthBlocks =
+	// 100 * 720 = 72,000 distinct participating Slots in one epoch. A materially
+	// larger ceiling is not a parameter change; it needs new load evidence under
+	// the architecture's adversarial-load obligation.
+	//
+	// These are BLOCK counts, not durations. Block time is not a protocol
+	// guarantee, so neither bound may be described as a wall-clock window.
+	//
+	// Ratified for the current V2 pre-production profile. They are not
+	// placeholders, and they are also not final mainnet calibration: hostile-load
+	// and load-calibration confirmation remains mandatory before the
+	// production-genesis freeze.
+	HardMinEpochLengthBlocks uint64 = 360
+	HardMaxEpochLengthBlocks uint64 = 720
 )
 
 // ValidateMaxActiveSlots enforces
@@ -225,8 +259,13 @@ type SelectionParams struct {
 //
 // The final inequality is what guarantees a beacon window plus at least one
 // publication block fits inside the shortest permitted epoch, for every
-// permitted epoch length. hardMinEpochLengthBlocks is implementation-calibrated
-// and supplied by the caller.
+// permitted epoch length.
+//
+// hardMinEpochLengthBlocks stays an argument so the relation itself can be
+// exercised independently of the ratified magnitude, but the floor is no longer
+// open: every canonical caller MUST pass HardMinEpochLengthBlocks. Passing a
+// configurable value here would let a Selection geometry be admitted that cannot
+// fit the shortest epoch the protocol permits.
 func (p SelectionParams) Validate(hardMinEpochLengthBlocks uint64) error {
 	if p.MaxSelectionRateBps == 0 || p.MaxSelectionRateBps > AbsoluteMaxSelectionRateBps {
 		return fmt.Errorf(
@@ -316,7 +355,13 @@ type CalibratedBounds struct {
 	// only so this struct keeps naming every bound the architecture enumerates;
 	// consensus paths read the constant. Removing it is deliberate later cleanup,
 	// not part of the change that ratified the value.
-	MaxActiveCoreSlots                     uint64
+	MaxActiveCoreSlots uint64
+	// MinEpochLengthBlocks and MaxEpochLengthBlocks are superseded by the ratified
+	// HardMinEpochLengthBlocks / HardMaxEpochLengthBlocks constants above and are
+	// no longer calibration inputs. They are retained so this struct keeps naming
+	// every bound the architecture enumerates, and so the generic structural
+	// relation below still has something to check; consensus paths read the
+	// constants and must never treat a caller-supplied value as authoritative.
 	MinEpochLengthBlocks                   uint64
 	MaxEpochLengthBlocks                   uint64
 	MaxSelectedParticipants                uint64
@@ -427,37 +472,27 @@ func requirePositiveAtLeast(name string, value, hardMin uint64) error {
 	return nil
 }
 
-// ValidateEpochLengthBlocks enforces
+// ValidateEpochLengthBlocks enforces the canonical relation
 //
-//	hardMin <= value <= hardMax,  with 0 < hardMin <= hardMax
+//	HardMinEpochLengthBlocks <= value <= HardMaxEpochLengthBlocks
 //
 // on a configured epoch length.
 //
-// Both bounds are supplied by the caller rather than read from a constant here,
-// for the same reason as every other relation in this file: the architecture
-// requires HARD_MIN_EPOCH_LENGTH_BLOCKS and HARD_MAX_EPOCH_LENGTH_BLOCKS to
-// exist and to bound the configured value, and does not fix their magnitudes.
-// Those two numbers are not yet ratified, so this function has no production
-// caller and no consensus path reads it. Wiring it is the whole of the remaining
-// work once the values are ratified: define the two immutable constants, call
-// this from epoch-configuration admission, and add the boundary tests that use
-// the real numbers.
+// The bounds are read from the ratified constants rather than supplied by the
+// caller. Every other relation in this file takes its bound as an argument
+// because the magnitude was not fixed; these two now are, and an injected
+// parameter would be a second production source of truth for a consensus value —
+// a caller could admit an epoch length the protocol forbids simply by passing
+// different numbers.
 //
-// A positive lower bound is what stops a zero-length epoch: the canonical
-// start-height recurrence would then be stationary, every epoch would begin at
-// the same block, and no boundary would ever be reached.
-func ValidateEpochLengthBlocks(value, hardMin, hardMax uint64) error {
-	if hardMin == 0 {
-		return fmt.Errorf("hard min epoch length blocks must be positive")
-	}
-	if hardMin > hardMax {
+// The positive floor is also what stops a zero-length epoch: the canonical
+// start-height recurrence would be stationary, every epoch would begin at the
+// same block, and no boundary would ever be reached.
+func ValidateEpochLengthBlocks(value uint64) error {
+	if value < HardMinEpochLengthBlocks || value > HardMaxEpochLengthBlocks {
 		return fmt.Errorf(
-			"hard min epoch length %d exceeds hard max epoch length %d", hardMin, hardMax,
-		)
-	}
-	if value < hardMin || value > hardMax {
-		return fmt.Errorf(
-			"epoch length is %d blocks, must be in [%d, %d]", value, hardMin, hardMax,
+			"epoch length is %d blocks, must be in [%d, %d]",
+			value, HardMinEpochLengthBlocks, HardMaxEpochLengthBlocks,
 		)
 	}
 	return nil

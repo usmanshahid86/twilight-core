@@ -29,7 +29,10 @@ func TestDefaultParams(t *testing.T) {
 	require.Equal(t, "21000000000000", params.MaxSupply)
 	require.Equal(t, "416190", params.InitialBlockSubsidy)
 	require.Equal(t, uint64(5), params.TargetBlockTimeSeconds)
-	require.Equal(t, uint64(17280), params.EpochLengthBlocks)
+	// The recommended initial epoch length, which is also the ratified floor.
+	require.Equal(t, appparams.HardMinEpochLengthBlocks, params.EpochLengthBlocks)
+	require.NoError(t, appparams.ValidateEpochLengthBlocks(params.EpochLengthBlocks),
+		"the default must be admissible under the ratified bounds")
 	require.Equal(t, types.HalvingMode_HALVING_MODE_SUPPLY_THRESHOLD, params.HalvingMode)
 	require.Equal(t, types.DistributionMethod_DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS, params.DistributionMethod)
 	require.Equal(t, types.RemainderPolicy_REMAINDER_POLICY_CARRY_FORWARD, params.RemainderPolicy)

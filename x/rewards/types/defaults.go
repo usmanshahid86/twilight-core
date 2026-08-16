@@ -6,9 +6,13 @@ const (
 	DefaultMaxSupply              = "21000000000000"
 	DefaultInitialBlockSubsidy    = "416190"
 	DefaultTargetBlockTimeSeconds = uint64(5)
-	DefaultEpochLengthBlocks      = uint64(17280)
-	DefaultMaxClaimEpochsPerTx    = uint64(100)
-	DefaultEpochSnapshotVersion   = uint64(1)
+	// DefaultEpochLengthBlocks is the architecture's recommended initial epoch
+	// length and is also the ratified immutable floor. The previous default of
+	// 17280 (a V1 daily cadence at five-second blocks) now lies outside the
+	// admissible interval [360, 720] and could not be used to open a chain.
+	DefaultEpochLengthBlocks    = uint64(360)
+	DefaultMaxClaimEpochsPerTx  = uint64(100)
+	DefaultEpochSnapshotVersion = uint64(1)
 )
 
 func DefaultParams() Params {
