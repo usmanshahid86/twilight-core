@@ -52,9 +52,9 @@ emergency="$(jq -r '.address' "$HOME_DIR/emergency.json")"
 "$BIN" add-genesis-account "$authority" "${FAUCET_BALANCE}utwlt" --home "$HOME_DIR"
 "$BIN" add-genesis-account "$emergency" "${FAUCET_BALANCE}utwlt" --home "$HOME_DIR"
 
-# Register the single CoreSlot validator (operator = payout = authority).
+# Register the single CoreSlot validator (operator = payout = settlement = authority).
 pubkey="$(sed -n 's/.*"value": "\([^"]*\)".*/\1/p' "$HOME_DIR/config/priv_validator_key.json" | head -n 1)"
-"$BIN" coreslot-genesis add "$authority" "$authority" "$pubkey" "$MONIKER" --home "$HOME_DIR"
+"$BIN" coreslot-genesis add "$authority" "$authority" "$authority" "$pubkey" "$MONIKER" --home "$HOME_DIR"
 "$BIN" coreslot-genesis validate --home "$HOME_DIR"
 
 # Devnet-friendly epoch length so rewards are visible in minutes.

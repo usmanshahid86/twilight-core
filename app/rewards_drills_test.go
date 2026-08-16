@@ -57,16 +57,43 @@ type slotSpec struct {
 // genesis through the real keepers (direct InitGenesis on the booted app),
 // generalizing the single-slot initChainWithRewards scaffold to the multi-slot
 // scenarios the branch drills need.
+// coreSlotRegisterMsg builds a registration message carrying the mandatory V2
+// fields, so a test about authorization or key uniqueness observes the rejection
+// it is about rather than a missing settlement address.
+func coreSlotRegisterMsg(t *testing.T, authority, operator, payout string, keyMarker byte, moniker string) *coreslottypes.MsgRegisterCoreSlot {
+	t.Helper()
+	return &coreslottypes.MsgRegisterCoreSlot{
+		Authority: authority, OperatorAddress: operator, PayoutAddress: payout,
+		SettlementAddress: payout,
+		ConsensusPubkey:   ed25519Any(t, keyMarker),
+		Metadata:          &coreslottypes.OperatorMetadata{Moniker: moniker},
+		InitialSelectionPolicy: &coreslottypes.InitialSelectionPolicy{
+			SelectionRateBps: 2_500, MaxSelectedParticipants: 10,
+		},
+	}
+}
+
 func initCoreSlotsAndRewards(t *testing.T, a *app.App, base sdk.Context, slots []slotSpec, rGen rewardstypes.GenesisState) {
 	t.Helper()
 	csParams := coreslottypes.DefaultParams(app.AuthorityAddress(), app.EmergencyAuthorityAddress())
 	csGen := &coreslottypes.GenesisState{Params: &csParams, NextSlotId: uint64(len(slots)) + 1}
+	// Fresh-genesis ACTIVE normalization (§80): the first activation generation,
+	// effective from the initial height, with a version-1 Selection policy the
+	// slot's pointer names.
+	initialHeight := base.BlockHeight()
 	for _, s := range slots {
 		csGen.Slots = append(csGen.Slots, &coreslottypes.CoreSlot{
 			SlotId: s.id, OperatorAddress: s.operator, PayoutAddress: s.payout,
-			ConsensusPubkey: ed25519Any(t, s.keyMarker),
-			Status:          coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
-			ConsensusPower:  1, RewardWeight: coreslottypes.DefaultRewardWeight,
+			SettlementAddress: s.payout,
+			ConsensusPubkey:   ed25519Any(t, s.keyMarker),
+			Status:            coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
+			ConsensusPower:    1, RewardWeight: coreslottypes.DefaultRewardWeight,
+			ActivationSequence: 1, ActivatedHeight: initialHeight, ActivationEffectiveHeight: initialHeight,
+			CurrentSelectionPolicyVersion: 1,
+		})
+		csGen.SelectionPolicies = append(csGen.SelectionPolicies, &coreslottypes.SelectionPolicyVersion{
+			SlotId: s.id, PolicyVersion: 1, SelectionRateBps: 2_500, MaxSelectedParticipants: 10,
+			ValidFromHeight: initialHeight,
 		})
 		csGen.RewardWeights = append(csGen.RewardWeights, &coreslottypes.OperatorRewardWeight{
 			SlotId: s.id, FinalWeight: coreslottypes.DefaultRewardWeight,

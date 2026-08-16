@@ -2591,6 +2591,30 @@
         },
         "metadata": {
           "$ref": "#/definitions/v1OperatorMetadata"
+        },
+        "settlement_address": {
+          "type": "string",
+          "description": "settlement_address is the operator's operational credential address\n(section 24). It is a value destination and takes the full canonical\neconomic-address rule, unlike operator_address which is a control identity."
+        },
+        "activation_sequence": {
+          "type": "string",
+          "format": "uint64",
+          "description": "activation_sequence is the activation generation. Zero means never\nactivated; every successful activation or reactivation increments it."
+        },
+        "activation_effective_height": {
+          "type": "string",
+          "format": "int64",
+          "description": "activation_effective_height is the height from which the current generation\nis effective for reward accounting: H+1 for a runtime activation at height\nH, and initial_height for a fresh-genesis ACTIVE slot (section 21)."
+        },
+        "current_selection_policy_version": {
+          "type": "string",
+          "format": "uint64",
+          "description": "current_selection_policy_version points at the slot's current\nSelectionPolicyVersion row. The pointer lives here rather than in a separate\ncollection, exactly as section 17 places it."
+        },
+        "last_selection_policy_update_height": {
+          "type": "string",
+          "format": "int64",
+          "description": "last_selection_policy_update_height is the height of the last successful\npost-registration policy update, zero until one occurs. It is stored rather\nthan derived because section 26's cooldown reads it directly and it records\nthe update transaction's height, which a version's valid_from_height does\nnot recover."
         }
       }
     },
@@ -3085,11 +3109,13 @@
         },
         "max_active_slots": {
           "type": "string",
-          "format": "uint64"
+          "format": "uint64",
+          "description": "max_active_slots is the governance-configured operational ceiling on\nsimultaneously ACTIVE slots. It is bounded in turn by the immutable\nHardMaxActiveCoreSlots (= 100) and must never exceed it. The two are\ndistinct layers and are enforced separately."
         },
         "activation_delay_blocks": {
           "type": "string",
-          "format": "uint64"
+          "format": "uint64",
+          "description": "Deprecated: V2 requires this to be 0. The field number is retained rather\nthan reserved because the API version is unchanged; removing it under an\nunchanged v1 package would be the more disruptive choice."
         },
         "key_rotation_delay_blocks": {
           "type": "string",
@@ -3097,14 +3123,16 @@
         },
         "removal_delay_blocks": {
           "type": "string",
-          "format": "uint64"
+          "format": "uint64",
+          "description": "Deprecated: V2 requires this to be 0. See activation_delay_blocks."
         },
         "consensus_key_reuse_lockout": {
           "type": "string",
           "format": "uint64"
         },
         "allow_self_registration": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Deprecated: V2 requires this to be false. Architecture section 19 states\nthat fresh V2.2 exposes no permissionless self-registration consensus path,\nso registration is authority-only and the runtime authorization branch that\nconsulted this field is deleted. See activation_delay_blocks for why the\nfield number is retained."
         },
         "allow_emergency_below_min_active": {
           "type": "boolean"

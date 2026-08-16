@@ -123,11 +123,8 @@ func runCoreSlotSim(t *testing.T, seed int64, steps int) {
 
 		case 2: // register -> PENDING (always valid: fresh operator + key)
 			km, op, pay := newKey(), newOp(), newPay()
-			_, err := msgSrv.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
-				Authority: auth, OperatorAddress: op, PayoutAddress: pay,
-				ConsensusPubkey: ed25519Any(t, km),
-				Metadata:        &coreslottypes.OperatorMetadata{Moniker: fmt.Sprintf("sim-%d", nextSlotID)},
-			})
+			_, err := msgSrv.RegisterCoreSlot(ctx,
+				coreSlotRegisterMsg(t, auth, op, pay, km, fmt.Sprintf("sim-%d", nextSlotID)))
 			require.NoErrorf(t, err, "seed %d step %d: register", seed, step)
 			model[nextSlotID] = &modelSlot{id: nextSlotID, operator: op, payout: pay, keyMarker: km, status: coreslottypes.SlotStatus_SLOT_STATUS_PENDING}
 			nextSlotID++
@@ -212,10 +209,7 @@ func TestCoreSlotGuardRejections(t *testing.T) {
 
 	t.Run("authority-rejection", func(t *testing.T) {
 		ctx, srv := setup()
-		_, err := srv.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
-			Authority: acc(99), OperatorAddress: acc(50), PayoutAddress: acc(150),
-			ConsensusPubkey: ed25519Any(t, 50), Metadata: &coreslottypes.OperatorMetadata{Moniker: "x"},
-		})
+		_, err := srv.RegisterCoreSlot(ctx, coreSlotRegisterMsg(t, acc(99), acc(50), acc(150), 50, "x"))
 		require.ErrorIs(t, err, coreslottypes.ErrUnauthorized, "non-authority register must be rejected")
 		_, err = srv.ActivateCoreSlot(ctx, &coreslottypes.MsgActivateCoreSlot{Authority: acc(99), SlotId: 1})
 		require.ErrorIs(t, err, coreslottypes.ErrUnauthorized, "non-authority activate must be rejected")
@@ -223,11 +217,8 @@ func TestCoreSlotGuardRejections(t *testing.T) {
 
 	t.Run("duplicate-consensus-key", func(t *testing.T) {
 		ctx, srv := setup()
-		_, err := srv.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
-			Authority: auth, OperatorAddress: acc(51), PayoutAddress: acc(151),
-			ConsensusPubkey: ed25519Any(t, 1), // key marker 1 already belongs to slot 1
-			Metadata:        &coreslottypes.OperatorMetadata{Moniker: "dup"},
-		})
+		// Key marker 1 already belongs to slot 1.
+		_, err := srv.RegisterCoreSlot(ctx, coreSlotRegisterMsg(t, auth, acc(51), acc(151), 1, "dup"))
 		require.ErrorIs(t, err, coreslottypes.ErrDuplicateConsensusKey)
 	})
 
@@ -244,10 +235,7 @@ func TestCoreSlotGuardRejections(t *testing.T) {
 		_, err := srv.UpdateParams(ctx, &coreslottypes.MsgUpdateParams{Authority: auth, Params: &p})
 		require.NoError(t, err)
 		for _, km := range []byte{64, 65} {
-			_, err = srv.RegisterCoreSlot(ctx, &coreslottypes.MsgRegisterCoreSlot{
-				Authority: auth, OperatorAddress: acc(km), PayoutAddress: acc(km + 100),
-				ConsensusPubkey: ed25519Any(t, km), Metadata: &coreslottypes.OperatorMetadata{Moniker: "m"},
-			})
+			_, err = srv.RegisterCoreSlot(ctx, coreSlotRegisterMsg(t, auth, acc(km), acc(km+100), km, "m"))
 			require.NoError(t, err)
 		}
 		_, err = srv.ActivateCoreSlot(ctx, &coreslottypes.MsgActivateCoreSlot{Authority: auth, SlotId: 4})

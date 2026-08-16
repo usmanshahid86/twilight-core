@@ -123,22 +123,24 @@ func (k Keeper) operatorForSlot(ctx context.Context, slotID uint64) string {
 }
 
 func (k Keeper) diffAndPersist(ctx context.Context) ([]abci.ValidatorUpdate, error) {
-	desired := map[string]types.LastAppliedValidator{}
-	if err := k.Slots.Walk(ctx, nil, func(_ uint64, slot types.CoreSlot) (bool, error) {
-		if slot.Status != types.SlotStatus_SLOT_STATUS_ACTIVE {
-			return false, nil
-		}
+	// The desired validator set is exactly the ACTIVE slots, read through the
+	// membership index. This runs every block, so it must not scan the whole
+	// lifetime-registered population: GetActiveSlots is bounded by the active set
+	// and fails closed if the index and the records have diverged.
+	activeSlots, err := k.GetActiveSlots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	desired := make(map[string]types.LastAppliedValidator, len(activeSlots))
+	for _, slot := range activeSlots {
 		key, _, err := consensusKey(slot.ConsensusPubkey)
 		if err != nil {
-			return true, err
+			return nil, err
 		}
 		if _, exists := desired[key]; exists {
-			return true, types.ErrDuplicateConsensusKey
+			return nil, types.ErrDuplicateConsensusKey
 		}
 		desired[key] = types.LastAppliedValidator{SlotId: slot.SlotId, ConsensusPubkey: slot.ConsensusPubkey, Power: slot.ConsensusPower}
-		return false, nil
-	}); err != nil {
-		return nil, err
 	}
 
 	last := map[string]types.LastAppliedValidator{}

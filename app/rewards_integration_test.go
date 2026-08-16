@@ -121,9 +121,15 @@ func TestRewardsShortEpochFinalizeSuspendClaim(t *testing.T) {
 	csParams := coreslottypes.DefaultParams(app.AuthorityAddress(), app.EmergencyAuthorityAddress())
 	_, err := a.CoreSlotKeeper.InitGenesis(base, &coreslottypes.GenesisState{
 		Params: &csParams,
+		// Fresh-genesis ACTIVE normalization at the chain's initial height (§80),
+		// with the version-1 Selection policy each slot's pointer names.
 		Slots: []*coreslottypes.CoreSlot{
-			{SlotId: 1, OperatorAddress: op1, PayoutAddress: pay1, ConsensusPubkey: ed25519Any(t, 1), Status: coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: 1, RewardWeight: coreslottypes.DefaultRewardWeight},
-			{SlotId: 2, OperatorAddress: op2, PayoutAddress: pay2, ConsensusPubkey: ed25519Any(t, 2), Status: coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: 1, RewardWeight: coreslottypes.DefaultRewardWeight},
+			{SlotId: 1, OperatorAddress: op1, PayoutAddress: pay1, SettlementAddress: pay1, ConsensusPubkey: ed25519Any(t, 1), Status: coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: 1, RewardWeight: coreslottypes.DefaultRewardWeight, ActivationSequence: 1, ActivatedHeight: 1, ActivationEffectiveHeight: 1, CurrentSelectionPolicyVersion: 1},
+			{SlotId: 2, OperatorAddress: op2, PayoutAddress: pay2, SettlementAddress: pay2, ConsensusPubkey: ed25519Any(t, 2), Status: coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: 1, RewardWeight: coreslottypes.DefaultRewardWeight, ActivationSequence: 1, ActivatedHeight: 1, ActivationEffectiveHeight: 1, CurrentSelectionPolicyVersion: 1},
+		},
+		SelectionPolicies: []*coreslottypes.SelectionPolicyVersion{
+			{SlotId: 1, PolicyVersion: 1, SelectionRateBps: 2_500, MaxSelectedParticipants: 10, ValidFromHeight: 1},
+			{SlotId: 2, PolicyVersion: 1, SelectionRateBps: 2_500, MaxSelectedParticipants: 10, ValidFromHeight: 1},
 		},
 		RewardWeights: []*coreslottypes.OperatorRewardWeight{
 			{SlotId: 1, FinalWeight: coreslottypes.DefaultRewardWeight},

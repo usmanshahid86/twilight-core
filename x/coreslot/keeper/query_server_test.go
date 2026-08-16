@@ -37,7 +37,7 @@ func TestReservedConsensusAddressQuery_GenesisFixture(t *testing.T) {
 		consAddr[i] = byte(i + 1)
 	}
 	op := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
-	_, err := k.InitGenesis(ctx, &types.GenesisState{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{
 		Params: &params,
 		// Genesis requires at least one active slot; the reservation below is the
 		// fixture under test and is independent of this slot's consensus key.
@@ -80,7 +80,7 @@ func TestReservedConsensusAddressQuery_RemovalLifecycle(t *testing.T) {
 	op2 := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
 
 	// Two active slots so removing one stays above the minimum-active-slots floor.
-	_, err := k.InitGenesis(ctx, &types.GenesisState{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{
 		Params: &params,
 		Slots: []*types.CoreSlot{
 			slot(t, 1, op1, 7, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
@@ -115,16 +115,29 @@ func TestReservedConsensusAddressQuery_RemovalLifecycle(t *testing.T) {
 func TestCoreSlotsQueryPagination(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	params := types.DefaultParams(authority, emergency)
-	_, err := k.InitGenesis(ctx, &types.GenesisState{
+	// Fresh genesis admits only PENDING and ACTIVE, so the mixed-status fixture
+	// this test needs is reached the way a chain reaches it: import five ACTIVE
+	// slots, then drive two of them through the lifecycle handlers.
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{
 		Params: &params,
 		Slots: []*types.CoreSlot{
 			querySlot(t, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower),
-			querySlot(t, 2, types.SlotStatus_SLOT_STATUS_INACTIVE, 0),
+			querySlot(t, 2, types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower),
 			querySlot(t, 3, types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower),
-			querySlot(t, 4, types.SlotStatus_SLOT_STATUS_SUSPENDED, 0),
+			querySlot(t, 4, types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower),
 			querySlot(t, 5, types.SlotStatus_SLOT_STATUS_ACTIVE, params.SlotVotingPower),
 		},
 		NextSlotId: 6,
+	})
+	require.NoError(t, err)
+
+	msgs := keeper.NewMsgServer(k)
+	_, err = msgs.InactivateCoreSlot(ctx, &types.MsgInactivateCoreSlot{
+		AuthorityOrOperator: authority, SlotId: 2, Reason: "maintenance",
+	})
+	require.NoError(t, err)
+	_, err = msgs.SuspendCoreSlot(ctx, &types.MsgSuspendCoreSlot{
+		Authority: authority, SlotId: 4, Reason: "evidence",
 	})
 	require.NoError(t, err)
 

@@ -37,6 +37,45 @@ message CoreSlot {
   int64 suspended_height = 11;
   int64 removed_height = 12;
   OperatorMetadata metadata = 13;
+
+  // V2 structural state (architecture section 17). Additive under the existing
+  // v1 API: no field above is renumbered, retyped or removed, so CoreSlot bytes
+  // written before these fields existed still decode.
+
+  // settlement_address is the operator's operational credential address
+  // (section 24). It is a value destination and takes the full canonical
+  // economic-address rule, unlike operator_address which is a control identity.
+  string settlement_address = 14;
+  // activation_sequence is the activation generation. Zero means never
+  // activated; every successful activation or reactivation increments it.
+  uint64 activation_sequence = 15;
+  // activation_effective_height is the height from which the current generation
+  // is effective for reward accounting: H+1 for a runtime activation at height
+  // H, and initial_height for a fresh-genesis ACTIVE slot (section 21).
+  int64 activation_effective_height = 16;
+  // current_selection_policy_version points at the slot's current
+  // SelectionPolicyVersion row. The pointer lives here rather than in a separate
+  // collection, exactly as section 17 places it.
+  uint64 current_selection_policy_version = 17;
+  // last_selection_policy_update_height is the height of the last successful
+  // post-registration policy update, zero until one occurs. It is stored rather
+  // than derived because section 26's cooldown reads it directly and it records
+  // the update transaction's height, which a version's valid_from_height does
+  // not recover.
+  int64 last_selection_policy_update_height = 18;
+}
+
+// SelectionPolicyVersion is one entry in a slot's immutable Selection policy
+// history (section 26), keyed by (slot_id, policy_version). A superseded row is
+// never rewritten.
+message SelectionPolicyVersion {
+  uint64 slot_id = 1;
+  uint64 policy_version = 2;
+  uint64 selection_rate_bps = 3;
+  uint64 max_selected_participants = 4;
+  int64 valid_from_height = 5;
+  // valid_until_height_exclusive is 0 for the current version.
+  int64 valid_until_height_exclusive = 6;
 }
 
 message Params {
@@ -44,12 +83,25 @@ message Params {
   string emergency_authority = 2;
   int64 slot_voting_power = 3;
   uint64 min_active_slots = 4;
+  // max_active_slots is the governance-configured operational ceiling on
+  // simultaneously ACTIVE slots. It is bounded in turn by the immutable
+  // HardMaxActiveCoreSlots (= 100) and must never exceed it. The two are
+  // distinct layers and are enforced separately.
   uint64 max_active_slots = 5;
-  uint64 activation_delay_blocks = 6;
+  // Deprecated: V2 requires this to be 0. The field number is retained rather
+  // than reserved because the API version is unchanged; removing it under an
+  // unchanged v1 package would be the more disruptive choice.
+  uint64 activation_delay_blocks = 6 [deprecated = true];
   uint64 key_rotation_delay_blocks = 7;
-  uint64 removal_delay_blocks = 8;
+  // Deprecated: V2 requires this to be 0. See activation_delay_blocks.
+  uint64 removal_delay_blocks = 8 [deprecated = true];
   uint64 consensus_key_reuse_lockout = 9;
-  bool allow_self_registration = 10;
+  // Deprecated: V2 requires this to be false. Architecture section 19 states
+  // that fresh V2.2 exposes no permissionless self-registration consensus path,
+  // so registration is authority-only and the runtime authorization branch that
+  // consulted this field is deleted. See activation_delay_blocks for why the
+  // field number is retained.
+  bool allow_self_registration = 10 [deprecated = true];
   bool allow_emergency_below_min_active = 11;
 }
 

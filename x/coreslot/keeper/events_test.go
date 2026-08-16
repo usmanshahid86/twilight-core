@@ -47,7 +47,7 @@ func oneActiveGenesis(t *testing.T, k keeper.Keeper, ctx sdk.Context, authority,
 	t.Helper()
 	params := types.DefaultParams(authority, emergency)
 	op1 := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
-	_, err := k.InitGenesis(ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{Params: &params, Slots: []*types.CoreSlot{
 		slot(t, 1, op1, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 	}, NextSlotId: 2})
 	require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestEndBlockEventsEmittedExactlyOnce(t *testing.T) {
 	msgs := keeper.NewMsgServer(k)
 
 	op2 := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
-	res, err := msgs.RegisterCoreSlot(ctx, &types.MsgRegisterCoreSlot{Authority: authority, OperatorAddress: op2, PayoutAddress: op2, ConsensusPubkey: pubkey(t, 2)})
+	res, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, op2, op2, 2))
 	require.NoError(t, err)
 	_, err = msgs.ActivateCoreSlot(ctx, &types.MsgActivateCoreSlot{Authority: authority, SlotId: res.SlotId})
 	require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestValidatorUpdateEventHasSlotAndOperator(t *testing.T) {
 	msgs := keeper.NewMsgServer(k)
 
 	op2 := sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String()
-	res, err := msgs.RegisterCoreSlot(ctx, &types.MsgRegisterCoreSlot{Authority: authority, OperatorAddress: op2, PayoutAddress: op2, ConsensusPubkey: pubkey(t, 2)})
+	res, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, op2, op2, 2))
 	require.NoError(t, err)
 	_, err = msgs.ActivateCoreSlot(ctx, &types.MsgActivateCoreSlot{Authority: authority, SlotId: res.SlotId})
 	require.NoError(t, err)
@@ -246,13 +246,17 @@ func TestStaleRotationCancelEventExactValues(t *testing.T) {
 	require.NoError(t, err)
 
 	// Bypass the lifecycle handler so the queued rotation remains stale and
-	// EndBlock must defensively drop it without mutating the removed slot.
+	// EndBlock must defensively drop it without mutating the removed slot. The
+	// ACTIVE membership index is cleared alongside the status: this fixture is
+	// about the stale rotation, and leaving the index disagreeing with the record
+	// would instead exercise the index-divergence guard.
 	before, err := k.Slots.Get(ctx, 1)
 	require.NoError(t, err)
 	removed := before
 	removed.Status = types.SlotStatus_SLOT_STATUS_REMOVED
 	removed.ConsensusPower = 0
 	require.NoError(t, k.Slots.Set(ctx, 1, removed))
+	require.NoError(t, k.ActiveSlots.Remove(ctx, 1))
 
 	ctx = ctx.WithBlockHeight(2).WithEventManager(sdk.NewEventManager())
 	_, err = k.EndBlock(ctx)
@@ -290,7 +294,7 @@ func TestEventAttributesComplete(t *testing.T) {
 	msgs := keeper.NewMsgServer(k)
 
 	op3 := sdk.AccAddress(append([]byte{4}, make([]byte, 19)...)).String()
-	res3, err := msgs.RegisterCoreSlot(ctx, &types.MsgRegisterCoreSlot{Authority: authority, OperatorAddress: op3, PayoutAddress: op3, ConsensusPubkey: pubkey(t, 3)})
+	res3, err := msgs.RegisterCoreSlot(ctx, registerMsg(t, authority, op3, op3, 3))
 	require.NoError(t, err)
 	_, err = msgs.ActivateCoreSlot(ctx, &types.MsgActivateCoreSlot{Authority: authority, SlotId: res3.SlotId})
 	require.NoError(t, err)

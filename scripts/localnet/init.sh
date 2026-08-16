@@ -30,7 +30,9 @@ emergency="$(sed -n 's/.*"address":"\([^"]*\)".*/\1/p' "$NET/operator1.json")"
 for i in 0 1 2 3; do
   operator="$(sed -n 's/.*"address":"\([^"]*\)".*/\1/p' "$NET/operator$i.json")"
   pubkey="$(sed -n 's/.*"value": "\([^"]*\)".*/\1/p' "$NET/node$i/config/priv_validator_key.json" | head -n 1)"
-  "$BIN" coreslot-genesis add "$operator" "$operator" "$pubkey" "node$i" --home "$genesis_home"
+  # operator = payout = settlement for the localnet; the settlement address is
+  # mandatory protocol state and has no default.
+  "$BIN" coreslot-genesis add "$operator" "$operator" "$operator" "$pubkey" "node$i" --home "$genesis_home"
 done
 "$BIN" coreslot-genesis validate --home "$genesis_home"
 

@@ -26,4 +26,14 @@ var (
 	// the wrapped message; it is a distinct code from ErrInvalidParams because a
 	// rejected payee is an admission failure, not a parameter fault.
 	ErrInvalidAddress = errorsmod.Register(ModuleName, 14, "invalid economic address")
+	// ErrInvalidSelectionPolicy is returned when a Selection policy fails §27
+	// local structural validity, or when a slot's stored policy history and
+	// current-version pointer are inconsistent. It is distinct from
+	// ErrInvalidParams because a policy is per-slot operator configuration rather
+	// than a module parameter.
+	ErrInvalidSelectionPolicy = errorsmod.Register(ModuleName, 15, "invalid selection policy")
+	// ErrNoOpUpdate is returned when a mutation would replace a value with the
+	// one already stored. §24 requires an identical settlement-address
+	// replacement to be rejected rather than silently accepted.
+	ErrNoOpUpdate = errorsmod.Register(ModuleName, 16, "update would not change stored state")
 )

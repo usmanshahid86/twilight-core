@@ -24,11 +24,14 @@ func TestReadAPIActiveSlotsSortedAndFiltered(t *testing.T) {
 		sdk.AccAddress(append([]byte{3}, make([]byte, 19)...)).String(),
 		sdk.AccAddress(append([]byte{4}, make([]byte, 19)...)).String(),
 	}
-	_, err := k.InitGenesis(ctx, &types.GenesisState{
+	// Fresh genesis admits only PENDING and ACTIVE; slot 2 becomes INACTIVE
+	// through the lifecycle handler, which is also what keeps the ACTIVE index
+	// and the records in step.
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{
 		Params: &params,
 		Slots: []*types.CoreSlot{
 			slot(t, 3, operators[2], 3, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
-			slot(t, 2, operators[1], 2, types.SlotStatus_SLOT_STATUS_INACTIVE, 0),
+			slot(t, 2, operators[1], 2, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 			slot(t, 1, operators[0], 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1),
 		},
 		RewardWeights: []*types.OperatorRewardWeight{
@@ -37,6 +40,10 @@ func TestReadAPIActiveSlotsSortedAndFiltered(t *testing.T) {
 			{SlotId: 3, FinalWeight: "3.000000000000000000"},
 		},
 		NextSlotId: 4,
+	})
+	require.NoError(t, err)
+	_, err = keeper.NewMsgServer(k).InactivateCoreSlot(ctx, &types.MsgInactivateCoreSlot{
+		AuthorityOrOperator: authority, SlotId: 2, Reason: "maintenance",
 	})
 	require.NoError(t, err)
 	slotOne, err := k.GetSlot(ctx, 1)
@@ -63,7 +70,7 @@ func TestReadAPISlotAuthoritiesAndMissingWeight(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	params := types.DefaultParams(authority, emergency)
 	operator := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
-	_, err := k.InitGenesis(ctx, &types.GenesisState{
+	_, err := initGenesis(t, k, ctx, &types.GenesisState{
 		Params:     &params,
 		Slots:      []*types.CoreSlot{slot(t, 1, operator, 1, types.SlotStatus_SLOT_STATUS_ACTIVE, 1)},
 		NextSlotId: 2,

@@ -3,7 +3,6 @@ package keeper
 import (
 	"context"
 	"encoding/hex"
-	"sort"
 
 	"cosmossdk.io/collections"
 	storetypes "cosmossdk.io/core/store"
@@ -37,6 +36,20 @@ type Keeper struct {
 	LastApplied   collections.Map[string, types.LastAppliedValidator]
 	RewardWeights collections.Map[uint64, types.OperatorRewardWeight]
 	NextSlotID    collections.Item[uint64]
+
+	// SelectionPolicies is the immutable per-slot policy history keyed by
+	// (slot_id, policy_version). PR4 writes version 1 only and never supersedes
+	// it; runtime updates belong to a later change.
+	SelectionPolicies collections.Map[collections.Pair[uint64, uint64], types.SelectionPolicyVersion]
+
+	// ActiveSlots is a membership-only index of ACTIVE slot IDs. It is a key set
+	// with no value payload on purpose: CoreSlot stays the single authority for
+	// slot data, so there is no duplicated field that could silently diverge. Its
+	// only job is to make enumerating the active set O(A) instead of O(every slot
+	// ever registered), which is what the architecture's workload closure needs.
+	//
+	// collections.Uint64Key is big-endian, so iteration is ascending slot ID.
+	ActiveSlots collections.KeySet[uint64]
 }
 
 // NewKeeper builds the CoreSlot keeper. economicAddresses is required: an
@@ -57,6 +70,9 @@ func NewKeeper(cdc codec.Codec, storeService storetypes.KVStoreService, economic
 		LastApplied:       collections.NewMap(sb, collections.NewPrefix(types.LastPrefix), "last_applied", collections.StringKey, codec.CollValue[types.LastAppliedValidator](cdc)),
 		RewardWeights:     collections.NewMap(sb, collections.NewPrefix(types.RewardsPrefix), "reward_weights", collections.Uint64Key, codec.CollValue[types.OperatorRewardWeight](cdc)),
 		NextSlotID:        collections.NewItem(sb, collections.NewPrefix(types.NextSlotIDKey), "next_slot_id", collections.Uint64Value),
+		SelectionPolicies: collections.NewMap(sb, collections.NewPrefix(types.SelectionPoliciesPrefix), "selection_policies",
+			collections.PairKeyCodec(collections.Uint64Key, collections.Uint64Key), codec.CollValue[types.SelectionPolicyVersion](cdc)),
+		ActiveSlots: collections.NewKeySet(sb, collections.NewPrefix(types.ActiveSlotsPrefix), "active_slots", collections.Uint64Key),
 	}
 	schema, err := sb.Build()
 	if err != nil {
@@ -102,15 +118,51 @@ func consensusKey(any interface {
 	return hex.EncodeToString(addr), addr, nil
 }
 
+// activeCount returns the number of ACTIVE slots.
+//
+// It walks the ActiveSlot membership index, so its cost is proportional to the
+// active set and is bounded by HardMaxActiveCoreSlots. It must never be
+// reimplemented as a scan over Slots: the registered population grows without
+// bound over the chain's lifetime while the active set does not, and a consensus
+// path whose cost tracks lifetime history breaks the architecture's workload
+// closure. The same rule applies to GetActiveSlots and activeSlotIDs below.
 func (k Keeper) activeCount(ctx context.Context) (uint64, error) {
 	var count uint64
-	err := k.Slots.Walk(ctx, nil, func(_ uint64, slot types.CoreSlot) (bool, error) {
-		if slot.Status == types.SlotStatus_SLOT_STATUS_ACTIVE {
-			count++
-		}
+	err := k.ActiveSlots.Walk(ctx, nil, func(_ uint64) (bool, error) {
+		count++
 		return false, nil
 	})
-	return count, err
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// activeSlotIDs returns the ACTIVE slot IDs in ascending order. Ascending order
+// is the pinned enumeration contract, not an incidental property: it comes from
+// the index's big-endian key encoding rather than from sorting a set collected in
+// some other order.
+func (k Keeper) activeSlotIDs(ctx context.Context) ([]uint64, error) {
+	ids := make([]uint64, 0)
+	if err := k.ActiveSlots.Walk(ctx, nil, func(id uint64) (bool, error) {
+		ids = append(ids, id)
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// setSlotActive records ACTIVE membership for a slot. Callers must invoke it in
+// the same state transition that writes the ACTIVE CoreSlot row.
+func (k Keeper) setSlotActive(ctx context.Context, slotID uint64) error {
+	return k.ActiveSlots.Set(ctx, slotID)
+}
+
+// clearSlotActive drops ACTIVE membership for a slot. Removing an absent key is
+// not an error, so this is safe on a transition out of a non-active status.
+func (k Keeper) clearSlotActive(ctx context.Context, slotID uint64) error {
+	return k.ActiveSlots.Remove(ctx, slotID)
 }
 
 func (k Keeper) getSlot(ctx context.Context, id uint64) (types.CoreSlot, error) {
@@ -124,16 +176,28 @@ func (k Keeper) getSlot(ctx context.Context, id uint64) (types.CoreSlot, error) 
 // GetActiveSlots returns the active CoreSlot rows in ascending slot ID order.
 // It is a read-only module integration surface; validator-set ownership remains
 // entirely inside x/coreslot.
+//
+// Rows come from the ActiveSlot index and are then read from Slots, which stays
+// authoritative for slot data. There is deliberately no fallback scan: a missing
+// row for an indexed ID means index and record have diverged, which is a broken
+// invariant rather than a condition to paper over, so it fails closed.
 func (k Keeper) GetActiveSlots(ctx context.Context) ([]types.CoreSlot, error) {
-	slots := make([]types.CoreSlot, 0)
-	err := k.Slots.Walk(ctx, nil, func(_ uint64, slot types.CoreSlot) (bool, error) {
-		if slot.Status == types.SlotStatus_SLOT_STATUS_ACTIVE {
-			slots = append(slots, slot)
+	ids, err := k.activeSlotIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	slots := make([]types.CoreSlot, 0, len(ids))
+	for _, id := range ids {
+		slot, err := k.Slots.Get(ctx, id)
+		if err != nil {
+			return nil, types.ErrInvalidGenesis.Wrapf("active index references missing slot %d", id)
 		}
-		return false, nil
-	})
-	sort.Slice(slots, func(i, j int) bool { return slots[i].SlotId < slots[j].SlotId })
-	return slots, err
+		if slot.Status != types.SlotStatus_SLOT_STATUS_ACTIVE {
+			return nil, types.ErrInvalidTransition.Wrapf("active index references slot %d with status %s", id, slot.Status)
+		}
+		slots = append(slots, slot)
+	}
+	return slots, nil
 }
 
 // GetSlot returns a CoreSlot row without exposing collection internals.

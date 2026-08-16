@@ -18,6 +18,15 @@ import (
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
+// The chain's first block height. These commands write it into the CometBFT
+// genesis document, and the slot rows they build are normalized against the same
+// value, so the two cannot drift apart. Both spellings exist because the document
+// carries the height as a JSON string.
+const (
+	genesisInitialHeight     = int64(1)
+	genesisInitialHeightJSON = `"1"`
+)
+
 func GetGenesisCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "coreslot-genesis", Short: "Manage core slots in genesis"}
 	cmd.AddCommand(addGenesisSlotCmd(), setAuthoritiesCmd(), validateGenesisCmd())
@@ -44,7 +53,7 @@ func setAuthoritiesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			doc["initial_height"] = json.RawMessage(`"1"`)
+			doc["initial_height"] = json.RawMessage(genesisInitialHeightJSON)
 			return saveGenesis(path, doc)
 		},
 	}
@@ -54,8 +63,8 @@ func setAuthoritiesCmd() *cobra.Command {
 
 func addGenesisSlotCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:  "add [operator] [payout] [consensus-pubkey-base64] [moniker]",
-		Args: cobra.ExactArgs(4),
+		Use:  "add [operator] [payout] [settlement] [consensus-pubkey-base64] [moniker]",
+		Args: cobra.ExactArgs(5),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx := client.GetClientContextFromCmd(cmd)
 			path := filepath.Join(clientCtx.HomeDir, "config", "genesis.json")
@@ -71,7 +80,7 @@ func addGenesisSlotCmd() *cobra.Command {
 			} else {
 				return fmt.Errorf("coreslot genesis missing")
 			}
-			pk, err := pubKeyAny(args[2])
+			pk, err := pubKeyAny(args[3])
 			if err != nil {
 				return err
 			}
@@ -80,8 +89,26 @@ func addGenesisSlotCmd() *cobra.Command {
 				id = 1
 			}
 			power, _ := cmd.Flags().GetInt64("power")
-			slot := &types.CoreSlot{SlotId: id, OperatorAddress: args[0], PayoutAddress: args[1], ConsensusPubkey: pk, Status: types.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: power, RewardWeight: types.DefaultRewardWeight, Metadata: &types.OperatorMetadata{Moniker: args[3]}}
+			rateBps, _ := cmd.Flags().GetUint64("selection-rate-bps")
+			maxSelected, _ := cmd.Flags().GetUint64("max-selected-participants")
+			// This tool writes a fresh V2 genesis, whose only admissible statuses are
+			// PENDING and ACTIVE, and it always writes an ACTIVE slot. The §80
+			// normalization for a genesis ACTIVE slot is the first activation
+			// generation effective from the initial height, which this command pins
+			// to 1 below. Fresh genesis is the explicit exception to the runtime H+1
+			// rule, so both heights are the initial height.
+			slot := &types.CoreSlot{
+				SlotId: id, OperatorAddress: args[0], PayoutAddress: args[1], SettlementAddress: args[2],
+				ConsensusPubkey: pk, Status: types.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: power,
+				RewardWeight: types.DefaultRewardWeight, Metadata: &types.OperatorMetadata{Moniker: args[4]},
+				ActivationSequence: 1, ActivatedHeight: genesisInitialHeight, ActivationEffectiveHeight: genesisInitialHeight,
+				CurrentSelectionPolicyVersion: 1, LastSelectionPolicyUpdateHeight: 0,
+			}
 			genesis.Slots = append(genesis.Slots, slot)
+			genesis.SelectionPolicies = append(genesis.SelectionPolicies, &types.SelectionPolicyVersion{
+				SlotId: id, PolicyVersion: 1, SelectionRateBps: rateBps, MaxSelectedParticipants: maxSelected,
+				ValidFromHeight: genesisInitialHeight, ValidUntilHeightExclusive: 0,
+			})
 			genesis.RewardWeights = append(genesis.RewardWeights, &types.OperatorRewardWeight{SlotId: id, BaseWeight: types.DefaultRewardWeight, UptimeWeight: types.DefaultRewardWeight, PerformanceWeight: types.DefaultRewardWeight, FinalWeight: types.DefaultRewardWeight})
 			genesis.NextSlotId = id + 1
 			state[types.ModuleName] = clientCtx.Codec.MustMarshalJSON(&genesis)
@@ -91,10 +118,12 @@ func addGenesisSlotCmd() *cobra.Command {
 				return err
 			}
 			doc["app_state"] = appState
-			doc["initial_height"] = json.RawMessage(`"1"`)
+			doc["initial_height"] = json.RawMessage(genesisInitialHeightJSON)
 			var validators []genesisValidator
 			_ = json.Unmarshal(doc["validators"], &validators)
-			validators = append(validators, genesisValidator{PubKey: genesisPubKey{Type: "tendermint/PubKeyEd25519", Value: args[2]}, Power: strconv.FormatInt(power, 10), Name: args[3]})
+			// args[3] is the consensus pubkey and args[4] the moniker: the settlement
+			// address was inserted at args[2], which shifted both.
+			validators = append(validators, genesisValidator{PubKey: genesisPubKey{Type: "tendermint/PubKeyEd25519", Value: args[3]}, Power: strconv.FormatInt(power, 10), Name: args[4]})
 			doc["validators"], err = json.Marshal(validators)
 			if err != nil {
 				return err
@@ -103,6 +132,12 @@ func addGenesisSlotCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().Int64("power", types.DefaultSlotVotingPower, "consensus voting power")
+	// Per-slot Selection policy. These are operator configuration, not protocol
+	// constants: the values below are convenience defaults for local networks and
+	// carry no protocol standing. Only the local §27 rule constrains them here —
+	// a positive rate at most 5000 bps, and a positive participant maximum.
+	cmd.Flags().Uint64("selection-rate-bps", 2_500, "initial selection rate in basis points")
+	cmd.Flags().Uint64("max-selected-participants", 10, "initial per-slot maximum selected participants")
 	flags.AddQueryFlagsToCmd(cmd)
 	return cmd
 }
@@ -147,7 +182,7 @@ func validateGenesisCmd() *cobra.Command {
 					return fmt.Errorf("CometBFT validator %s does not match coreslot genesis", validator.Name)
 				}
 			}
-			doc["initial_height"] = json.RawMessage(`"1"`)
+			doc["initial_height"] = json.RawMessage(genesisInitialHeightJSON)
 			if err := saveGenesis(path, doc); err != nil {
 				return err
 			}
