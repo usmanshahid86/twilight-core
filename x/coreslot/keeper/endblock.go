@@ -46,13 +46,33 @@ func (k Keeper) endBlock(ctx context.Context) ([]abci.ValidatorUpdate, error) {
 	}
 	sort.Slice(due, func(i, j int) bool { return due[i].SlotId < due[j].SlotId })
 	for _, rotation := range due {
+		// A read failure here HALTS the block. It does not drop the rotation.
+		//
+		// Dropping is a consensus-state mutation — it frees the staged consensus key
+		// and deletes the queued rotation — and taking it on a record the module
+		// could not read means changing consensus state on the strength of evidence
+		// it does not have. That is the one thing a block path must not do.
+		//
+		// Absence halts too, not just corruption. Slot rows are terminal, never
+		// deleted, and a rotation is only queued for an existing slot and is
+		// canceled by every lifecycle transition, so a due rotation naming a slot
+		// with no record is index/record divergence — the same shape of fault
+		// GetActiveSlots already halts on a few lines below. Treating one as fatal
+		// and the other as routine would be incoherent.
+		//
+		// This costs no liveness the module did not already spend: a due rotation
+		// implies its slot was ACTIVE when the rotation survived to this point, so
+		// the slot is in the ACTIVE index, so a missing or unreadable record for it
+		// halts in diffAndPersist during this very block regardless. All this
+		// changes is that the halt happens at the read that noticed, with an
+		// accurate reason, instead of after silently mutating state first.
+		//
+		// The genuinely modeled "this rotation is no longer eligible" case is the
+		// status check below, which acts on a record it successfully read (F1).
 		slot, err := k.getSlot(ctx, rotation.SlotId)
 		if err != nil {
-			// Slot disappeared; drop the stale rotation without mutating state (F1).
-			if err := k.dropStaleRotation(ctx, rotation); err != nil {
-				return nil, err
-			}
-			continue
+			return nil, types.ErrInvalidTransition.Wrapf(
+				"slot %d has a due key rotation but its record could not be read: %v", rotation.SlotId, err)
 		}
 		if slot.Status != types.SlotStatus_SLOT_STATUS_ACTIVE {
 			// Lifecycle change should have cancelled this already; never mutate a
@@ -112,8 +132,15 @@ func (k Keeper) dropStaleRotation(ctx context.Context, rotation types.PendingKey
 }
 
 // operatorForSlot resolves a slot's operator address for event enrichment,
-// returning "" if the slot row is absent (slots are terminal, not deleted, so
-// this is normally present even for REMOVED slots).
+// returning "" if the row cannot be read (slots are terminal, not deleted, so it
+// is normally present even for REMOVED slots).
+//
+// This is the one block-path read that deliberately does NOT distinguish absence
+// from corruption, and it is safe precisely because it decides nothing: the
+// result is an event attribute, never a state transition or a validator update.
+// Halting a block over an event label would trade a real consequence for a
+// cosmetic one — and any state broken enough to fail this read fails a
+// consequential read in the same block, where it does halt.
 func (k Keeper) operatorForSlot(ctx context.Context, slotID uint64) string {
 	slot, err := k.Slots.Get(ctx, slotID)
 	if err != nil {
