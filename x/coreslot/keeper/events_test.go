@@ -375,4 +375,46 @@ func TestEventAttributesComplete(t *testing.T) {
 			require.NotEmptyf(t, attrValue(t, ev, key), "event %s attribute %s must be non-empty", evtType, key)
 		}
 	}
+
+	// Presence and non-emptiness cannot tell a correct policy-update event from a
+	// plausible-looking wrong one — the wrong slot, the operator of another slot,
+	// a stale version, the transaction height instead of the effective height
+	// would all satisfy the loop above. Slot 3 was registered and updated in block
+	// 1, so its new version is 2 and takes effect at height 2.
+	policyEv := firstEvent(t, ctx, types.EventTypeSelectionPolicyUpdated)
+	require.Equal(t, "3", attrValue(t, policyEv, types.AttributeKeySlotID))
+	require.Equal(t, op3, attrValue(t, policyEv, types.AttributeKeyOperatorAddress))
+	require.Equal(t, "2", attrValue(t, policyEv, types.AttributeKeyPolicyVersion))
+	require.Equal(t, "2", attrValue(t, policyEv, types.AttributeKeyEffectiveHeight))
+}
+
+// TestSelectionPolicyUpdatedEventExactValues pins the event at values that cannot
+// be confused with one another: version 2 becoming effective at height 51 after a
+// transaction in block 50. The comprehensive regression above necessarily runs in
+// block 1, where the version and the effective height are both "2" and a handler
+// that emitted one in place of the other would still pass.
+func TestSelectionPolicyUpdatedEventExactValues(t *testing.T) {
+	k, ctx, authority, emergency := setup(t)
+	op := policySlotGenesis(t, k, ctx, authority, emergency)
+	msgs := keeper.NewMsgServer(k)
+
+	updateCtx := ctx.WithBlockHeight(50).WithEventManager(sdk.NewEventManager())
+	res, err := msgs.UpdateSelectionPolicy(updateCtx, &types.MsgUpdateSelectionPolicy{
+		Operator: op, SlotId: 1, SelectionRateBps: 1_234, MaxSelectedParticipants: 42,
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), res.PolicyVersion)
+
+	require.Equal(t, 1, countEvents(updateCtx, types.EventTypeSelectionPolicyUpdated))
+	ev := firstEvent(t, updateCtx, types.EventTypeSelectionPolicyUpdated)
+	require.Equal(t, "1", attrValue(t, ev, types.AttributeKeySlotID))
+	require.Equal(t, op, attrValue(t, ev, types.AttributeKeyOperatorAddress))
+	require.Equal(t, "2", attrValue(t, ev, types.AttributeKeyPolicyVersion),
+		"the event names the version the update produced")
+	require.Equal(t, "51", attrValue(t, ev, types.AttributeKeyEffectiveHeight),
+		"the effective height is H+1, not the transaction height")
+
+	// The event agrees with what was actually written.
+	written := policyRow(t, k, updateCtx, 1, res.PolicyVersion)
+	require.Equal(t, int64(51), written.ValidFromHeight)
 }

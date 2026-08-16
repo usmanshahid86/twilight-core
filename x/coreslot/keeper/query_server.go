@@ -3,11 +3,60 @@ package keeper
 import (
 	"context"
 	"encoding/hex"
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/cosmos/cosmos-sdk/types/query"
 
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
+
+// grpcStatusError attaches a gRPC status code to a module error without
+// discarding the error itself.
+//
+// Returning a bare status would throw away the very thing being reported: the
+// module distinguishes ordinary absence from state corruption, and an in-process
+// caller comparing with errors.Is is entitled to see which one it got. Wrapping
+// keeps that chain intact while status.FromError — used by the gRPC server and by
+// the REST gateway to pick an HTTP code — finds the code through GRPCStatus.
+type grpcStatusError struct {
+	code codes.Code
+	err  error
+}
+
+func (e grpcStatusError) Error() string { return e.err.Error() }
+
+func (e grpcStatusError) Unwrap() error { return e.err }
+
+func (e grpcStatusError) GRPCStatus() *grpcstatus.Status {
+	return grpcstatus.New(e.code, e.err.Error())
+}
+
+// policyQueryError maps a keeper-level Selection-policy error onto the public
+// query contract.
+//
+// A slot or version that does not exist is an ordinary answer and must reach a
+// caller as NotFound — a REST 404 rather than a server error. A disagreement
+// between policy history and its derived index is categorically different: it
+// means stored state contradicts itself, so it stays a fail-closed internal
+// fault and must never be flattened into "not found", which would read as a
+// perfectly normal absence.
+//
+// Anything else is passed through unchanged rather than guessed at.
+func policyQueryError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, types.ErrSlotNotFound), errors.Is(err, types.ErrSelectionPolicyNotFound):
+		return grpcStatusError{code: codes.NotFound, err: err}
+	case errors.Is(err, types.ErrInvalidSelectionPolicy):
+		return grpcStatusError{code: codes.Internal, err: err}
+	default:
+		return err
+	}
+}
 
 type queryServer struct{ Keeper }
 
@@ -125,11 +174,11 @@ func (q queryServer) ReservedConsensusAddress(ctx context.Context, req *types.Qu
 func (q queryServer) SelectionPolicy(ctx context.Context, req *types.QuerySelectionPolicyRequest) (*types.QuerySelectionPolicyResponse, error) {
 	slot, err := q.getSlot(ctx, req.SlotId)
 	if err != nil {
-		return nil, err
+		return nil, policyQueryError(err)
 	}
 	policy, err := q.currentPolicy(ctx, slot)
 	if err != nil {
-		return nil, err
+		return nil, policyQueryError(err)
 	}
 	return &types.QuerySelectionPolicyResponse{Policy: &policy}, nil
 }
@@ -140,7 +189,16 @@ func (q queryServer) SelectionPolicy(ctx context.Context, req *types.QuerySelect
 func (q queryServer) SelectionPolicyVersion(ctx context.Context, req *types.QuerySelectionPolicyVersionRequest) (*types.QuerySelectionPolicyResponse, error) {
 	policy, err := q.SelectionPolicies.Get(ctx, policyKey(req.SlotId, req.PolicyVersion))
 	if err != nil {
-		return nil, types.ErrSelectionPolicyNotFound.Wrapf("slot %d version %d", req.SlotId, req.PolicyVersion)
+		return nil, policyQueryError(types.ErrSelectionPolicyNotFound.Wrapf("slot %d version %d", req.SlotId, req.PolicyVersion))
+	}
+	// The row was addressed by (slot, version), so its stored identity has to
+	// agree with the key it was found under. A row that disagrees is corruption
+	// rather than an answer: returning it would hand the caller some other slot's
+	// or version's policy under the identity it asked about, and reporting it as
+	// not-found would hide a contradiction behind an ordinary absence.
+	if policy.SlotId != req.SlotId || policy.PolicyVersion != req.PolicyVersion {
+		return nil, policyQueryError(types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d version %d row identity does not match its key", req.SlotId, req.PolicyVersion))
 	}
 	return &types.QuerySelectionPolicyResponse{Policy: &policy}, nil
 }
@@ -150,7 +208,7 @@ func (q queryServer) SelectionPolicyVersion(ctx context.Context, req *types.Quer
 func (q queryServer) SelectionPolicyAtHeight(ctx context.Context, req *types.QuerySelectionPolicyAtHeightRequest) (*types.QuerySelectionPolicyResponse, error) {
 	policy, err := q.Keeper.SelectionPolicyAtHeight(ctx, req.SlotId, req.AtHeight)
 	if err != nil {
-		return nil, err
+		return nil, policyQueryError(err)
 	}
 	return &types.QuerySelectionPolicyResponse{Policy: &policy}, nil
 }

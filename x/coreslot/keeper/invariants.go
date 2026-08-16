@@ -9,8 +9,8 @@ import (
 )
 
 // initialPolicyVersion is the version number of the policy every slot is
-// registered with. Later versions are created by policy updates, which this
-// change does not implement.
+// registered with. Runtime policy updates supersede it by creating successive
+// versions; version 1 is never re-created and never renumbered.
 const initialPolicyVersion uint64 = 1
 
 // policyKey is the canonical (slot_id, policy_version) key for the immutable
@@ -126,8 +126,16 @@ func (k Keeper) SelectionPolicyAtHeight(ctx context.Context, slotID uint64, heig
 }
 
 // currentPolicy returns the policy version a slot currently points at, failing
-// closed if the pointer names a version that does not exist or a row whose stored
-// identity disagrees with its key.
+// closed if the pointer names a version that does not exist, a row whose stored
+// identity disagrees with its key, or a row that is no longer open.
+//
+// The open check is what makes "current" mean current. A version whose exclusive
+// end is set has already been superseded and is immutable historical state, so a
+// pointer naming one is a broken invariant — and, critically, it is the only
+// thing standing between a corrupt pointer and an update REWRITING that closed
+// row's end. Every caller wants the open row: the ACTIVE-slot invariant, the
+// current-policy query, and the update path all ask "which policy is in force",
+// which a closed version cannot answer.
 func (k Keeper) currentPolicy(ctx context.Context, slot types.CoreSlot) (types.SelectionPolicyVersion, error) {
 	if slot.CurrentSelectionPolicyVersion == 0 {
 		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf("slot %d has no current policy version", slot.SlotId)
@@ -141,7 +149,79 @@ func (k Keeper) currentPolicy(ctx context.Context, slot types.CoreSlot) (types.S
 		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
 			"slot %d policy row identity does not match its key", slot.SlotId)
 	}
+	if policy.ValidUntilHeightExclusive != 0 {
+		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d points at policy version %d, which was already closed at height %d",
+			slot.SlotId, slot.CurrentSelectionPolicyVersion, policy.ValidUntilHeightExclusive)
+	}
 	return policy, nil
+}
+
+// validatePolicyTransitionSeam proves that the seam a policy update is about to
+// write is admissible, BEFORE the first write happens.
+//
+// Every write in the transition is a Set, and a Set is unconditional: it closes a
+// row, or occupies a key, whether or not doing so is legal. Store-level failures
+// still roll back with the transaction cache, but a predictable conflict must not
+// depend on that — a direct keeper or message invocation has no such cache, and
+// "we would have rolled back" is not the same guarantee as "we never wrote". So
+// each conflict the module can know about is proven absent up front.
+//
+// Every check here is bounded: two point lookups and one indexed resolution. None
+// of them walks policy history, which is precisely the cost the seek index exists
+// to avoid — a validation that scanned history would reintroduce, on the write
+// path, the complexity the read path was built to escape.
+func (k Keeper) validatePolicyTransitionSeam(
+	ctx context.Context,
+	slot types.CoreSlot,
+	current types.SelectionPolicyVersion,
+	height, effectiveHeight int64,
+	nextVersion uint64,
+) error {
+	// §27 local validity of what is ALREADY stored. An update supersedes the
+	// current version; it is not a repair mechanism for one that should never have
+	// been admitted, and transitioning out of an invalid current state would
+	// launder it into permanent history as a legitimately closed version.
+	if err := types.ValidateSelectionPolicyValues(current.SelectionRateBps, current.MaxSelectedParticipants); err != nil {
+		return types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d stored current policy version %d is invalid: %v", slot.SlotId, current.PolicyVersion, err)
+	}
+	// The seek index must already agree with the pointer at this height. Resolving
+	// through the index is what makes the check bounded, and it covers three
+	// distinct corruptions at once: a missing entry for the current version, an
+	// entry naming a different version, and a rogue later start that would shadow
+	// the current version for every subsequent height query.
+	//
+	// Absence is not ordinary here. A slot being updated HAS a current version by
+	// construction, so an index that cannot resolve it has diverged from history,
+	// which is why the not-found answer is reported as invalid state rather than
+	// passed through.
+	resolved, err := k.SelectionPolicyAtHeight(ctx, slot.SlotId, height)
+	if err != nil {
+		return types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d policy index does not resolve at height %d: %v", slot.SlotId, height, err)
+	}
+	if resolved.PolicyVersion != current.PolicyVersion {
+		return types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d policy index resolves version %d at height %d but the slot points at version %d",
+			slot.SlotId, resolved.PolicyVersion, height, current.PolicyVersion)
+	}
+	// Both successor keys must be vacant. An occupied history key would be
+	// overwritten — destroying a version that, if it exists at all, is immutable —
+	// and an occupied index key would silently repoint an existing start height.
+	if occupied, err := k.SelectionPolicies.Has(ctx, policyKey(slot.SlotId, nextVersion)); err != nil {
+		return err
+	} else if occupied {
+		return types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d already has a policy row at version %d", slot.SlotId, nextVersion)
+	}
+	if occupied, err := k.PolicyStarts.Has(ctx, policyStartKey(slot.SlotId, effectiveHeight)); err != nil {
+		return err
+	} else if occupied {
+		return types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d already has a policy index entry starting at height %d", slot.SlotId, effectiveHeight)
+	}
+	return nil
 }
 
 // validateActiveSlotInvariant checks the §18 requirements that must hold of an

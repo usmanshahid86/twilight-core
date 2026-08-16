@@ -316,6 +316,13 @@ func TestSelectionPolicyUpdateRejectionsAreAtomic(t *testing.T) {
 				require.NoError(t, k.SelectionPolicies.Set(ctx, collections.Join(uint64(1), uint64(math.MaxUint64)), saturated))
 				stored, err := k.GetSlot(ctx, 1)
 				require.NoError(t, err)
+				// The whole history must move with the pointer, index included.
+				// Leaving version 1 and its index entry behind would make this a
+				// divergence fixture instead: the transition seam would reject it for
+				// an incoherent index and the version arithmetic under test would
+				// never run.
+				require.NoError(t, k.SelectionPolicies.Remove(ctx, collections.Join(uint64(1), uint64(1))))
+				require.NoError(t, k.PolicyStarts.Set(ctx, collections.Join(uint64(1), saturated.ValidFromHeight), uint64(math.MaxUint64)))
 				stored.CurrentSelectionPolicyVersion = math.MaxUint64
 				require.NoError(t, k.Slots.Set(ctx, 1, stored))
 				return ctx.WithBlockHeight(10)
@@ -366,6 +373,256 @@ func TestSelectionPolicyUpdateRejectionsAreAtomic(t *testing.T) {
 			require.False(t, hasSeekEntry(t, k, runCtx, 1, runCtx.BlockHeight()+1), "no new seek entry")
 		})
 	}
+}
+
+// TestSelectionPolicyCooldownRejectsUnrepresentableConfiguredValue covers a
+// configured cooldown that fits uint64 but cannot be represented as a block
+// height.
+//
+// The value is legal as a parameter: 720 is a default and 360 a floor, and
+// neither is a maximum, so nothing in Params.Validate stops governance from
+// configuring one this large. Admission is where it has to be refused, and it
+// must be refused rather than narrowed — a wrapped conversion would silently
+// become a tiny or negative window and disable the rate limit entirely.
+func TestSelectionPolicyCooldownRejectsUnrepresentableConfiguredValue(t *testing.T) {
+	k, ctx, authority, emergency := setup(t)
+	op := policySlotGenesis(t, k, ctx, authority, emergency)
+	msgs := keeper.NewMsgServer(k)
+
+	const unrepresentable = uint64(math.MaxInt64) + 1
+	admissible := types.DefaultParams(authority, emergency)
+	admissible.SelectionPolicyUpdateCooldownBlocks = unrepresentable
+	require.NoError(t, admissible.Validate(),
+		"a cooldown above the int64 height domain is still a valid parameter — the bound is a floor, not a ceiling")
+	setCooldown(t, k, ctx, unrepresentable)
+
+	// First update: the last-update height is zero, which §26 exempts, so the
+	// cooldown is never consulted and no conversion is required.
+	firstCtx := ctx.WithBlockHeight(10)
+	_, err := msgs.UpdateSelectionPolicy(firstCtx, &types.MsgUpdateSelectionPolicy{
+		Operator: op, SlotId: 1, SelectionRateBps: 111, MaxSelectedParticipants: 11,
+	})
+	require.NoError(t, err, "the first post-registration update does not consult the cooldown")
+
+	// Second update: the conversion is now required and must fail closed.
+	secondCtx := ctx.WithBlockHeight(1_000_000).WithEventManager(sdk.NewEventManager())
+	before := snapshotPolicyState(t, k, secondCtx, 1)
+	_, err = msgs.UpdateSelectionPolicy(secondCtx, &types.MsgUpdateSelectionPolicy{
+		Operator: op, SlotId: 1, SelectionRateBps: 222, MaxSelectedParticipants: 12,
+	})
+	require.ErrorIs(t, err, types.ErrInvalidParams)
+	require.Contains(t, err.Error(), "not representable")
+	require.Equal(t, before, snapshotPolicyState(t, k, secondCtx, 1), "a rejected conversion must write nothing")
+	require.Zero(t, countEvents(secondCtx, types.EventTypeSelectionPolicyUpdated))
+}
+
+// --- malformed transition seam ---
+
+// policyStateSnapshot captures everything a policy update would write for one
+// slot: the record that holds the pointer and the cooldown height, the whole
+// policy history, and the whole seek index. Comparing two snapshots is how a
+// rejection is shown to be a NO-mutation rejection rather than a partly applied
+// one — including the writes a targeted assertion would not think to look for.
+type policyStateSnapshot struct {
+	slot     types.CoreSlot
+	policies map[uint64]types.SelectionPolicyVersion
+	starts   map[int64]uint64
+}
+
+func snapshotPolicyState(t *testing.T, k keeper.Keeper, ctx sdk.Context, slotID uint64) policyStateSnapshot {
+	t.Helper()
+	snapshot := policyStateSnapshot{
+		policies: map[uint64]types.SelectionPolicyVersion{},
+		starts:   map[int64]uint64{},
+	}
+	var err error
+	snapshot.slot, err = k.GetSlot(ctx, slotID)
+	require.NoError(t, err)
+	require.NoError(t, k.SelectionPolicies.Walk(ctx, collections.NewPrefixedPairRange[uint64, uint64](slotID),
+		func(key collections.Pair[uint64, uint64], policy types.SelectionPolicyVersion) (bool, error) {
+			snapshot.policies[key.K2()] = policy
+			return false, nil
+		}))
+	require.NoError(t, k.PolicyStarts.Walk(ctx, collections.NewPrefixedPairRange[uint64, int64](slotID),
+		func(key collections.Pair[uint64, int64], version uint64) (bool, error) {
+			snapshot.starts[key.K2()] = version
+			return false, nil
+		}))
+	return snapshot
+}
+
+// TestSelectionPolicyUpdateRejectsMalformedTransitionSeam proves each seam of the
+// transition is independently load-bearing.
+//
+// The writes are unconditional Sets: closing the outgoing row, occupying the next
+// history key, occupying the new index key. Against malformed state each one is a
+// way to destroy something immutable — reclosing an already-closed version,
+// overwriting a version that exists, repointing a start height already claimed.
+// Every case here is therefore given its OWN fixture rather than folded into a
+// single "corrupted state" scenario: one shared fixture would let a single
+// surviving check mask the removal of any of the others.
+func TestSelectionPolicyUpdateRejectsMalformedTransitionSeam(t *testing.T) {
+	// Each fixture corrupts one seam of a healthy slot 1 and returns the height the
+	// update is attempted at.
+	for _, tc := range []struct {
+		name       string
+		corrupt    func(t *testing.T, k keeper.Keeper, ctx sdk.Context)
+		wantErr    error
+		wantDetail string
+	}{
+		{
+			name: "the pointer names an already-closed version",
+			corrupt: func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+				closed := policyRow(t, k, ctx, 1, 1)
+				closed.ValidUntilHeightExclusive = 100
+				require.NoError(t, k.SelectionPolicies.Set(ctx, collections.Join(uint64(1), uint64(1)), closed))
+			},
+			wantErr:    types.ErrInvalidSelectionPolicy,
+			wantDetail: "already closed",
+		},
+		{
+			name: "the next history key is already occupied",
+			corrupt: func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+				// A row already sitting where the successor would land. It carries no
+				// index entry, so the current version still resolves and this is the
+				// only seam under test.
+				require.NoError(t, k.SelectionPolicies.Set(ctx, collections.Join(uint64(1), uint64(2)),
+					types.SelectionPolicyVersion{
+						SlotId: 1, PolicyVersion: 2, SelectionRateBps: 999, MaxSelectedParticipants: 9,
+						ValidFromHeight: 5_000,
+					}))
+			},
+			wantErr:    types.ErrInvalidSelectionPolicy,
+			wantDetail: "already has a policy row at version 2",
+		},
+		{
+			name: "the new seek key is already occupied",
+			corrupt: func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+				// The update runs at height 10, so its version would start at 11.
+				// The entry is above the queried height, so current resolution is
+				// untouched and only the vacancy check can reject this.
+				require.NoError(t, k.PolicyStarts.Set(ctx, collections.Join(uint64(1), int64(11)), uint64(42)))
+			},
+			wantErr:    types.ErrInvalidSelectionPolicy,
+			wantDetail: "already has a policy index entry starting at height 11",
+		},
+		{
+			name: "the current version has no seek entry",
+			corrupt: func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+				require.NoError(t, k.PolicyStarts.Remove(ctx, collections.Join(uint64(1), testInitialHeight)))
+			},
+			wantErr:    types.ErrInvalidSelectionPolicy,
+			wantDetail: "does not resolve at height 10",
+		},
+		{
+			name: "the current seek entry names a different version",
+			corrupt: func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+				require.NoError(t, k.PolicyStarts.Set(ctx, collections.Join(uint64(1), testInitialHeight), uint64(3)))
+			},
+			wantErr:    types.ErrInvalidSelectionPolicy,
+			wantDetail: "does not resolve at height 10",
+		},
+		{
+			name: "a rogue later start shadows the current version",
+			corrupt: func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+				// A well-formed but unreferenced version starting after the current
+				// one. History and pointer agree with each other; the INDEX is what
+				// disagrees, and it is the index every height query trusts.
+				require.NoError(t, k.SelectionPolicies.Set(ctx, collections.Join(uint64(1), uint64(7)),
+					types.SelectionPolicyVersion{
+						SlotId: 1, PolicyVersion: 7, SelectionRateBps: 3_000, MaxSelectedParticipants: 5,
+						ValidFromHeight: 5,
+					}))
+				require.NoError(t, k.PolicyStarts.Set(ctx, collections.Join(uint64(1), int64(5)), uint64(7)))
+			},
+			wantErr:    types.ErrInvalidSelectionPolicy,
+			wantDetail: "resolves version 7 at height 10 but the slot points at version 1",
+		},
+		{
+			name: "the stored current policy is locally invalid",
+			corrupt: func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+				invalid := policyRow(t, k, ctx, 1, 1)
+				invalid.MaxSelectedParticipants = 0
+				require.NoError(t, k.SelectionPolicies.Set(ctx, collections.Join(uint64(1), uint64(1)), invalid))
+			},
+			wantErr:    types.ErrInvalidSelectionPolicy,
+			wantDetail: "stored current policy version 1 is invalid",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			k, ctx, authority, emergency := setup(t)
+			op := policySlotGenesis(t, k, ctx, authority, emergency)
+			msgs := keeper.NewMsgServer(k)
+
+			tc.corrupt(t, k, ctx)
+
+			// The baseline is taken AFTER corruption: the corrupted values are part
+			// of the state that must survive untouched, and a rejection that
+			// "repaired" one of them would be a mutation too.
+			runCtx := ctx.WithBlockHeight(10).WithEventManager(sdk.NewEventManager())
+			before := snapshotPolicyState(t, k, runCtx, 1)
+
+			_, err := msgs.UpdateSelectionPolicy(runCtx, &types.MsgUpdateSelectionPolicy{
+				Operator: op, SlotId: 1, SelectionRateBps: 1_111, MaxSelectedParticipants: 11,
+			})
+			require.ErrorIs(t, err, tc.wantErr)
+			require.Contains(t, err.Error(), tc.wantDetail,
+				"the rejection must name the seam it refused, not merely fail somewhere")
+
+			after := snapshotPolicyState(t, k, runCtx, 1)
+			require.Equal(t, before, after, "a malformed seam must leave history, index and record byte-identical")
+			// Named explicitly as well, because the struct comparison above would
+			// still pass if a future refactor narrowed what the snapshot captures.
+			require.Equal(t, before.slot.CurrentSelectionPolicyVersion, after.slot.CurrentSelectionPolicyVersion,
+				"the pointer must not move")
+			require.Equal(t, before.slot.LastSelectionPolicyUpdateHeight, after.slot.LastSelectionPolicyUpdateHeight,
+				"the cooldown height must not move")
+			// Stated by count as well as by value, because one fixture pre-plants an
+			// entry at the height a new version would have claimed: "unchanged" there
+			// means the planted entry survives, not that no entry exists.
+			require.Len(t, after.starts, len(before.starts), "no new seek entry")
+			require.Len(t, after.policies, len(before.policies), "no new policy row")
+			require.Zero(t, countEvents(runCtx, types.EventTypeSelectionPolicyUpdated),
+				"a rejected update must not announce a version that was never written")
+		})
+	}
+}
+
+// TestSelectionPolicyUpdateNeverReopensAClosedVersion is the same rule stated as
+// the outcome it protects: once a version's exclusive end is set, no later update
+// may move it, whatever the pointer says.
+func TestSelectionPolicyUpdateNeverReopensAClosedVersion(t *testing.T) {
+	k, ctx, authority, emergency := setup(t)
+	op := policySlotGenesis(t, k, ctx, authority, emergency)
+	msgs := keeper.NewMsgServer(k)
+
+	// A genuine update, so version 1 is closed the way production closes it.
+	updateCtx := ctx.WithBlockHeight(50)
+	_, err := msgs.UpdateSelectionPolicy(updateCtx, &types.MsgUpdateSelectionPolicy{
+		Operator: op, SlotId: 1, SelectionRateBps: 1_234, MaxSelectedParticipants: 42,
+	})
+	require.NoError(t, err)
+	closed := policyRow(t, k, updateCtx, 1, 1)
+	require.Equal(t, int64(51), closed.ValidUntilHeightExclusive)
+
+	// Now roll the pointer back to the closed version, as a corrupt migration or a
+	// bad genesis import could.
+	stored, err := k.GetSlot(updateCtx, 1)
+	require.NoError(t, err)
+	stored.CurrentSelectionPolicyVersion = 1
+	stored.LastSelectionPolicyUpdateHeight = 0
+	require.NoError(t, k.Slots.Set(updateCtx, 1, stored))
+
+	laterCtx := ctx.WithBlockHeight(5_000).WithEventManager(sdk.NewEventManager())
+	before := snapshotPolicyState(t, k, laterCtx, 1)
+	_, err = msgs.UpdateSelectionPolicy(laterCtx, &types.MsgUpdateSelectionPolicy{
+		Operator: op, SlotId: 1, SelectionRateBps: 4_321, MaxSelectedParticipants: 43,
+	})
+	require.ErrorIs(t, err, types.ErrInvalidSelectionPolicy)
+	require.Equal(t, closed, policyRow(t, k, laterCtx, 1, 1),
+		"a closed version's end must never be rewritten, not even to a later height")
+	require.Equal(t, before, snapshotPolicyState(t, k, laterCtx, 1))
+	require.Zero(t, countEvents(laterCtx, types.EventTypeSelectionPolicyUpdated))
 }
 
 // --- seek index and height resolution ---
@@ -475,10 +732,19 @@ func TestSelectionPolicyIndexDivergenceFailsClosed(t *testing.T) {
 	})
 }
 
-// TestSelectionPolicyResolutionDoesNotScanHistory is the complexity guard. It
-// corrupts a dormant historical row that no seek can reach for the queried
-// height: a resolver that walked the whole history would have to decode it and
-// fail, while the seek path never touches it.
+// TestSelectionPolicyResolutionDoesNotScanHistory is the complexity guard: height
+// resolution must not regress to a cost proportional to the number of versions a
+// slot has ever had.
+//
+// A guard that only corrupts an OLD version proves less than it appears to. It
+// rejects an ascending full-history walk, but a descending walk that starts at
+// the newest version and stops at the first containing row would sail past it and
+// still pass — so the test would certify a linear implementation as index-bounded.
+//
+// This fixture therefore builds five versions, targets one in the MIDDLE, and
+// corrupts the rows on BOTH sides of it. Whichever direction a linear scan runs,
+// it must decode a corrupted row before reaching the target and fail; the seek
+// index reads exactly one row — the target — and never sees them.
 func TestSelectionPolicyResolutionDoesNotScanHistory(t *testing.T) {
 	k, ctx, authority, emergency, storeKey := setupWithRawStore(t)
 	params := types.DefaultParams(authority, emergency)
@@ -491,25 +757,70 @@ func TestSelectionPolicyResolutionDoesNotScanHistory(t *testing.T) {
 
 	msgs := keeper.NewMsgServer(k)
 	setCooldown(t, k, ctx, 360)
-	updateCtx := ctx.WithBlockHeight(1_000)
-	_, err = msgs.UpdateSelectionPolicy(updateCtx, &types.MsgUpdateSelectionPolicy{
-		Operator: op, SlotId: 1, SelectionRateBps: 321, MaxSelectedParticipants: 21,
+	// Versions 2..5, so the target is genuinely interior rather than adjacent to
+	// either end of the history. Intervals: v1 [1,1001), v2 [1001,2001),
+	// v3 [2001,3001), v4 [3001,4001), v5 [4001,∞).
+	for _, h := range []int64{1_000, 2_000, 3_000, 4_000} {
+		_, err = msgs.UpdateSelectionPolicy(ctx.WithBlockHeight(h), &types.MsgUpdateSelectionPolicy{
+			Operator: op, SlotId: 1, SelectionRateBps: uint64(h), MaxSelectedParticipants: uint64(h / 100),
+		})
+		require.NoErrorf(t, err, "update at height %d", h)
+	}
+
+	const targetHeight = int64(2_500) // inside version 3
+	want := policyRow(t, k, ctx, 1, 3)
+	require.Equal(t, int64(2_001), want.ValidFromHeight)
+	require.Equal(t, int64(3_001), want.ValidUntilHeightExclusive)
+
+	// Corrupt every version except the target, as raw bytes: a value the typed API
+	// cannot decode is the only way to express "reading this row is itself the
+	// failure", which is what makes the direction of a scan observable.
+	store := ctx.KVStore(storeKey)
+	for _, version := range []uint64{1, 2, 4, 5} {
+		rawKey := append(append([]byte{}, types.SelectionPoliciesPrefix...), policyRawKey(1, version)...)
+		require.NotNilf(t, store.Get(rawKey), "version %d must exist before it is corrupted", version)
+		store.Set(rawKey, []byte{0xff, 0xff, 0xff, 0xff})
+	}
+
+	// Both linear directions are now unusable, which is the premise the guard
+	// rests on. If either of these stopped failing the assertions below would
+	// prove nothing.
+	require.Error(t, walkPolicyHistory(t, k, ctx, 1, false),
+		"an ascending history scan must fail on a corrupted row before the target")
+	require.Error(t, walkPolicyHistory(t, k, ctx, 1, true),
+		"a descending history scan must fail on a corrupted row before the target")
+
+	policy, err := k.SelectionPolicyAtHeight(ctx, 1, targetHeight)
+	require.NoError(t, err, "height resolution must read only the row the seek index names")
+	require.Equal(t, want, policy)
+
+	// The public query path inherits the same bound.
+	resp, err := keeper.NewQueryServer(k).SelectionPolicyAtHeight(ctx, &types.QuerySelectionPolicyAtHeightRequest{
+		SlotId: 1, AtHeight: targetHeight,
 	})
 	require.NoError(t, err)
+	require.Equal(t, want, *resp.Policy)
+}
 
-	// Corrupt version 1's row in place. Version 2 covers height 2000.
-	store := ctx.KVStore(storeKey)
-	rawKey := append(append([]byte{}, types.SelectionPoliciesPrefix...), policyRawKey(1, 1)...)
-	require.NotNil(t, store.Get(rawKey), "the row must exist before it is corrupted")
-	store.Set(rawKey, []byte{0xff, 0xff, 0xff, 0xff})
-
-	require.Error(t, k.SelectionPolicies.Walk(ctx, nil, func(collections.Pair[uint64, uint64], types.SelectionPolicyVersion) (bool, error) {
-		return false, nil
-	}), "a scan over the whole history must fail on the corrupted row")
-
-	policy, err := k.SelectionPolicyAtHeight(ctx, 1, 2_000)
-	require.NoError(t, err, "height resolution must not read unrelated history rows")
-	require.Equal(t, uint64(2), policy.PolicyVersion)
+// walkPolicyHistory reads a slot's policy history linearly in one direction until
+// a row fails to decode. It is the shape of the two implementations the guard
+// above must reject — an ascending scan and a descending one — kept here so the
+// test states what it is ruling out rather than implying it.
+func walkPolicyHistory(t *testing.T, k keeper.Keeper, ctx sdk.Context, slotID uint64, descending bool) error {
+	t.Helper()
+	rng := collections.NewPrefixedPairRange[uint64, uint64](slotID)
+	if descending {
+		rng = rng.Descending()
+	}
+	iter, err := k.SelectionPolicies.Iterate(ctx, rng)
+	require.NoError(t, err)
+	defer iter.Close()
+	for ; iter.Valid(); iter.Next() {
+		if _, err := iter.Value(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // policyRawKey builds the collections key bytes for a (slot, version) pair:

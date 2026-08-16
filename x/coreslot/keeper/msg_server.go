@@ -582,6 +582,14 @@ func (m msgServer) UpdateSelectionPolicy(ctx context.Context, msg *types.MsgUpda
 		return nil, types.ErrInvalidSelectionPolicy.Wrapf("slot %d policy version space exhausted: %v", slot.SlotId, err)
 	}
 
+	// The last thing checked before the first write is the seam itself: that the
+	// stored current version is coherent with the index, and that neither
+	// successor key is already occupied. A conflict here is malformed state, not a
+	// user error, and it must be refused rather than overwritten.
+	if err := m.validatePolicyTransitionSeam(ctx, slot, current, height, effective, nextVersion); err != nil {
+		return nil, err
+	}
+
 	// Everything that can fail has now failed. From here the six writes of the
 	// transition are performed together.
 	//

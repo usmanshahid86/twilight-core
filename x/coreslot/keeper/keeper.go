@@ -38,8 +38,10 @@ type Keeper struct {
 	NextSlotID    collections.Item[uint64]
 
 	// SelectionPolicies is the immutable per-slot policy history keyed by
-	// (slot_id, policy_version). PR4 writes version 1 only and never supersedes
-	// it; runtime updates belong to a later change.
+	// (slot_id, policy_version). Registration and fresh genesis create version 1;
+	// a runtime policy update closes the current version and appends the next.
+	// Closing an open version's exclusive end is the only write ever made to an
+	// existing row — a closed version is immutable from then on.
 	SelectionPolicies collections.Map[collections.Pair[uint64, uint64], types.SelectionPolicyVersion]
 
 	// ActiveSlots is a membership-only index of ACTIVE slot IDs. It is a key set
