@@ -85,13 +85,18 @@ func (m msgServer) RegisterCoreSlot(ctx context.Context, msg *types.MsgRegisterC
 	} else if exists {
 		return nil, types.ErrDuplicateOperator
 	}
-	key, _, err := m.ensureConsensusAvailable(ctx, msg.ConsensusPubkey)
+	// Resolved BEFORE ensureConsensusAvailable, which may release a stale
+	// reservation and is therefore the first thing in this handler that writes.
+	// A counter fault is knowable without touching state, so it is settled while
+	// a rejection still costs nothing — the same reason every other predictable
+	// failure here is checked ahead of the first Set.
+	id, err := m.nextSlotID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	id, err := m.NextSlotID.Get(ctx)
-	if err != nil || id == 0 {
-		id = 1
+	key, _, err := m.ensureConsensusAvailable(ctx, msg.ConsensusPubkey)
+	if err != nil {
+		return nil, err
 	}
 	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
 	slot := types.CoreSlot{

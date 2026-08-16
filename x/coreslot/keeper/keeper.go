@@ -231,6 +231,54 @@ func (k Keeper) GetSlot(ctx context.Context, slotID uint64) (types.CoreSlot, err
 	return k.getSlot(ctx, slotID)
 }
 
+// nextSlotID resolves the identifier a new registration will take, refusing to
+// proceed on any counter state it cannot trust.
+//
+// There is deliberately NO fallback. A registration writes the slot record, both
+// address indexes, the reward-weight row and the slot's version-1 Selection
+// policy with unconditional Sets, so an identifier that is already in use does
+// not fail — it OVERWRITES, reassigning a live slot to a different operator and
+// destroying policy history §26 makes immutable. Substituting a default value for
+// a counter that could not be read is therefore not a lenient recovery; it is the
+// most destructive thing this handler can do, and it happens precisely when state
+// is already known to be damaged.
+//
+// Every rejection below is unreachable from a conforming chain. Genesis admission
+// requires next_slot_id to exceed every assigned identifier, and each registration
+// advances it with a checked increment, so a counter that is absent, zero,
+// unreadable or already-taken means state has been corrupted by something outside
+// the module's own transitions. The only safe answer is to stop.
+func (k Keeper) nextSlotID(ctx context.Context) (uint64, error) {
+	id, err := k.NextSlotID.Get(ctx)
+	if err != nil {
+		// Absence and corruption are separated because they are different faults,
+		// not because one of them is tolerable. Genesis always writes the counter,
+		// so an absent key on a chain able to process a registration is itself
+		// broken state — "start from 1" would be the same overwrite hazard wearing
+		// the disguise of a fresh chain.
+		if errors.Is(err, collections.ErrNotFound) {
+			return 0, types.ErrInvalidTransition.Wrap(
+				"the slot id counter is not set; genesis must establish it before any registration")
+		}
+		return 0, types.ErrInvalidTransition.Wrapf("the slot id counter could not be read: %v", err)
+	}
+	if id == 0 {
+		return 0, types.ErrInvalidTransition.Wrap("the slot id counter is zero")
+	}
+	// Independent of the counter's own consistency: whatever it names must not
+	// already exist. This is what keeps the overwrite closed even if some future
+	// path hands out an identifier a healthy-looking counter should not have.
+	//
+	// Has checks key presence without decoding, so a slot whose stored record is
+	// itself corrupt still registers as taken rather than reading as free.
+	if taken, err := k.Slots.Has(ctx, id); err != nil {
+		return 0, types.ErrInvalidTransition.Wrapf("slot id %d availability could not be determined: %v", id, err)
+	} else if taken {
+		return 0, types.ErrInvalidTransition.Wrapf("the slot id counter names slot %d, which already exists", id)
+	}
+	return id, nil
+}
+
 // GetRewardWeight returns the stored reward-weight row for a slot. Absence is
 // returned as an error rather than silently synthesizing economic state.
 func (k Keeper) GetRewardWeight(ctx context.Context, slotID uint64) (types.OperatorRewardWeight, error) {

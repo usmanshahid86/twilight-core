@@ -81,7 +81,7 @@ func TestRealModuleAccountsRejectedAsEconomicAddresses(t *testing.T) {
 		t.Run("coreslot payout rejects "+name, func(t *testing.T) {
 			a := newApp(t)
 			ctx := appContext(t, a)
-			seedCoreSlotParams(t, a, ctx)
+			seedCoreSlotState(t, a, ctx)
 
 			// The PAYOUT address is the value destination. The operator address is
 			// an identity and is deliberately not subject to this exclusion.
@@ -115,7 +115,7 @@ func TestRealModuleAccountsRejectedAsEconomicAddresses(t *testing.T) {
 func TestOrdinaryAccountAcceptedThroughRealPath(t *testing.T) {
 	a := newApp(t)
 	ctx := appContext(t, a)
-	seedCoreSlotParams(t, a, ctx)
+	seedCoreSlotState(t, a, ctx)
 
 	operator := ordinaryAccount(9)
 	msgs := coreslotkeeper.NewMsgServer(a.CoreSlotKeeper)
@@ -146,7 +146,7 @@ func TestOrdinaryAccountAcceptedThroughRealPath(t *testing.T) {
 func TestControlPlaneAuthoritiesRemainValid(t *testing.T) {
 	a := newApp(t)
 	ctx := appContext(t, a)
-	seedCoreSlotParams(t, a, ctx)
+	seedCoreSlotState(t, a, ctx)
 
 	// Both authorities really are module accounts — otherwise this test proves
 	// nothing about the exemption.
@@ -187,10 +187,22 @@ func TestDefaultGenesisStillInitialises(t *testing.T) {
 	require.Zero(t, params.EmissionTreasuryShareBps)
 }
 
-func seedCoreSlotParams(t *testing.T, a *app.App, ctx sdk.Context) {
+// seedCoreSlotState puts the module into the state a chain is in once genesis has
+// run. These tests build the app directly and never call InitChain, so nothing
+// else establishes it.
+//
+// The slot-id counter is part of that state, not an optional extra. Registration
+// refuses to allocate an identifier from a counter it cannot trust — an absent
+// one included — because allocating a wrong identifier overwrites a live slot
+// rather than failing. A fixture that seeded only params would be testing
+// registration against state no chain is ever in.
+func seedCoreSlotState(t *testing.T, a *app.App, ctx sdk.Context) {
 	t.Helper()
 	params := coreslottypes.DefaultParams(app.AuthorityAddress(), app.EmergencyAuthorityAddress())
 	require.NoError(t, a.CoreSlotKeeper.Params.Set(ctx, params))
+	// No slots exist in these fixtures, so the first identifier a conforming
+	// genesis would leave free is 1.
+	require.NoError(t, a.CoreSlotKeeper.NextSlotID.Set(ctx, 1))
 }
 
 func appPubkey(t *testing.T, marker byte) *anypb.Any {
