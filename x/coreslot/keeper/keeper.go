@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 
 	"cosmossdk.io/collections"
 	storetypes "cosmossdk.io/core/store"
@@ -179,10 +180,21 @@ func (k Keeper) clearSlotActive(ctx context.Context, slotID uint64) error {
 	return k.ActiveSlots.Remove(ctx, slotID)
 }
 
+// getSlot reads a slot record, reporting a genuinely absent key as
+// ErrSlotNotFound and propagating everything else unchanged.
+//
+// The distinction is the point. Only collections.ErrNotFound means "no such
+// slot"; a decode failure, or any other storage error, means the key IS there
+// and the stored bytes could not be read. Relabelling that as absence would tell
+// a caller — and, through the query surface, the outside world — that a slot
+// does not exist when in fact the database holding it is broken.
 func (k Keeper) getSlot(ctx context.Context, id uint64) (types.CoreSlot, error) {
 	slot, err := k.Slots.Get(ctx, id)
 	if err != nil {
-		return types.CoreSlot{}, types.ErrSlotNotFound.Wrapf("%d", id)
+		if errors.Is(err, collections.ErrNotFound) {
+			return types.CoreSlot{}, types.ErrSlotNotFound.Wrapf("%d", id)
+		}
+		return types.CoreSlot{}, err
 	}
 	return slot, nil
 }

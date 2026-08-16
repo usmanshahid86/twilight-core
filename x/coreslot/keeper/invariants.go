@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"errors"
 
 	"cosmossdk.io/collections"
 
@@ -88,27 +89,44 @@ func (k Keeper) SelectionPolicyAtHeight(ctx context.Context, slotID uint64, heig
 
 	iter, err := k.PolicyStarts.Iterate(ctx, rng)
 	if err != nil {
-		return types.SelectionPolicyVersion{}, err
+		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d policy index could not be read: %v", slotID, err)
 	}
 	defer iter.Close()
 
+	// The ONLY ordinary answer in this function. An exhausted range means no
+	// version started at or before the requested height; every other failure below
+	// is about state that exists and cannot be trusted.
 	if !iter.Valid() {
 		return types.SelectionPolicyVersion{}, types.ErrSelectionPolicyNotFound.Wrapf(
 			"slot %d has no selection policy at height %d", slotID, height)
 	}
+	// A live index entry whose key or value will not decode is corrupt derived
+	// state, not a missing predecessor. Letting it escape untyped would surface as
+	// an unclassified transport error rather than the state-integrity failure it
+	// is.
 	key, err := iter.Key()
 	if err != nil {
-		return types.SelectionPolicyVersion{}, err
+		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d policy index entry key could not be decoded: %v", slotID, err)
 	}
 	version, err := iter.Value()
 	if err != nil {
-		return types.SelectionPolicyVersion{}, err
+		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
+			"slot %d policy index entry at height %d could not be decoded: %v", slotID, key.K2(), err)
 	}
 
 	policy, err := k.SelectionPolicies.Get(ctx, policyKey(slotID, version))
 	if err != nil {
+		// Both are index/history divergence and both fail closed, but they are
+		// different faults and are named as such: the row was never written, or it
+		// was written and cannot be read.
+		if errors.Is(err, collections.ErrNotFound) {
+			return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
+				"slot %d policy index names missing version %d", slotID, version)
+		}
 		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
-			"slot %d policy index names missing version %d", slotID, version)
+			"slot %d policy version %d could not be read: %v", slotID, version, err)
 	}
 	if policy.SlotId != slotID || policy.PolicyVersion != version || policy.ValidFromHeight != key.K2() {
 		return types.SelectionPolicyVersion{}, types.ErrInvalidSelectionPolicy.Wrapf(
