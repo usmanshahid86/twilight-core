@@ -223,8 +223,15 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 
 	// Authoritative obligation creation. Each write also raises the outstanding
 	// liability by exactly its amount, so the two cannot commit apart.
+	//
+	// The already-resolved rewardConfig is passed in rather than looked up per row.
+	// The governing configuration is a property of the EPOCH, so resolving it once
+	// is not an optimization of a repeated lookup — it is the same lookup, and
+	// repeating it would put a history seek that grows with the number of accepted
+	// configuration changes inside a loop over participants. Materialization is
+	// O(participants), independent of chain age.
 	for _, entitlement := range entitlements {
-		if err := k.CreateSlotEntitlement(ctx, entitlement); err != nil {
+		if err := k.createSlotEntitlement(ctx, entitlement, rewardConfig); err != nil {
 			return err
 		}
 	}

@@ -369,3 +369,58 @@ func TestFreshGenesisCarriesNoObligations(t *testing.T) {
 func entitlementTestKey(slotID, epoch uint64) collections.Pair[uint64, uint64] {
 	return collections.Join(epoch, slotID)
 }
+
+// TestEntitlementCreationIsAtomicAtItsOwnBoundary is S1.
+//
+// The contract is that the row and the liability move together. Getting that from
+// an outer cache is not the same as having it: the finalizer supplies one, and
+// every other caller — including the settlement layer that does not exist yet —
+// would be relying on a guarantee nobody stated.
+//
+// The liability is corrupted so the accounting step fails at the point AFTER the
+// row would have been written. Without a cache of its own, the exported call would
+// return an error and leave the obligation behind, and the module would then owe
+// something it has no record of owing.
+func TestEntitlementCreationIsAtomicAtItsOwnBoundary(t *testing.T) {
+	k, ctx, _ := setupEntitlements(t)
+	// Not parseable, so the read inside the accounting step fails. Corrupting the
+	// accumulator rather than the record is deliberate: the record has to be valid,
+	// or creation would be refused before it wrote anything and the test would
+	// prove nothing about ordering.
+	require.NoError(t, k.OutstandingEntitlementLiability.Set(ctx, "not-an-amount"))
+
+	err := k.CreateSlotEntitlement(ctx, entitlementFor(1, 1, "500"))
+	require.ErrorIs(t, err, types.ErrInvalidState)
+
+	_, found, err := k.GetSlotEntitlement(ctx, 1, 1)
+	require.NoError(t, err)
+	require.False(t, found, "the entitlement row must not survive a failed liability update")
+
+	raw, err := k.OutstandingEntitlementLiability.Get(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "not-an-amount", raw, "the accumulator must be exactly as it was")
+}
+
+// TestEntitlementCreationRefusesAMismatchedBinding covers the argument the
+// finalizer now supplies.
+//
+// Moving the history read out of the creation primitive made the governing
+// configuration a parameter, and a parameter is a place a wrong value can enter.
+// The record must still prove it names the version that governed its epoch, so
+// both halves are checked: a version number that disagrees, and a configuration
+// that could not have governed the epoch at all.
+func TestEntitlementCreationRefusesAMismatchedBinding(t *testing.T) {
+	k, ctx, _ := setupEntitlements(t)
+
+	// A history version whose number is not the one governing epoch 1.
+	seedRewardVersion(t, k, ctx, rewardVersionAt(2, 2, "20"))
+
+	mismatched := entitlementFor(1, 1, "500")
+	mismatched.RewardConfigVersion = 2
+	require.ErrorIs(t, k.CreateSlotEntitlement(ctx, mismatched), types.ErrInvalidState)
+
+	_, found, err := k.GetSlotEntitlement(ctx, 1, 1)
+	require.NoError(t, err)
+	require.False(t, found)
+	requireLiability(t, k, ctx, "0")
+}

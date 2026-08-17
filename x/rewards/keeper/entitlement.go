@@ -6,6 +6,7 @@ import (
 
 	"cosmossdk.io/collections"
 	sdkmath "cosmossdk.io/math"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
@@ -103,16 +104,60 @@ func (k Keeper) IterateEntitlementsForEpoch(ctx context.Context, epoch uint64) (
 // CreateSlotEntitlement writes one new obligation and increases the outstanding
 // liability by exactly its amount.
 //
-// Write-once is enforced by an explicit existence check rather than by relying on
-// the caller. Overwriting would silently replace one obligation with another over
-// the same escrow, and the difference between the two amounts would never appear
-// in the liability — the accumulator would still be carrying the old figure.
+// # Atomicity is this boundary's own property
 //
-// Creation and the liability increase happen here together. Splitting them across
-// two calls would make it possible to commit an obligation the module does not
-// know it owes, which is exactly the state the solvency assertion exists to catch
-// and would then fail to catch.
+// The contract is that the row and the liability move together or not at all, and
+// that has to hold for a caller who did not think to open a cache. Without one,
+// the Set below can succeed and the accounting step after it can fail, leaving an
+// obligation the module does not know it owes — which is precisely the state the
+// solvency assertion exists to catch, and which it would then be unable to catch
+// because the recorded liability looks consistent with itself.
+//
+// So the cache is opened here. The finalization loop already runs inside one and
+// nests harmlessly; what it must not do is make this guarantee contingent on
+// every future caller remembering it.
+//
+// # Why the governing configuration is resolved here and passed down
+//
+// Referential integrity is checked through the EPOCH's binding rather than by
+// looking a bare version number up. Resolving a version number means walking a
+// history keyed by effective epoch, and that walk grows with the number of
+// accepted configuration changes. It also happens to be the weaker claim: "some
+// version with this number exists" is not what makes the record auditable — naming
+// the version that actually governed its epoch is.
+//
+// One resolution per call is correct for a standalone caller and wrong for the
+// finalizer, which creates many entitlements for ONE epoch and would repeat the
+// identical lookup for each. See createSlotEntitlement.
 func (k Keeper) CreateSlotEntitlement(ctx context.Context, entitlement types.SlotEntitlement) error {
+	governing, err := k.RewardConfigForTarget(ctx, entitlement.Epoch)
+	if err != nil {
+		return err
+	}
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	cacheCtx, write := sdkCtx.CacheContext()
+	if err := k.createSlotEntitlement(cacheCtx, entitlement, governing); err != nil {
+		return err
+	}
+	write()
+	return nil
+}
+
+// createSlotEntitlement is the raw creation step, against an ALREADY-RESOLVED
+// governing configuration and inside a cache the caller owns.
+//
+// Splitting it out is what keeps epoch close O(participants) rather than
+// O(participants x versions): the governing configuration is a property of the
+// epoch, not of the row, so the finalizer resolves it once and every entitlement
+// of that epoch is proven against the same value. Nothing here reads the
+// reward-configuration history, so no amount of chain age changes what this costs.
+//
+// Referential integrity is not weakened by moving the read out. The stored record
+// must still name the version that governed its epoch; the only change is who
+// establishes what that version is.
+func (k Keeper) createSlotEntitlement(
+	ctx context.Context, entitlement types.SlotEntitlement, governing types.RewardConfigVersion,
+) error {
 	if err := entitlement.Validate(); err != nil {
 		return err
 	}
@@ -132,22 +177,13 @@ func (k Keeper) CreateSlotEntitlement(ctx context.Context, entitlement types.Slo
 	if err := k.validatePayoutDestination("entitlement", entitlement.PayoutAddress); err != nil {
 		return err
 	}
-	// Referential integrity against the canonical history.
-	//
-	// Checked through the epoch's own binding rather than by looking the version
-	// number up. Two reasons, and the second is the important one:
-	//
-	//   - the history is keyed by effective epoch, so resolving a bare version
-	//     number means walking it. That walk grows with the number of accepted
-	//     configuration changes, and it would run once per entitlement — turning a
-	//     close into O(participants x versions) of chain-age-dependent work on the
-	//     block path.
-	//   - "some version with this number exists" is the weaker claim. What makes
-	//     the record auditable is that it names the version that actually governed
-	//     its epoch, which is what the binding resolves and what this compares.
-	governing, err := k.RewardConfigForTarget(ctx, entitlement.Epoch)
-	if err != nil {
-		return err
+	// The binding the caller resolved has to be the binding for THIS record's epoch.
+	// Passing a configuration in makes the argument a place a mismatch could enter,
+	// so the argument is checked rather than trusted.
+	if governing.EffectiveEpoch > entitlement.Epoch {
+		return types.ErrInvalidState.Wrapf(
+			"entitlement for slot %d in epoch %d was offered a reward configuration effective at epoch %d",
+			entitlement.SlotId, entitlement.Epoch, governing.EffectiveEpoch)
 	}
 	if governing.Version != entitlement.RewardConfigVersion {
 		return types.ErrInvalidState.Wrapf(
@@ -156,6 +192,11 @@ func (k Keeper) CreateSlotEntitlement(ctx context.Context, entitlement types.Slo
 			entitlement.Epoch, governing.Version)
 	}
 
+	// Write-once is enforced by an explicit existence check rather than by relying
+	// on the caller. Overwriting would silently replace one obligation with another
+	// over the same escrow, and the difference between the two amounts would never
+	// appear in the liability — the accumulator would still be carrying the old
+	// figure.
 	key := entitlementKey(entitlement.Epoch, entitlement.SlotId)
 	exists, err := k.SlotEntitlements.Has(ctx, key)
 	if err != nil {
