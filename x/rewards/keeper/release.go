@@ -73,9 +73,10 @@ func (k Keeper) payEntitlement(
 		return err
 	}
 
-	// 2. Validate every line. Recipients are resolved to parsed addresses here and
-	//    reused below rather than decoded a second time at transfer.
-	params, err := k.GetParams(ctx)
+	// 2. Validate every line, and the denom the whole set would be paid in.
+	//    Recipients are resolved to parsed addresses here and reused below rather
+	//    than decoded a second time at transfer.
+	params, err := k.MonetaryParams(ctx)
 	if err != nil {
 		return err
 	}
@@ -140,7 +141,7 @@ func (k Keeper) payEntitlementRemainder(ctx context.Context, slotID, epoch uint6
 		return nil
 	}
 
-	params, err := k.GetParams(ctx)
+	params, err := k.MonetaryParams(ctx)
 	if err != nil {
 		return err
 	}

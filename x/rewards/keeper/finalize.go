@@ -65,7 +65,10 @@ func (k Keeper) validateEpochParticipation(
 }
 
 func (k Keeper) finalizeEpoch(ctx context.Context) error {
-	params, err := k.GetParams(ctx)
+	// The genesis-fixed monetary configuration this transition will act on, read
+	// through the boundary that refuses a corrupted denom, cap, or schedule rather
+	// than minting under it.
+	params, err := k.MonetaryParams(ctx)
 	if err != nil {
 		return err
 	}
