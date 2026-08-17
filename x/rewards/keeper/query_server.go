@@ -27,6 +27,69 @@ const epochProjectionHorizon = 1_000
 // consensus path reads the schedule in pages.
 const maxScheduledEpochConfigsPerPage = 100
 
+// maxCollectionPageSize bounds one page of any canonical collection query below.
+// Like the other query constants it bounds query work only and is not a protocol
+// value: no consensus path paginates.
+const maxCollectionPageSize = 100
+
+// boundedPage turns a caller-supplied PageRequest into one whose cost is bounded
+// by this server rather than by the caller or by the collection.
+//
+// # Why the SDK defaults are not usable here
+//
+// The standard pagination helper is written for collections whose size is a
+// product of usage, and its defaults reflect that. Under the pinned SDK:
+//
+//   - a nil or zero limit becomes 100 AND silently turns count_total ON, and
+//     counting the total consumes the iterator to the end of the prefix;
+//   - offset is implemented by advancing the iterator one row at a time, so the
+//     work is the offset, not the page;
+//   - a caller-supplied limit is not capped at all.
+//
+// The collections these surfaces expose are not small. One epoch can hold an
+// entitlement per participating Slot — bounded by the ratified active-slot maximum
+// times the maximum epoch length under churn — and reward-configuration history
+// grows for the life of the chain and is never pruned. So the ordinary defaults
+// mean a single unauthenticated query can make a node materialize a whole epoch or
+// a whole history, which is a denial-of-service surface rather than a page.
+//
+// # The policy
+//
+// Refuse what cannot be served in bounded work, and bound what can:
+//
+//	offset      -> InvalidArgument   (its cost is the offset)
+//	count_total -> InvalidArgument   (its cost is the collection)
+//	reverse     -> InvalidArgument   (these surfaces promise ascending order)
+//	limit       -> capped at maxCollectionPageSize; 0 means the cap, not "count"
+//	key         -> supported, and is the way to page
+//
+// Refusing rather than silently clamping matters for the first two. A caller that
+// asked for a total and received a response without one would have no way to tell
+// it was not answered, and would go on believing a number it never got.
+func boundedPage(page *query.PageRequest) (*query.PageRequest, error) {
+	bounded := &query.PageRequest{Limit: maxCollectionPageSize}
+	if page == nil {
+		return bounded, nil
+	}
+	if page.Offset != 0 {
+		return nil, status.Error(codes.InvalidArgument,
+			"offset pagination is not supported; page with the key cursor returned in next_key")
+	}
+	if page.CountTotal {
+		return nil, status.Error(codes.InvalidArgument,
+			"count_total is not supported; counting a canonical collection is unbounded work")
+	}
+	if page.Reverse {
+		return nil, status.Error(codes.InvalidArgument,
+			"results are returned in canonical ascending order; reverse pagination is not supported")
+	}
+	if page.Limit != 0 && page.Limit < maxCollectionPageSize {
+		bounded.Limit = page.Limit
+	}
+	bounded.Key = page.Key
+	return bounded, nil
+}
+
 type queryServer struct{ Keeper }
 
 // NewQueryServer returns a read-only gRPC query server. It performs no state
@@ -611,9 +674,11 @@ func (q queryServer) SlotEntitlementsByEpoch(
 	if req.Epoch == 0 {
 		return nil, status.Error(codes.InvalidArgument, "epoch must be positive")
 	}
-	if req.Pagination != nil && req.Pagination.Reverse {
-		return nil, status.Error(codes.InvalidArgument,
-			"entitlements are returned in canonical ascending slot_id order; reverse pagination is not supported")
+	// Bounded before anything is read, so a request this server will not serve
+	// cannot walk a single row of the epoch on its way to being refused.
+	page, err := boundedPage(req.Pagination)
+	if err != nil {
+		return nil, err
 	}
 	// Resolved once for the whole page. The governing configuration is a property
 	// of the epoch, and the epoch is fixed by the request, so per-row resolution
@@ -623,7 +688,7 @@ func (q queryServer) SlotEntitlementsByEpoch(
 		return nil, canonicalStateQueryError("governing reward configuration", err)
 	}
 	entitlements, pageRes, err := query.CollectionPaginate(
-		ctx, q.SlotEntitlements, req.Pagination,
+		ctx, q.SlotEntitlements, page,
 		func(key collections.Pair[uint64, uint64], entitlement types.SlotEntitlement) (*types.SlotEntitlement, error) {
 			if err := validateEntitlementRecord(key, entitlement); err != nil {
 				return nil, err
@@ -656,9 +721,16 @@ func (q queryServer) SlotEntitlementsByEpoch(
 func (q queryServer) RewardConfigVersions(
 	ctx context.Context, req *types.QueryRewardConfigVersionsRequest,
 ) (*types.QueryRewardConfigVersionsResponse, error) {
-	var page *query.PageRequest
+	var requested *query.PageRequest
 	if req != nil {
-		page = req.Pagination
+		requested = req.Pagination
+	}
+	// Bounded before anything is read. Reward-configuration history grows for the
+	// life of the chain and is never pruned, so it is the surface where an unbounded
+	// default costs the most.
+	page, err := boundedPage(requested)
+	if err != nil {
+		return nil, err
 	}
 	// The permanent anchor, once for the whole page. A history that has lost it is
 	// not a shorter history, and no page drawn from it is trustworthy.
