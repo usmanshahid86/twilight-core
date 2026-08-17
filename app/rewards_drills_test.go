@@ -188,6 +188,8 @@ func canonicalRewardsTimeline(gen *rewardstypes.GenesisState, initialHeight uint
 	rewardAnchor := rewardstypes.DefaultRewardConfigVersion(*gen.Params)
 	gen.RewardConfigVersions = []*rewardstypes.RewardConfigVersion{&rewardAnchor}
 	gen.ScheduledRewardConfigs = nil
+	gen.SlotEntitlements = nil
+	gen.OutstandingEntitlementLiability = "0"
 	gen.PauseState = &rewardstypes.RewardsPauseState{}
 	gen.OpenRewardEnabledBlocks = 0
 	return gen

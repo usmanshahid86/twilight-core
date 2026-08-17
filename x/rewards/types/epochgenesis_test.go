@@ -144,6 +144,8 @@ func TestFreshGenesisInitialHeightAnchoring(t *testing.T) {
 			EpochConfigVersions:  []*types.EpochConfigVersion{&anchor},
 			RewardConfigVersions: []*types.RewardConfigVersion{&rewardAnchor},
 			PauseState:           &types.RewardsPauseState{},
+
+			OutstandingEntitlementLiability: "0",
 		}
 	}
 
@@ -196,6 +198,8 @@ func TestFreshGenesisForbidsAnyPendingPauseTransition(t *testing.T) {
 			EpochConfigVersions:  []*types.EpochConfigVersion{&anchor},
 			RewardConfigVersions: []*types.RewardConfigVersion{&rewardAnchor},
 			PauseState:           &pause,
+
+			OutstandingEntitlementLiability: "0",
 		}
 	}
 

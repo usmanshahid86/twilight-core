@@ -52,6 +52,9 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 	if err := k.initRewardConfigGenesis(ctx, genState); err != nil {
 		return err
 	}
+	if err := k.initEntitlementGenesis(ctx, genState); err != nil {
+		return err
+	}
 	if err := k.SetPauseState(ctx, *genState.PauseState); err != nil {
 		return err
 	}
@@ -144,6 +147,17 @@ func (k Keeper) validateGenesisEconomicAddresses(genState types.GenesisState) er
 			return err
 		}
 	}
+	for _, entitlement := range genState.SlotEntitlements {
+		if entitlement == nil {
+			continue
+		}
+		if err := k.validatePayoutDestination(
+			fmt.Sprintf("genesis entitlement slot %d epoch %d", entitlement.SlotId, entitlement.Epoch),
+			entitlement.PayoutAddress,
+		); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -168,12 +182,17 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 	if err != nil {
 		return nil, err
 	}
+	liability, err := k.GetOutstandingEntitlementLiability(ctx)
+	if err != nil {
+		return nil, err
+	}
 	genesis := &types.GenesisState{
-		Params:                  &params,
-		State:                   &state,
-		CurrentEpochConfig:      &config,
-		PauseState:              &pauseState,
-		OpenRewardEnabledBlocks: openBlocks,
+		Params:                          &params,
+		State:                           &state,
+		CurrentEpochConfig:              &config,
+		PauseState:                      &pauseState,
+		OpenRewardEnabledBlocks:         openBlocks,
+		OutstandingEntitlementLiability: liability.String(),
 	}
 	if err := k.EpochConfigVersions.Walk(ctx, nil, func(_ uint64, version types.EpochConfigVersion) (bool, error) {
 		value := version
@@ -209,6 +228,14 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		genesis.HasPendingParams = true
 		genesis.PendingParams = &pending
 	}
+	if err := k.SlotEntitlements.Walk(ctx, nil,
+		func(_ collections.Pair[uint64, uint64], entitlement types.SlotEntitlement) (bool, error) {
+			value := entitlement
+			genesis.SlotEntitlements = append(genesis.SlotEntitlements, &value)
+			return false, nil
+		}); err != nil {
+		return nil, err
+	}
 	if err := k.FinalizedEpochs.Walk(ctx, nil, func(_ uint64, epoch types.EpochReward) (bool, error) {
 		value := epoch
 		genesis.FinalizedEpochs = append(genesis.FinalizedEpochs, &value)
@@ -224,6 +251,27 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		return nil, err
 	}
 	return genesis, nil
+}
+
+// initEntitlementGenesis imports canonical entitlement state and the outstanding
+// liability.
+//
+// The liability is written explicitly, exactly as the open reward-enabled counter
+// is: after genesis an absent value is corruption, and no read path invents one.
+func (k Keeper) initEntitlementGenesis(ctx context.Context, genState types.GenesisState) error {
+	for _, entitlement := range genState.SlotEntitlements {
+		if err := importGenesisCollection(
+			ctx, k.SlotEntitlements, entitlementKey(entitlement.Epoch, entitlement.SlotId), *entitlement,
+		); err != nil {
+			return err
+		}
+	}
+	liability, err := types.ParseAmountString(
+		"outstanding entitlement liability", genState.OutstandingEntitlementLiability)
+	if err != nil {
+		return types.ErrInvalidGenesis.Wrap(err.Error())
+	}
+	return k.SetOutstandingEntitlementLiability(ctx, liability)
 }
 
 // initRewardConfigGenesis imports the canonical reward-configuration history and

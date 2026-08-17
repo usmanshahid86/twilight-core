@@ -47,4 +47,19 @@ var (
 	// change, keyed by the epoch it becomes effective at. At most one entry
 	// exists and its key is exactly current_epoch + 1.
 	ScheduledRewardConfigsPrefix = collections.NewPrefix(0x0D)
+
+	// SlotEntitlementsPrefix holds canonical finalized entitlements keyed
+	// (epoch, slot_id).
+	//
+	// The key order is (epoch, slot_id) and not the reverse. Both orders serve the
+	// point read equally, but only this one makes "every entitlement of one epoch,
+	// ascending by slot_id" a bounded prefix range — which is what epoch queries
+	// and later settlement materialization both need. Ordering the key the other
+	// way would require a second, derivable collection to answer the same
+	// question, and with it a class of divergence between the two.
+	SlotEntitlementsPrefix = collections.NewPrefix(0x0E)
+	// OutstandingEntitlementLiabilityKey holds the O(1) accumulator of unreleased
+	// entitlement value. Genesis writes it explicitly; afterwards an absent or
+	// unreadable value is corruption and must never be defaulted to zero.
+	OutstandingEntitlementLiabilityKey = collections.NewPrefix(0x0F)
 )

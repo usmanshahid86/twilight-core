@@ -26,6 +26,9 @@ func DefaultGenesis() *GenesisState {
 		RewardConfigVersions:    []*RewardConfigVersion{&rewardAnchor},
 		PauseState:              &RewardsPauseState{},
 		OpenRewardEnabledBlocks: 0,
+		// Written explicitly rather than left to the zero string. After genesis an
+		// absent liability is corruption, and an empty string does not parse.
+		OutstandingEntitlementLiability: "0",
 	}
 }
 
@@ -61,6 +64,9 @@ func (g GenesisState) Validate() error {
 		return err
 	}
 	if err := g.validateRewardConfigTimeline(); err != nil {
+		return err
+	}
+	if err := g.validateEntitlementState(); err != nil {
 		return err
 	}
 	if g.HasPendingParams {
@@ -244,6 +250,36 @@ func (g GenesisState) validateRewardConfigTimeline() error {
 	}
 
 	return g.validateRewardConfigMirrors(*anchor)
+}
+
+// validateEntitlementState checks the fresh-genesis shape of the canonical
+// entitlement state and its liability accumulator.
+//
+// A fresh chain has finalized no epoch, so it owes nothing and has recorded
+// nothing. Both rules are canonical CONTENT rules — about which entries may exist
+// at all, not about how a malformed collection is treated — so they are
+// enforceable without settling the open duplicate/ordering question.
+//
+// The liability is required to be the explicit string "0" rather than merely to
+// parse as zero. It is written, not defaulted: after initialization an absent
+// value is corruption, and accepting an empty document here would create exactly
+// the absent state the runtime refuses to interpret.
+func (g GenesisState) validateEntitlementState() error {
+	if len(g.SlotEntitlements) != 0 {
+		return ErrInvalidGenesis.Wrapf(
+			"fresh genesis carries %d slot entitlements; a fresh chain has finalized no epoch",
+			len(g.SlotEntitlements))
+	}
+	liability, err := ParseAmountString("outstanding entitlement liability", g.OutstandingEntitlementLiability)
+	if err != nil {
+		return ErrInvalidGenesis.Wrap(err.Error())
+	}
+	if !liability.IsZero() {
+		return ErrInvalidGenesis.Wrapf(
+			"fresh genesis carries an outstanding entitlement liability of %s; a fresh chain owes nothing",
+			liability)
+	}
+	return nil
 }
 
 // validateRewardConfigMirrors pins the deprecated economic mirrors to the

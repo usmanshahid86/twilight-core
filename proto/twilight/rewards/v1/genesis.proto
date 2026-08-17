@@ -32,4 +32,13 @@ message GenesisState {
   // Fresh genesis requires this to be empty; a populated entry is continuation
   // state and its key must be exactly current_epoch + 1.
   repeated ScheduledRewardConfig scheduled_reward_configs = 13;
+  // Canonical finalized entitlements. Fresh genesis requires this to be empty:
+  // a fresh chain has finalized no epoch and therefore owes nothing.
+  repeated SlotEntitlement slot_entitlements = 14;
+  // The O(1) outstanding entitlement liability, as a canonical base-10 amount.
+  //
+  // Written explicitly and required to be exactly "0" at fresh genesis. After
+  // initialization an absent or unreadable value is corruption rather than zero:
+  // defaulting it would silently forget what the module owes.
+  string outstanding_entitlement_liability = 15;
 }

@@ -89,6 +89,25 @@ type Keeper struct {
 	// NOT at BeginBlock, which is where the epoch-geometry schedule is consumed.
 	ScheduledRewardConfigs collections.Map[uint64, types.ScheduledRewardConfig]
 
+	// SlotEntitlements holds canonical finalized entitlements keyed
+	// (epoch, slot_id).
+	//
+	// One collection, no secondary index. The key order makes the point read O(1)
+	// and "one epoch, ascending slot_id" a bounded prefix range, which is every
+	// access the architecture asks for. A by-epoch index would add a second write
+	// per entitlement and a divergence class to detect, in exchange for no
+	// reachable query.
+	SlotEntitlements collections.Map[collections.Pair[uint64, uint64], types.SlotEntitlement]
+
+	// OutstandingEntitlementLiability is the O(1) accumulator of unreleased
+	// entitlement value, held as a canonical base-10 amount string.
+	//
+	// It exists because the definitional form — summing every live entitlement —
+	// is a full scan, and solvency is asserted on a block path. The scan survives
+	// as a test backstop, which is where an accumulator that drifted from the
+	// records it summarizes would be caught.
+	OutstandingEntitlementLiability collections.Item[string]
+
 	// PauseState is the single canonical rewards-pause state.
 	PauseState collections.Item[types.RewardsPauseState]
 
@@ -129,6 +148,10 @@ func NewKeeper(
 			collections.Uint64Key, codec.CollValue[types.RewardConfigVersion](cdc)),
 		ScheduledRewardConfigs: collections.NewMap(sb, types.ScheduledRewardConfigsPrefix, "scheduled_reward_configs",
 			collections.Uint64Key, codec.CollValue[types.ScheduledRewardConfig](cdc)),
+		SlotEntitlements: collections.NewMap(sb, types.SlotEntitlementsPrefix, "slot_entitlements",
+			pairKey, codec.CollValue[types.SlotEntitlement](cdc)),
+		OutstandingEntitlementLiability: collections.NewItem(sb, types.OutstandingEntitlementLiabilityKey,
+			"outstanding_entitlement_liability", collections.StringValue),
 		PauseState:              collections.NewItem(sb, types.RewardsPauseStateKey, "pause_state", codec.CollValue[types.RewardsPauseState](cdc)),
 		OpenRewardEnabledBlocks: collections.NewItem(sb, types.OpenRewardEnabledBlocksKey, "open_reward_enabled_blocks", collections.Uint64Value),
 	}
