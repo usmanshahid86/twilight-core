@@ -115,7 +115,7 @@ func TestRewardsModuleWiringAndOrdering(t *testing.T) {
 // claim transfers exactly that reward to the snapshotted payout address and
 // nothing to a different signer; and every rewards invariant holds against the
 // real bank.
-func TestRewardsShortEpochFinalizeSuspendClaim(t *testing.T) {
+func TestRewardsEpochFinalizeSuspendAndRelease(t *testing.T) {
 	a := bootApp(t)
 	base := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
 
@@ -220,54 +220,68 @@ func TestRewardsShortEpochFinalizeSuspendClaim(t *testing.T) {
 	require.Equal(t, mintedEmission, supplyAfter.Sub(supplyBefore).String(),
 		"supply must rise by exactly the clipped epoch emission (no double mint)")
 
-	// Finalized aggregate + separate claim records exist; suspended slot 1 is in.
+	// Finalized aggregate plus canonical entitlements; suspended slot 1 is in.
 	epoch, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx2, 1)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, mintedEmission, epoch.MintedEmission)
-	rec1, found, err := a.RewardsKeeper.GetClaimRecord(ctx2, 1, 1)
+	require.Empty(t, epoch.Rewards, "the aggregate embeds no per-Slot rows after the switchover")
+
+	ent1, found, err := a.RewardsKeeper.GetSlotEntitlement(ctx2, 1, 1)
 	require.NoError(t, err)
-	require.True(t, found, "suspended slot 1 must still have a claim record for the epoch it earned")
-	require.Equal(t, perSlotReward, rec1.Amount)
-	require.Equal(t, pay1, rec1.PayoutAddress)
-	require.False(t, rec1.Claimed)
+	require.True(t, found, "suspended slot 1 must still hold an entitlement for the epoch it earned")
+	require.Equal(t, perSlotReward, ent1.EntitlementAmount)
+	require.Equal(t, pay1, ent1.PayoutAddress)
+	require.Equal(t, "0", ent1.ReleasedAmount)
 
 	// The counterweight: allocation is proportional to earned blocks, so the slot
 	// that stayed active takes the larger share.
-	rec2, found, err := a.RewardsKeeper.GetClaimRecord(ctx2, 2, 1)
+	ent2, found, err := a.RewardsKeeper.GetSlotEntitlement(ctx2, 2, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, slot2Reward, rec2.Amount)
-	require.Equal(t, uint64(slot2Blocks), rec2.BlocksActive)
-	require.Equal(t, uint64(slot1Blocks), rec1.BlocksActive,
+	require.Equal(t, slot2Reward, ent2.EntitlementAmount)
+	require.Equal(t, uint64(slot2Blocks), ent2.TotalBlocksActive)
+	require.Equal(t, uint64(slot1Blocks), ent1.TotalBlocksActive,
 		"slot 1 earned only the blocks before its suspension took effect")
 
-	// === Claim slot 1 (the suspended slot) via an arbitrary signer != payout. ===
-	signer := acc(9)
+	// The legacy path owns nothing here.
+	_, found, err = a.RewardsKeeper.GetClaimRecord(ctx2, 1, 1)
+	require.NoError(t, err)
+	require.False(t, found, "V2 finalization creates no claim record")
+	require.Error(t, a.RewardsKeeper.ClaimRewards(ctx2, &rewardstypes.MsgClaimRewards{
+		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 1,
+	}), "the legacy claim path must be unable to pay a V2 obligation")
+
+	// === Release slot 1 (the suspended slot) through the constrained boundary. ===
+	//
+	// Against the REAL bank keeper and the real module account, so this is where
+	// the bank half of the atomicity story is actually proven rather than modeled.
 	payAddr1 := mustAddr(t, pay1)
 	require.True(t, a.BankKeeper.GetBalance(ctx2, payAddr1, app.BaseDenom).Amount.IsZero())
-
-	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx2, &rewardstypes.MsgClaimRewards{
-		Signer: signer, SlotId: 1, StartEpoch: 1, EndEpoch: 1,
-	}))
-
-	// Addendum 2 §B.6 + §13: real bank balance of the snapshotted payout rose by
-	// exactly the reward; a non-payout signer received nothing.
-	require.Equal(t, perSlotReward, a.BankKeeper.GetBalance(ctx2, payAddr1, app.BaseDenom).Amount.String())
-	require.True(t, a.BankKeeper.GetBalance(ctx2, mustAddr(t, signer), app.BaseDenom).Amount.IsZero(),
-		"signer must not receive funds unless signer == snapshotted payout")
-
-	// Double claim is impossible.
-	require.Error(t, a.RewardsKeeper.ClaimRewards(ctx2, &rewardstypes.MsgClaimRewards{
-		Signer: signer, SlotId: 1, StartEpoch: 1, EndEpoch: 1,
-	}))
-
-	// Closed-epoch aggregate is not mutated by the claim (separate claim row only).
-	epochAfter, _, err := a.RewardsKeeper.GetFinalizedEpoch(ctx2, 1)
+	liabilityBefore, err := a.RewardsKeeper.GetOutstandingEntitlementLiability(ctx2)
 	require.NoError(t, err)
-	for _, r := range epochAfter.Rewards {
-		require.False(t, r.Claimed, "finalized epoch aggregate must stay immutable after claims")
-	}
+
+	require.NoError(t, a.RewardsKeeper.PayEntitlementRemainderToOperator(ctx2, 1, 1))
+
+	// The snapshotted payout received exactly the entitlement, the released amount
+	// moved with it, and the liability fell by the same value. All three or none.
+	require.Equal(t, perSlotReward, a.BankKeeper.GetBalance(ctx2, payAddr1, app.BaseDenom).Amount.String())
+	released, found, err := a.RewardsKeeper.GetSlotEntitlement(ctx2, 1, 1)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, perSlotReward, released.ReleasedAmount)
+	liabilityAfter, err := a.RewardsKeeper.GetOutstandingEntitlementLiability(ctx2)
+	require.NoError(t, err)
+	require.Equal(t, perSlotReward, liabilityBefore.Sub(liabilityAfter).String())
+
+	// A second remainder release is a deterministic no-op, not a double payment.
+	require.NoError(t, a.RewardsKeeper.PayEntitlementRemainderToOperator(ctx2, 1, 1))
+	require.Equal(t, perSlotReward, a.BankKeeper.GetBalance(ctx2, payAddr1, app.BaseDenom).Amount.String())
+
+	// Suspension did not confiscate: §64 keeps an earned obligation payable.
+	suspended, err := a.CoreSlotKeeper.GetSlot(ctx2, 1)
+	require.NoError(t, err)
+	require.Equal(t, coreslottypes.SlotStatus_SLOT_STATUS_SUSPENDED, suspended.Status)
 
 	// === Every rewards invariant holds against the real bank/module accounts. ===
 	invariants := map[string]sdk.Invariant{
@@ -276,6 +290,7 @@ func TestRewardsShortEpochFinalizeSuspendClaim(t *testing.T) {
 		"module-balance-coverage":   a.RewardsKeeper.ModuleBalanceCoverageInvariant(),
 		"denom-correctness":         a.RewardsKeeper.DenomCorrectnessInvariant(),
 		"closed-epoch-immutability": a.RewardsKeeper.ClosedEpochImmutabilityInvariant(),
+		"entitlement-liability":     a.RewardsKeeper.EntitlementLiabilityInvariant(),
 	}
 	for name, inv := range invariants {
 		msg, broken := inv(ctx2)

@@ -12,17 +12,15 @@ func TestCoreSlotRewardSnapshots(t *testing.T) {
 	active := coreslottypes.CoreSlot{
 		SlotId: 1, OperatorAddress: addr(1), PayoutAddress: addr(2),
 		Status: coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE, ConsensusPower: 999,
+		ActivationSequence: 3,
 	}
 	inactive := coreslottypes.CoreSlot{
 		SlotId: 2, OperatorAddress: addr(3), PayoutAddress: addr(4),
 		Status: coreslottypes.SlotStatus_SLOT_STATUS_INACTIVE, ConsensusPower: 0,
+		ActivationSequence: 5,
 	}
 	core := &coreSlotKeeperMock{
-		slots: map[uint64]coreslottypes.CoreSlot{1: active, 2: inactive},
-		weights: map[uint64]coreslottypes.OperatorRewardWeight{
-			1: {SlotId: 1, FinalWeight: "1.500000000000000000"},
-			2: {SlotId: 2, FinalWeight: "2.000000000000000000"},
-		},
+		slots:  map[uint64]coreslottypes.CoreSlot{1: active, 2: inactive},
 		active: []coreslottypes.CoreSlot{active, inactive},
 	}
 	k, ctx, _ := setupKeeper(t, core)
@@ -34,13 +32,17 @@ func TestCoreSlotRewardSnapshots(t *testing.T) {
 	require.Equal(t, active.OperatorAddress, snapshots[0].OperatorAddress.String())
 	require.Equal(t, active.PayoutAddress, snapshots[0].PayoutAddress.String())
 	require.Equal(t, active.Status, snapshots[0].Status)
-	require.Equal(t, "1.500000000000000000", snapshots[0].RewardWeight.String())
+	// Audit context for the entitlement, carried verbatim from CoreSlot. It is
+	// deliberately NOT derived from consensus power, which is a different quantity
+	// that happens to be present on the same record.
+	require.Equal(t, uint64(3), snapshots[0].ActivationSequence)
 
 	snapshot, err := k.GetSlotRewardSnapshot(ctx, 2)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), snapshot.SlotID)
-	require.Equal(t, "2.000000000000000000", snapshot.RewardWeight.String())
-	require.NotEqual(t, active.ConsensusPower, snapshot.RewardWeight.TruncateInt64(), "snapshot must not derive weight from consensus power")
+	require.Equal(t, uint64(5), snapshot.ActivationSequence)
+	require.Equal(t, inactive.Status, snapshot.Status,
+		"a non-ACTIVE Slot still snapshots: an earned entitlement survives lifecycle change")
 }
 
 func TestCoreSlotRewardSnapshotRejectsInvalidAddresses(t *testing.T) {
@@ -50,9 +52,8 @@ func TestCoreSlotRewardSnapshotRejectsInvalidAddresses(t *testing.T) {
 	}
 	for _, slot := range tests {
 		core := &coreSlotKeeperMock{
-			slots:   map[uint64]coreslottypes.CoreSlot{1: slot},
-			weights: map[uint64]coreslottypes.OperatorRewardWeight{1: {SlotId: 1, FinalWeight: "1.000000000000000000"}},
-			active:  []coreslottypes.CoreSlot{slot},
+			slots:  map[uint64]coreslottypes.CoreSlot{1: slot},
+			active: []coreslottypes.CoreSlot{slot},
 		}
 		k, ctx, _ := setupKeeper(t, core)
 		_, err := k.GetActiveSlotSnapshots(ctx)
@@ -60,17 +61,7 @@ func TestCoreSlotRewardSnapshotRejectsInvalidAddresses(t *testing.T) {
 	}
 }
 
-func TestCoreSlotRewardSnapshotRejectsNegativeWeight(t *testing.T) {
-	slot := coreslottypes.CoreSlot{
-		SlotId: 1, OperatorAddress: addr(1), PayoutAddress: addr(2),
-		Status: coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
-	}
-	core := &coreSlotKeeperMock{
-		slots:   map[uint64]coreslottypes.CoreSlot{1: slot},
-		weights: map[uint64]coreslottypes.OperatorRewardWeight{1: {SlotId: 1, FinalWeight: "-1"}},
-		active:  []coreslottypes.CoreSlot{slot},
-	}
-	k, ctx, _ := setupKeeper(t, core)
-	_, err := k.GetActiveSlotSnapshots(ctx)
-	require.Error(t, err)
-}
+// The reward-weight rejection test is deliberately gone rather than relaxed.
+// x/rewards no longer reads the weight at all -- V2 entitlement shares are
+// participation-relative -- so there is nothing left here to reject. The weight
+// remains CoreSlot's own metadata and CoreSlot validates it.

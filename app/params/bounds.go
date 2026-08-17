@@ -102,15 +102,23 @@ const (
 	// recommended 360-block one.
 	//
 	// Why 720 is the ceiling. It leaves real configurability above the recommended
-	// 360 while bounding the per-epoch participation-accounting envelope, whose
-	// worst case is HardMaxActiveCoreSlots * HardMaxEpochLengthBlocks =
-	// 100 * 720 = 72,000 slot-blocks of participation credit in one epoch. That is
-	// an accounting volume, not a population: the number of DISTINCT participating
-	// Slots in an epoch stays bounded by HardMaxActiveCoreSlots = 100, and the
-	// per-epoch participation table therefore holds at most 100 rows, each counting
-	// up to HardMaxEpochLengthBlocks. A materially larger ceiling is not a parameter
-	// change; it needs new load evidence under the architecture's adversarial-load
-	// obligation.
+	// 360 while bounding the per-epoch participation envelope, whose worst case is
+	//
+	//	HardMaxActiveCoreSlots * HardMaxEpochLengthBlocks = 100 * 720 = 72,000
+	//
+	// The PRODUCT is the bound, not the concurrent ceiling. HardMaxActiveCoreSlots
+	// limits how many Slots are ACTIVE at one instant, not how many are active at
+	// some point during an epoch: Slots may be inactivated and others activated
+	// while the epoch runs, and a distinct participant needs only one
+	// reward-enabled BeginBlock position to earn a row. So the count of DISTINCT
+	// participating Slots in one epoch — and with it the size of the per-epoch
+	// participation table and the number of entitlements a single close can create
+	// — is bounded by the product, not by 100.
+	//
+	// Sizing per-epoch work against the concurrent ceiling alone would understate
+	// the maximum-churn case by nearly three orders of magnitude. A materially
+	// larger ceiling is not a parameter change; it needs new load evidence under
+	// the architecture's adversarial-load obligation.
 	//
 	// These are BLOCK counts, not durations. Block time is not a protocol
 	// guarantee, so neither bound may be described as a wall-clock window.

@@ -467,3 +467,39 @@ func setupFinalizationWithRewardConfig(t *testing.T) (keeper.Keeper, sdk.Context
 	require.Equal(t, uint64(1), anchor.Version)
 	return k, ctx, bank
 }
+
+// seedTreasuryRewardConfig points the canonical reward configuration at a
+// treasury destination with a positive share.
+//
+// The deprecated Params/snapshot mirrors are deliberately left alone. They carry
+// no authority, so moving them would change nothing about what finalization pays
+// — which is itself worth stating, because a fixture that set them instead would
+// silently test nothing.
+func seedTreasuryRewardConfig(
+	t *testing.T, k keeper.Keeper, ctx sdk.Context, shareBps uint64, destination string,
+) {
+	t.Helper()
+	anchor, err := k.GenesisRewardConfigVersion(ctx)
+	require.NoError(t, err)
+	anchor.EmissionTreasuryShareBps = shareBps
+	anchor.TreasuryAddress = destination
+	require.NoError(t, k.RewardConfigVersions.Set(ctx, anchor.EffectiveEpoch, anchor))
+}
+
+// seedTreasuryRewardConfigUnchecked writes a treasury configuration straight to
+// the history, bypassing admission.
+//
+// Admission would refuse an inadmissible destination, which is correct and is
+// tested separately. This exists for the §33.2 cases, which are about whether the
+// destination is revalidated AT TRANSFER TIME — a question that only arises once
+// such a configuration is already in force.
+func seedTreasuryRewardConfigUnchecked(
+	t *testing.T, k keeper.Keeper, ctx sdk.Context, shareBps uint64, destination string,
+) {
+	t.Helper()
+	anchor, err := k.GenesisRewardConfigVersion(ctx)
+	require.NoError(t, err)
+	anchor.EmissionTreasuryShareBps = shareBps
+	anchor.TreasuryAddress = destination
+	require.NoError(t, k.RewardConfigVersions.Set(ctx, anchor.EffectiveEpoch, anchor))
+}

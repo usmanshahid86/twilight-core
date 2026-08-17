@@ -291,15 +291,9 @@ func TestDrillHalvingSubsidyDecay(t *testing.T) {
 	require.Equal(t, intStr(t, epoch1.MintedEmission).QuoRaw(2), intStr(t, epoch2.MintedEmission),
 		"emission must halve exactly across the supply threshold")
 
-	// Single slot takes the whole pool each epoch; the per-slot reward halves too.
-	rec1, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 1)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, strconv.FormatInt(epochEmission, 10), rec1.Amount)
-	rec2, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 2)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, strconv.FormatInt(halved, 10), rec2.Amount)
+	// Single slot takes the whole pool each epoch; the per-slot entitlement halves too.
+	require.Equal(t, strconv.FormatInt(epochEmission, 10), entitlementOf(t, a, ctx, 1, 1).EntitlementAmount)
+	require.Equal(t, strconv.FormatInt(halved, 10), entitlementOf(t, a, ctx, 1, 2).EntitlementAmount)
 
 	// Identity (zero premine, zero treasury): supply == cumulative; both <= maxSupply.
 	state, err := a.RewardsKeeper.GetState(ctx)
@@ -351,11 +345,8 @@ func TestDrillTreasuryBpsSplit(t *testing.T) {
 	require.Equal(t, strconv.FormatInt(treasuryCut, 10), a.BankKeeper.GetBalance(ctx, mustAddr(t, treasury), app.BaseDenom).Amount.String(),
 		"treasury address must hold exactly the split amount")
 
-	// Single slot's claimable reward is the post-treasury pool.
-	rec, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 1)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, strconv.FormatInt(pool, 10), rec.Amount)
+	// The single slot's entitlement is the post-treasury pool.
+	require.Equal(t, strconv.FormatInt(pool, 10), entitlementOf(t, a, ctx, 1, 1).EntitlementAmount)
 
 	// Identity with treasury: emission is fully minted (counts in supply and
 	// cumulative); the treasury portion left the module but stays in supply.
@@ -364,8 +355,8 @@ func TestDrillTreasuryBpsSplit(t *testing.T) {
 	require.Equal(t, strconv.FormatInt(emission, 10), state.CumulativeEmitted)
 	require.Equal(t, strconv.FormatInt(emission, 10), a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String(),
 		"supply == cumulative; treasury coins are still in circulation")
-	// Coverage: the module balance covers the single unclaimed reward; treasury
-	// coins are excluded from both sides of the coverage invariant.
+	// Coverage: the module balance covers the single unreleased obligation;
+	// treasury coins are excluded from both sides of the coverage invariant.
 	require.Equal(t, strconv.FormatInt(pool, 10), a.BankKeeper.GetBalance(ctx, a.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName), app.BaseDenom).Amount.String())
 	assertInvariants(t, a, ctx)
 }
@@ -496,17 +487,13 @@ func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 		"whatever the floors leave is carry, and it is bounded by one per positive slot")
 	require.LessOrEqual(t, emission-allocated, int64(1), "two positive slots leave at most one unit")
 
-	rec1, found, err := a.RewardsKeeper.GetClaimRecord(ctx3, 1, 1)
-	require.NoError(t, err)
-	require.True(t, found, "suspended-but-earned slot 1 still has a claim record")
-	require.Equal(t, uint64(1), rec1.BlocksActive, "slot 1 was active only for block 1 before suspension")
-	require.Equal(t, strconv.FormatInt(slot1Amount, 10), rec1.Amount, "one block out of the epoch's total weight")
-	require.Equal(t, pay1, rec1.PayoutAddress)
-	rec2, found, err := a.RewardsKeeper.GetClaimRecord(ctx3, 2, 1)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, uint64(slot2Blocks), rec2.BlocksActive, "slot 2 stayed active for the whole epoch")
-	require.Equal(t, strconv.FormatInt(slot2Amount, 10), rec2.Amount)
+	ent1 := entitlementOf(t, a, ctx3, 1, 1)
+	require.Equal(t, uint64(1), ent1.TotalBlocksActive, "slot 1 was active only for block 1 before suspension")
+	require.Equal(t, strconv.FormatInt(slot1Amount, 10), ent1.EntitlementAmount, "one block out of the epoch's total weight")
+	require.Equal(t, pay1, ent1.PayoutAddress)
+	ent2 := entitlementOf(t, a, ctx3, 2, 1)
+	require.Equal(t, uint64(slot2Blocks), ent2.TotalBlocksActive, "slot 2 stayed active for the whole epoch")
+	require.Equal(t, strconv.FormatInt(slot2Amount, 10), ent2.EntitlementAmount)
 
 	// CoreSlot reflects the churn: slot 1 is suspended but its row/payout survive.
 	s1, err := a.CoreSlotKeeper.GetSlot(ctx3, 1)
@@ -514,10 +501,10 @@ func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 	require.Equal(t, coreslottypes.SlotStatus_SLOT_STATUS_SUSPENDED, s1.Status)
 	require.Equal(t, pay1, s1.PayoutAddress)
 
-	// The suspended slot's reward is still claimable to its snapshotted payout.
-	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx3, &rewardstypes.MsgClaimRewards{
-		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 1,
-	}))
+	// The suspended slot's earned value still reaches its snapshotted payout. §64:
+	// release does not consult live lifecycle state, so suspension cannot
+	// confiscate what was already earned.
+	releaseToPayout(t, a, ctx3, 1, 1)
 	require.Equal(t, strconv.FormatInt(slot1Amount, 10), a.BankKeeper.GetBalance(ctx3, mustAddr(t, pay1), app.BaseDenom).Amount.String())
 
 	// Identity holds across the churn.
@@ -526,14 +513,19 @@ func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 }
 
 // ===========================================================================
-// Branch 6: max_claim_epochs_per_tx cap.
+// Branch 6: the LEGACY claim cap, over LEGACY state.
 //
-// MaxClaimEpochsPerTx=3 with 4 finalized epochs (epoch length 1, single slot).
-// The cap rejects when EndEpoch-StartEpoch >= cap, so a [1,4] claim (delta 3) is
-// rejected while a [1,3] claim (delta 2, three inclusive epochs) is the maximum
-// allowed span. C1 used the default cap of 100 and never claimed near it.
+// max_claim_epochs_per_tx bounds a span of ClaimRecords. V2 finalization creates
+// none -- the obligation it produces is a SlotEntitlement -- so the cap has
+// nothing to bound on the live path and this drill is explicitly legacy
+// coverage: it seeds claim records directly rather than expecting finalization
+// to produce them.
+//
+// Kept because the code is still reachable and still owns real money until the
+// claim surface is retired. It is NOT a V2 money-movement proof, and the epochs
+// it drives are asserted to produce entitlements, not claims.
 // ===========================================================================
-func TestDrillMaxClaimEpochsCap(t *testing.T) {
+func TestDrillLegacyMaxClaimEpochsCap(t *testing.T) {
 	a := bootApp(t)
 	base := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
 
@@ -547,15 +539,29 @@ func TestDrillMaxClaimEpochsCap(t *testing.T) {
 		{id: 1, operator: acc(2), payout: pay, keyMarker: 1},
 	}, genesisState(p, snap))
 
-	// Four full epochs -> four finalized epochs, each crediting the single slot
-	// one epoch's worth of subsidy.
+	// Four full epochs -> four finalized epochs. The live path creates
+	// entitlements; the claim records below are legacy fixture state.
 	perEpoch := drillEpochLen * 100
 	ctx := driveBlocks(t, a, base, 1, 4*drillEpochLen)
 	for epoch := uint64(1); epoch <= 4; epoch++ {
-		rec, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, epoch)
+		require.Equal(t, strconv.FormatInt(perEpoch, 10),
+			entitlementOf(t, a, ctx, 1, epoch).EntitlementAmount)
+		_, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, epoch)
 		require.NoError(t, err)
-		require.Truef(t, found, "epoch %d must be finalized with a claim record", epoch)
-		require.Equal(t, strconv.FormatInt(perEpoch, 10), rec.Amount)
+		require.Falsef(t, found, "V2 finalization must create no claim record for epoch %d", epoch)
+	}
+
+	// Legacy setup: the claim records this drill is about, seeded directly. They
+	// deliberately name a different payout destination than the entitlements, so
+	// the balances below cannot be confused with V2 release.
+	legacyPay := acc(13)
+	for epoch := uint64(1); epoch <= 4; epoch++ {
+		require.NoError(t, a.RewardsKeeper.SetClaimRecord(ctx, rewardstypes.EligibleSlotReward{
+			SlotId: 1, EpochNumber: epoch, OperatorAddress: acc(2), PayoutAddress: legacyPay,
+			BlocksActive: uint64(drillEpochLen), RewardWeight: coreslottypes.DefaultRewardWeight,
+			EffectiveWeight: strconv.FormatInt(drillEpochLen, 10),
+			Amount:          strconv.FormatInt(perEpoch, 10),
+		}))
 	}
 
 	// A span exceeding the cap is rejected (delta 3 >= cap 3).
@@ -566,26 +572,25 @@ func TestDrillMaxClaimEpochsCap(t *testing.T) {
 	require.Contains(t, err.Error(), "claim range exceeds maximum")
 
 	// Nothing was paid by the rejected claim.
-	require.True(t, a.BankKeeper.GetBalance(ctx, mustAddr(t, pay), app.BaseDenom).Amount.IsZero(),
+	require.True(t, a.BankKeeper.GetBalance(ctx, mustAddr(t, legacyPay), app.BaseDenom).Amount.IsZero(),
 		"a rejected over-cap claim must pay nothing")
 
-	// The maximum allowed span (delta 2, epochs 1..3) succeeds and pays three
-	// epochs' worth.
+	// The maximum allowed span (delta 2, epochs 1..3) succeeds.
 	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
 		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 3,
 	}))
-	require.Equal(t, strconv.FormatInt(3*perEpoch, 10), a.BankKeeper.GetBalance(ctx, mustAddr(t, pay), app.BaseDenom).Amount.String())
+	require.Equal(t, strconv.FormatInt(3*perEpoch, 10),
+		a.BankKeeper.GetBalance(ctx, mustAddr(t, legacyPay), app.BaseDenom).Amount.String())
 
-	// Epoch 4 is still unclaimed and claimable on its own.
+	// Epoch 4 was outside the allowed span and remains unclaimed.
 	rec4, _, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 4)
 	require.NoError(t, err)
-	require.False(t, rec4.Claimed, "epoch 4 was outside the allowed span and remains unclaimed")
+	require.False(t, rec4.Claimed)
 	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
 		Signer: acc(9), SlotId: 1, StartEpoch: 4, EndEpoch: 4,
 	}))
-	require.Equal(t, strconv.FormatInt(4*perEpoch, 10), a.BankKeeper.GetBalance(ctx, mustAddr(t, pay), app.BaseDenom).Amount.String())
-
-	assertInvariants(t, a, ctx)
+	require.Equal(t, strconv.FormatInt(4*perEpoch, 10),
+		a.BankKeeper.GetBalance(ctx, mustAddr(t, legacyPay), app.BaseDenom).Amount.String())
 }
 
 // ===========================================================================
@@ -679,10 +684,10 @@ func TestDrillCombinedAllBranches(t *testing.T) {
 	// Slot 3 was active only for the first block of epoch 2; slots 1 and 2 for all
 	// of it. Read the preserved count off the finalized claim record, since the
 	// live counters are deleted at finalization.
-	rec3, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 3, 2)
+	ent3, found, err := a.RewardsKeeper.GetSlotEntitlement(ctx, 3, 2)
 	require.NoError(t, err)
-	require.True(t, found, "suspended-but-earned slot 3 still has a claim record for epoch 2")
-	require.Equal(t, uint64(1), rec3.BlocksActive, "suspended slot 3 earned only the first block of epoch 2")
+	require.True(t, found, "suspended-but-earned slot 3 still holds an entitlement for epoch 2")
+	require.Equal(t, uint64(1), ent3.TotalBlocksActive, "suspended slot 3 earned only the first block of epoch 2")
 	reconcile(ctx, 2)
 
 	// --- Epochs 3 and 4: only slots 1,2 active; cross the halving. ---
@@ -714,18 +719,51 @@ func TestDrillCombinedAllBranches(t *testing.T) {
 	}
 	require.True(t, carrySeen, "non-divisible pools must have produced a nonzero carry-forward at least once")
 
-	// Claim-cap branch: a 3-epoch span exceeds MaxClaimEpochsPerTx=2.
-	err = a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
-		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 3,
-	})
-	require.Error(t, err, "3-epoch span must exceed the cap of 2")
-	require.Contains(t, err.Error(), "claim range exceeds maximum")
-	// The maximum allowed span (epochs 1..2) succeeds.
-	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
-		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 2,
-	}))
+	// Release branch: the constrained keeper path pays earned value to the
+	// immutable payout snapshot. The legacy claim cap is not exercised here --
+	// finalization creates no claim record for a V2 epoch, so the cap has nothing
+	// to bound; it survives only as legacy coverage over legacy state.
+	require.Error(t, a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
+		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 1,
+	}), "the legacy path must refuse a V2 obligation: no claim record exists for it")
 
-	// Identity still holds after claims (claims move coins module -> payout but
-	// do not change cumulative, treasury, or allocated totals).
+	releaseToPayout(t, a, ctx, 1, 1)
+	releaseToPayout(t, a, ctx, 1, 2)
+
+	// Identity still holds after release: value moves module -> payout without
+	// changing cumulative, treasury, or allocated totals.
 	reconcile(ctx, 4)
+}
+
+// ---------------------------------------------------------------------------
+// V2 obligation helpers for the drills.
+//
+// The drills' subject is the economics -- halving, treasury split, carry, churn
+// -- not the mechanism that pays them out. After the switchover the obligation a
+// finalized epoch produces is a SlotEntitlement and the release path is the
+// constrained keeper API, so the drills read and pay through those.
+// ---------------------------------------------------------------------------
+
+// entitlementOf returns the canonical obligation a finalized epoch created.
+func entitlementOf(
+	t *testing.T, a *app.App, ctx sdk.Context, slotID, epoch uint64,
+) rewardstypes.SlotEntitlement {
+	t.Helper()
+	entitlement, found, err := a.RewardsKeeper.GetSlotEntitlement(ctx, slotID, epoch)
+	require.NoError(t, err)
+	require.Truef(t, found, "slot %d must hold an entitlement for epoch %d", slotID, epoch)
+	return entitlement
+}
+
+// releaseToPayout pays an entitlement in full to its immutable payout snapshot,
+// through the constrained release boundary.
+//
+// This is the V2 equivalent of what the legacy claim used to do, and it is
+// deliberately the remainder helper rather than a participant payout set: the
+// drills care that the earned value reaches the operator's snapshotted
+// destination, which is exactly what the remainder path guarantees and what no
+// caller can redirect.
+func releaseToPayout(t *testing.T, a *app.App, ctx sdk.Context, slotID, epoch uint64) {
+	t.Helper()
+	require.NoError(t, a.RewardsKeeper.PayEntitlementRemainderToOperator(ctx, slotID, epoch))
 }

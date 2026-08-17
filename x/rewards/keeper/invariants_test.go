@@ -3,6 +3,8 @@ package keeper_test
 import (
 	"testing"
 
+	sdkmath "cosmossdk.io/math"
+
 	"github.com/stretchr/testify/require"
 
 	"cosmossdk.io/collections"
@@ -29,23 +31,41 @@ func TestSupplyAndCumulativeInvariants(t *testing.T) {
 	require.True(t, broken)
 }
 
+// TestModuleBalanceCoverageInvariant measures the obligation the entitlement way:
+// the O(1) liability plus carry, not a full walk of unclaimed claim records.
 func TestModuleBalanceCoverageInvariant(t *testing.T) {
-	k, ctx, bank := setupAccountingKeeper(t, &coreSlotKeeperMock{}, 1, types.DefaultParams())
+	k, ctx, bank := setupAccountingKeeper(t, &coreSlotKeeperMock{}, 1, rewardConfigParams())
 	state, err := k.GetState(ctx)
 	require.NoError(t, err)
 	state.CarryForwardRemainder = "3"
 	require.NoError(t, k.SetState(ctx, state))
-	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 1)))
+	require.NoError(t, k.CreateSlotEntitlement(ctx, entitlementFor(1, 1, "1")))
 
 	moduleAddress := sdk.AccAddress(make([]byte, 20))
-	bank.balances = map[string]sdk.Coin{
-		moduleAddress.String(): sdk.NewInt64Coin(types.DefaultParams().NativeDenom, 4),
-	}
+	denom := types.DefaultParams().NativeDenom
+	bank.balances = map[string]sdk.Coin{moduleAddress.String(): sdk.NewInt64Coin(denom, 4)}
 	_, broken := k.ModuleBalanceCoverageInvariant()(ctx)
+	require.False(t, broken, "escrow of 4 covers a liability of 1 plus carry of 3")
+
+	bank.balances[moduleAddress.String()] = sdk.NewInt64Coin(denom, 3)
+	_, broken = k.ModuleBalanceCoverageInvariant()(ctx)
+	require.True(t, broken)
+}
+
+// TestEntitlementLiabilityInvariant is the backstop for the O(1) accumulator.
+//
+// Without it the accumulator is unfalsifiable: every consumer reads the same
+// stored number, so a drift would be invisible to all of them.
+func TestEntitlementLiabilityInvariant(t *testing.T) {
+	k, ctx, _ := setupAccountingKeeper(t, &coreSlotKeeperMock{}, 1, rewardConfigParams())
+	require.NoError(t, k.CreateSlotEntitlement(ctx, entitlementFor(1, 1, "500")))
+
+	_, broken := k.EntitlementLiabilityInvariant()(ctx)
 	require.False(t, broken)
 
-	bank.balances[moduleAddress.String()] = sdk.NewInt64Coin(types.DefaultParams().NativeDenom, 3)
-	_, broken = k.ModuleBalanceCoverageInvariant()(ctx)
+	// Drift the accumulator away from the records it summarizes.
+	require.NoError(t, k.SetOutstandingEntitlementLiability(ctx, sdkmath.NewInt(499)))
+	_, broken = k.EntitlementLiabilityInvariant()(ctx)
 	require.True(t, broken)
 }
 

@@ -54,6 +54,19 @@ func renormalizeRewardsGenesis(t *testing.T, appState []byte, initialHeight int6
 	rGen.State.CurrentEpoch = 1
 	rGen.State.CurrentEpochStartHeight = uint64(initialHeight)
 
+	rewardAnchor := rewardstypes.DefaultRewardConfigVersion(*rGen.Params)
+	rGen.RewardConfigVersions = []*rewardstypes.RewardConfigVersion{&rewardAnchor}
+	rGen.ScheduledRewardConfigs = nil
+	// Outstanding obligations are DROPPED, not carried.
+	//
+	// Fresh genesis owes nothing, and this renormalizer produces a fresh-genesis
+	// shaped document. Preserving entitlements would require continuation import,
+	// which decides what an outstanding obligation means across a restart and is
+	// deliberately out of scope. Dropping them here is the honest normalization;
+	// the assertions below are scoped to what actually survives it.
+	rGen.SlotEntitlements = nil
+	rGen.OutstandingEntitlementLiability = "0"
+
 	state[rewardstypes.ModuleName] = cdc.MustMarshalJSON(&rGen)
 	out, err := json.Marshal(state)
 	require.NoError(t, err)
@@ -159,11 +172,17 @@ func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, epochEmission, epoch.MintedEmission)
-	claim, found, err := b.RewardsKeeper.GetClaimRecord(ctx, 1, 1)
+	// Obligations are deliberately absent: the renormalized document is
+	// fresh-genesis shaped and a fresh chain owes nothing. What continuity this
+	// test demonstrates is of the epoch timeline and the emission accounting, not
+	// of outstanding obligations -- that is continuation work.
+	_, found, err = b.RewardsKeeper.GetSlotEntitlement(ctx, 1, 1)
 	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, epochEmission, claim.Amount)
-	require.False(t, claim.Claimed)
+	require.False(t, found)
+	liability, err := b.RewardsKeeper.GetOutstandingEntitlementLiability(ctx)
+	require.NoError(t, err)
+	require.True(t, liability.IsZero())
+
 	require.Equal(t, epochEmission, b.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String())
 	rewardsAddr := b.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName)
 	require.Equal(t, epochEmission, b.BankKeeper.GetBalance(ctx, rewardsAddr, app.BaseDenom).Amount.String())

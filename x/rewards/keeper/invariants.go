@@ -53,6 +53,19 @@ func (k Keeper) CumulativeEmittedInvariant() sdk.Invariant {
 	}
 }
 
+// ModuleBalanceCoverageInvariant proves the escrow covers what the module owes.
+//
+// Rewritten from the claim-shaped model. It used to sum every unclaimed
+// ClaimRecord through a full walk; the obligation is now the O(1) outstanding
+// entitlement liability plus carry, which is the same quantity finalization
+// asserts and costs two reads instead of a scan.
+//
+// Coverage (>=) rather than the equality finalization asserts. The two differ
+// deliberately: finalization checks the invariant at the one moment it must hold
+// exactly, immediately after a complete monetary transition. This runs at
+// arbitrary times, including while historical claim-shaped state from before the
+// switchover is still outstanding, so a strict equality here would report a
+// legitimate chain as broken.
 func (k Keeper) ModuleBalanceCoverageInvariant() sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
 		params, err := k.GetParams(ctx)
@@ -63,21 +76,15 @@ func (k Keeper) ModuleBalanceCoverageInvariant() sdk.Invariant {
 		if err != nil {
 			return invariantError("module-balance-coverage", err)
 		}
-		required, err := types.ParseAmountString("carry forward remainder", state.CarryForwardRemainder)
+		carry, err := types.ParseAmountString("carry forward remainder", state.CarryForwardRemainder)
 		if err != nil {
 			return invariantError("module-balance-coverage", err)
 		}
-		err = k.ClaimRecords.Walk(ctx, nil, func(_ collections.Pair[uint64, uint64], reward types.EligibleSlotReward) (bool, error) {
-			if reward.Claimed {
-				return false, nil
-			}
-			amount, err := types.ParseAmountString("claim amount", reward.Amount)
-			if err != nil {
-				return true, err
-			}
-			required = required.Add(amount)
-			return false, nil
-		})
+		liability, err := k.GetOutstandingEntitlementLiability(ctx)
+		if err != nil {
+			return invariantError("module-balance-coverage", err)
+		}
+		required, err := liability.SafeAdd(carry)
 		if err != nil {
 			return invariantError("module-balance-coverage", err)
 		}
@@ -88,6 +95,41 @@ func (k Keeper) ModuleBalanceCoverageInvariant() sdk.Invariant {
 		balance := k.bankKeeper.GetBalance(ctx, address, params.NativeDenom).Amount
 		if balance.LT(required) {
 			return sdk.FormatInvariant(types.ModuleName, "module-balance-coverage", fmt.Sprintf("%s < %s", balance, required)), true
+		}
+		return "", false
+	}
+}
+
+// EntitlementLiabilityInvariant proves the O(1) accumulator has not drifted from
+// the records it summarizes.
+//
+// This is the full scan the accumulator exists to avoid on the block path, run
+// where its cost is acceptable. Without it the accumulator is unfalsifiable:
+// every consumer reads the same stored number, so a drift would be invisible to
+// all of them and would show up only as a solvency failure much later, or not at
+// all.
+//
+// sdk.Invariant is deprecated pending the removal of x/crisis. It is used anyway
+// because the module's four existing invariants all use it and register through
+// the same registry; an invariant with a different shape could not be registered
+// beside them. The deprecation is a reason to migrate that whole surface in one
+// change, not a reason to leave this backstop unwritten.
+//
+//nolint:staticcheck // SA1019: consistent with the module's existing invariant surface
+func (k Keeper) EntitlementLiabilityInvariant() sdk.Invariant {
+	return func(ctx sdk.Context) (string, bool) {
+		stored, err := k.GetOutstandingEntitlementLiability(ctx)
+		if err != nil {
+			return invariantError("entitlement-liability", err)
+		}
+		summed, err := k.SumOutstandingEntitlementLiability(ctx)
+		if err != nil {
+			return invariantError("entitlement-liability", err)
+		}
+		if !stored.Equal(summed) {
+			//nolint:staticcheck // SA1019: see the note on this function
+			return sdk.FormatInvariant(types.ModuleName, "entitlement-liability",
+				fmt.Sprintf("accumulator %s but live entitlements sum to %s", stored, summed)), true
 		}
 		return "", false
 	}
@@ -114,6 +156,21 @@ func (k Keeper) DenomCorrectnessInvariant() sdk.Invariant {
 	}
 }
 
+// ClosedEpochImmutabilityInvariant proves a closed epoch's record cannot acquire
+// mutable state.
+//
+// Rewritten around entitlements. Two properties now, where there used to be one:
+//
+//   - a finalized epoch carries no embedded per-Slot rows. After the switchover
+//     the canonical per-Slot record is the entitlement, so an aggregate that
+//     acquired rows would be a second immutable copy of the same obligation, free
+//     to drift from the one that can actually be paid.
+//   - every live entitlement stays inside its own bound. released_amount is the
+//     only field permitted to move, and it may never pass the amount it is
+//     bounded by.
+//
+// The historical claim-marker check is kept for aggregates that predate the
+// switchover, which may still carry rows and must still carry no claim markers.
 func (k Keeper) ClosedEpochImmutabilityInvariant() sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
 		err := k.FinalizedEpochs.Walk(ctx, nil, func(_ uint64, epoch types.EpochReward) (bool, error) {
@@ -124,6 +181,17 @@ func (k Keeper) ClosedEpochImmutabilityInvariant() sdk.Invariant {
 			}
 			return false, nil
 		})
+		if err != nil {
+			return invariantError("closed-epoch-immutability", err)
+		}
+
+		err = k.SlotEntitlements.Walk(ctx, nil,
+			func(key collections.Pair[uint64, uint64], entitlement types.SlotEntitlement) (bool, error) {
+				if err := validateEntitlementRecord(key, entitlement); err != nil {
+					return true, err
+				}
+				return false, nil
+			})
 		if err != nil {
 			return invariantError("closed-epoch-immutability", err)
 		}

@@ -25,10 +25,16 @@ type BankKeeper interface {
 	GetBalance(ctx context.Context, addr sdk.AccAddress, denom string) sdk.Coin
 }
 
+// CoreSlotKeeper is the narrow read interface x/rewards holds over x/coreslot.
+//
+// GetRewardWeight is deliberately absent. Weighted rewards are not part of V2:
+// entitlement shares are participation-relative, so the weight had no remaining
+// consumer once allocation stopped producing claim-shaped rows. Removing it
+// narrows the cross-module surface rather than leaving a read that nothing acts
+// on — the weight remains CoreSlot's own metadata.
 type CoreSlotKeeper interface {
 	GetActiveSlots(ctx context.Context) ([]coreslottypes.CoreSlot, error)
 	GetSlot(ctx context.Context, slotID uint64) (coreslottypes.CoreSlot, error)
-	GetRewardWeight(ctx context.Context, slotID uint64) (coreslottypes.OperatorRewardWeight, error)
 	GetAuthority(ctx context.Context) (string, error)
 	GetEmergencyAuthority(ctx context.Context) (string, error)
 }

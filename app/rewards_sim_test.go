@@ -9,8 +9,10 @@ package app_test
 //
 //   - advance block (crossing epoch boundaries -> mint / carry / treasury split)
 //   - mid-epoch churn (suspend / reactivate a slot, floor-respecting) -> non-uniform blocks
-//   - claims (valid and invalid: double-claim, over-cap, unfinalized) predicted from chain state
-//   - emergency pause / resume of emission / settlement / claims
+//   - constrained releases (participant payout sets and operator remainders,
+//     valid and invalid: over-release, missing obligation, paused) predicted from
+//     chain state
+//   - emergency pause / resume of the canonical global rewards state
 //
 // After every step it asserts the five rewards invariants AND the full accounting
 // identity reconciled against every finalized epoch:
@@ -44,16 +46,20 @@ import (
 // rewardsCoverage accumulates, across seeds, that each claimed branch was really
 // exercised — a standing guard against the sim silently regressing to vacuous.
 type rewardsCoverage struct {
-	claimOk, claimReject, capReject, replayReject, pauseClaimReject int
-	carry, treasury, halving                                        int
+	releaseOk, releaseReject                             int
+	overReleaseReject, missingReject, pauseReleaseReject int
+	remainderPaid, remainderNoop                         int
+	carry, treasury, halving                             int
 }
 
 func (c *rewardsCoverage) add(o rewardsCoverage) {
-	c.claimOk += o.claimOk
-	c.claimReject += o.claimReject
-	c.capReject += o.capReject
-	c.replayReject += o.replayReject
-	c.pauseClaimReject += o.pauseClaimReject
+	c.releaseOk += o.releaseOk
+	c.releaseReject += o.releaseReject
+	c.overReleaseReject += o.overReleaseReject
+	c.missingReject += o.missingReject
+	c.pauseReleaseReject += o.pauseReleaseReject
+	c.remainderPaid += o.remainderPaid
+	c.remainderNoop += o.remainderNoop
 	c.carry += o.carry
 	c.treasury += o.treasury
 	c.halving += o.halving
@@ -69,11 +75,13 @@ func TestRewardsEconomicSimulation(t *testing.T) {
 	}
 	// Across the 8 seeds, every branch the sim claims to cover must fire at least
 	// once; otherwise the corresponding assurance is vacuous and should fail loudly.
-	require.Positivef(t, cov.claimOk, "no successful claim was exercised: %+v", cov)
-	require.Positivef(t, cov.claimReject, "no rejected claim was exercised: %+v", cov)
-	require.Positivef(t, cov.capReject, "claim-cap rejection never exercised: %+v", cov)
-	require.Positivef(t, cov.replayReject, "double-claim (replay) rejection never exercised: %+v", cov)
-	require.Positivef(t, cov.pauseClaimReject, "claims-disabled rejection never exercised: %+v", cov)
+	require.Positivef(t, cov.releaseOk, "no successful participant release was exercised: %+v", cov)
+	require.Positivef(t, cov.releaseReject, "no rejected release was exercised: %+v", cov)
+	require.Positivef(t, cov.overReleaseReject, "over-release rejection never exercised: %+v", cov)
+	require.Positivef(t, cov.missingReject, "release against a missing entitlement never exercised: %+v", cov)
+	require.Positivef(t, cov.pauseReleaseReject, "paused release rejection never exercised: %+v", cov)
+	require.Positivef(t, cov.remainderPaid, "operator remainder never paid: %+v", cov)
+	require.Positivef(t, cov.remainderNoop, "zero operator remainder never exercised: %+v", cov)
 	require.Positivef(t, cov.carry, "nonzero carry-forward never produced: %+v", cov)
 	require.Positivef(t, cov.treasury, "treasury split never exercised: %+v", cov)
 	require.Positivef(t, cov.halving, "halving crossing never exercised: %+v", cov)
@@ -220,7 +228,7 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 			}
 
 		case 4: // claim: predict validity from chain state, then assert
-			simClaim(t, a, ctx, rng, cap_, &cov, seed, step)
+			simRelease(t, a, ctx, rng, &cov, seed, step)
 
 		case 5: // emergency pause or resume a random subset of flags
 			pause := rng.Intn(2) == 0
@@ -292,10 +300,18 @@ func smallestSlotWithStatus(m map[uint64]coreslottypes.SlotStatus, st coreslotty
 	return found
 }
 
-// simClaim attempts a claim for a random slot+range and asserts the outcome
-// matches what the chain state implies (finalized? already claimed? over cap?
-// claims enabled?).
-func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ uint64, cov *rewardsCoverage, seed int64, step int) {
+// simRelease exercises the constrained release boundary against a random
+// obligation and asserts the outcome matches what chain state implies.
+//
+// The oracle is derived from the chain, not from a parallel model: the
+// entitlement is read each time, so accumulated releases from earlier steps are
+// accounted for without the simulation having to track them. What it predicts is
+// only the FIRST reason the boundary would refuse, in the order the boundary
+// applies them (paused -> no obligation -> over the ceiling).
+func simRelease(
+	t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand,
+	cov *rewardsCoverage, seed int64, step int,
+) {
 	t.Helper()
 	state, err := a.RewardsKeeper.GetState(ctx)
 	require.NoError(t, err)
@@ -303,71 +319,155 @@ func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ ui
 		return // nothing finalized yet
 	}
 	slot := uint64(1 + rng.Intn(3))
-	start := uint64(1 + rng.Intn(int(state.CurrentEpoch-1)))
-	end := start + uint64(rng.Intn(6)) // delta 0..5 so the cap boundary is reachable for caps 2..5
+	epoch := uint64(1 + rng.Intn(int(state.CurrentEpoch-1)))
 
-	// Predict the FIRST rejection reason in claims.go precedence order
-	// (claims-disabled -> over-cap -> per-epoch: unfinalized -> missing -> claimed
-	// -> nonpositive). Empty reason == predicted valid.
-	reason := ""
-	switch {
-	case !releaseEnabled(t, a, ctx):
-		reason = "rewards release is paused"
-	case end-start >= cap_:
-		reason = "claim range exceeds maximum"
-	default:
-		for e := start; e <= end; e++ {
-			_, fin, ferr := a.RewardsKeeper.GetFinalizedEpoch(ctx, e)
-			require.NoError(t, ferr) // a store error here is a real regression, not "unfinalized"
-			if !fin {
-				reason = "is not finalized"
-				break
-			}
-			rec, found, gerr := a.RewardsKeeper.GetClaimRecord(ctx, slot, e)
-			require.NoError(t, gerr)
-			switch {
-			case !found:
-				reason = "claim record missing"
-			case rec.Claimed:
-				reason = "already claimed"
-			case intStr(t, rec.Amount).IsZero():
-				reason = "claim amount must be positive"
-			}
-			if reason != "" {
-				break
-			}
-		}
-	}
+	entitlement, found, err := a.RewardsKeeper.GetSlotEntitlement(ctx, slot, epoch)
+	require.NoError(t, err)
 
-	// Snapshot funds state so a rejected claim can be proven to mutate nothing (B).
+	paused := !releaseEnabled(t, a, ctx)
 	modAddr := a.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName)
 	preMod := a.BankKeeper.GetBalance(ctx, modAddr, app.BaseDenom).Amount.String()
 	preSupply := a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String()
+	preLiability, err := a.RewardsKeeper.GetOutstandingEntitlementLiability(ctx)
+	require.NoError(t, err)
 
-	err = a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
-		Signer: acc(9), SlotId: slot, StartEpoch: start, EndEpoch: end,
+	// Half the steps take the operator remainder, half a participant payout set.
+	if rng.Intn(2) == 0 {
+		simRemainder(t, a, ctx, slot, epoch, entitlement, found, paused, cov, seed, step,
+			preMod, preSupply, preLiability)
+		return
+	}
+
+	var remaining math.Int
+	if found {
+		remaining, err = entitlement.Remaining()
+		require.NoError(t, err)
+	}
+	// Deliberately allowed to exceed the remainder, so the ceiling is exercised.
+	amount := math.NewInt(int64(1 + rng.Intn(400)))
+
+	reason := ""
+	switch {
+	case paused:
+		reason = "rewards release is paused"
+	case !found:
+		reason = "no entitlement exists"
+	case amount.GT(remaining):
+		reason = "above the entitlement of"
+	}
+
+	err = a.RewardsKeeper.PayEntitlement(ctx, slot, epoch, []rewardstypes.EntitlementPayout{
+		{Recipient: acc(200), Amount: amount.String()},
 	})
 	if reason == "" {
-		require.NoErrorf(t, err, "seed %d step %d: predicted-valid claim slot %d [%d,%d] must succeed", seed, step, slot, start, end)
-		cov.claimOk++
-	} else {
-		require.Errorf(t, err, "seed %d step %d: predicted-invalid claim slot %d [%d,%d] must fail (%s)", seed, step, slot, start, end, reason)
-		require.Containsf(t, err.Error(), reason, "seed %d step %d: claim rejected for a different reason than predicted (%s)", seed, step, reason)
-		// Atomic rejection: no module-balance or supply change.
-		require.Equalf(t, preMod, a.BankKeeper.GetBalance(ctx, modAddr, app.BaseDenom).Amount.String(),
-			"seed %d step %d: rejected claim changed module balance", seed, step)
+		require.NoErrorf(t, err, "seed %d step %d: predicted-valid release slot %d epoch %d must succeed",
+			seed, step, slot, epoch)
+		cov.releaseOk++
+
+		after, ok, gerr := a.RewardsKeeper.GetSlotEntitlement(ctx, slot, epoch)
+		require.NoError(t, gerr)
+		require.True(t, ok)
+		before, perr := entitlement.Released()
+		require.NoError(t, perr)
+		got, perr := after.Released()
+		require.NoError(t, perr)
+		require.Equalf(t, amount.String(), got.Sub(before).String(),
+			"seed %d step %d: released amount must rise by exactly the payout", seed, step)
+
+		postLiability, lerr := a.RewardsKeeper.GetOutstandingEntitlementLiability(ctx)
+		require.NoError(t, lerr)
+		require.Equalf(t, amount.String(), preLiability.Sub(postLiability).String(),
+			"seed %d step %d: liability must fall by exactly the payout", seed, step)
 		require.Equalf(t, preSupply, a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String(),
-			"seed %d step %d: rejected claim changed supply", seed, step)
-		cov.claimReject++
-		switch reason {
-		case "claim range exceeds maximum":
-			cov.capReject++
-		case "already claimed":
-			cov.replayReject++
-		case "rewards release is paused":
-			cov.pauseClaimReject++
-		}
+			"seed %d step %d: a release moves value, it does not mint", seed, step)
+		return
 	}
+
+	require.Errorf(t, err, "seed %d step %d: predicted-invalid release slot %d epoch %d must fail (%s)",
+		seed, step, slot, epoch, reason)
+	require.Containsf(t, err.Error(), reason,
+		"seed %d step %d: release rejected for a different reason than predicted (%s)", seed, step, reason)
+	requireReleaseChangedNothing(t, a, ctx, preMod, preSupply, preLiability, seed, step)
+
+	cov.releaseReject++
+	switch reason {
+	case "above the entitlement of":
+		cov.overReleaseReject++
+	case "no entitlement exists":
+		cov.missingReject++
+	case "rewards release is paused":
+		cov.pauseReleaseReject++
+	}
+}
+
+// simRemainder exercises the operator-remainder helper, whose contract differs
+// from a participant payout in one important way: a remainder of zero is a
+// deterministic no-op that SUCCEEDS rather than an error.
+func simRemainder(
+	t *testing.T, a *app.App, ctx sdk.Context, slot, epoch uint64,
+	entitlement rewardstypes.SlotEntitlement, found, paused bool,
+	cov *rewardsCoverage, seed int64, step int,
+	preMod, preSupply string, preLiability math.Int,
+) {
+	t.Helper()
+	err := a.RewardsKeeper.PayEntitlementRemainderToOperator(ctx, slot, epoch)
+
+	switch {
+	case paused:
+		require.Errorf(t, err, "seed %d step %d: a paused chain must refuse the remainder", seed, step)
+		require.Contains(t, err.Error(), "rewards release is paused")
+		requireReleaseChangedNothing(t, a, ctx, preMod, preSupply, preLiability, seed, step)
+		cov.releaseReject++
+		cov.pauseReleaseReject++
+		return
+	case !found:
+		require.Errorf(t, err, "seed %d step %d: no obligation exists to pay a remainder against", seed, step)
+		require.Contains(t, err.Error(), "no entitlement exists")
+		requireReleaseChangedNothing(t, a, ctx, preMod, preSupply, preLiability, seed, step)
+		cov.releaseReject++
+		cov.missingReject++
+		return
+	}
+
+	require.NoErrorf(t, err, "seed %d step %d: the remainder helper must succeed", seed, step)
+	remaining, perr := entitlement.Remaining()
+	require.NoError(t, perr)
+
+	after, ok, gerr := a.RewardsKeeper.GetSlotEntitlement(ctx, slot, epoch)
+	require.NoError(t, gerr)
+	require.True(t, ok)
+	require.Equalf(t, after.EntitlementAmount, after.ReleasedAmount,
+		"seed %d step %d: a paid remainder leaves the obligation fully released", seed, step)
+
+	if remaining.IsZero() {
+		// The deterministic no-op: nothing moved, and nothing was sent.
+		requireReleaseChangedNothing(t, a, ctx, preMod, preSupply, preLiability, seed, step)
+		cov.remainderNoop++
+		return
+	}
+	postLiability, lerr := a.RewardsKeeper.GetOutstandingEntitlementLiability(ctx)
+	require.NoError(t, lerr)
+	require.Equalf(t, remaining.String(), preLiability.Sub(postLiability).String(),
+		"seed %d step %d: liability must fall by exactly the remainder", seed, step)
+	cov.remainderPaid++
+}
+
+// requireReleaseChangedNothing is the atomicity assertion every rejected release
+// shares: no escrow movement, no supply movement, no accounting movement.
+func requireReleaseChangedNothing(
+	t *testing.T, a *app.App, ctx sdk.Context,
+	preMod, preSupply string, preLiability math.Int, seed int64, step int,
+) {
+	t.Helper()
+	modAddr := a.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName)
+	require.Equalf(t, preMod, a.BankKeeper.GetBalance(ctx, modAddr, app.BaseDenom).Amount.String(),
+		"seed %d step %d: a refused release changed the module balance", seed, step)
+	require.Equalf(t, preSupply, a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String(),
+		"seed %d step %d: a refused release changed supply", seed, step)
+	postLiability, err := a.RewardsKeeper.GetOutstandingEntitlementLiability(ctx)
+	require.NoError(t, err)
+	require.Equalf(t, preLiability.String(), postLiability.String(),
+		"seed %d step %d: a refused release changed the outstanding liability", seed, step)
 }
 
 // pauseResume drives the canonical global pause through the emergency authority.

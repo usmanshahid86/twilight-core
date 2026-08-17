@@ -261,7 +261,11 @@ func TestEntitlementEpochEnumerationIsDeterministicallyAscending(t *testing.T) {
 // unpaid in the store, and every solvency assertion built on it would then pass.
 func TestOutstandingLiabilityHasNoDefault(t *testing.T) {
 	t.Run("absent", func(t *testing.T) {
-		k, ctx, _ := setupAccountingKeeper(t, &coreSlotKeeperMock{}, 1, rewardConfigParams())
+		k, ctx, _ := setupEntitlements(t)
+		// Removed explicitly rather than relying on a fixture that never wrote it:
+		// the fixtures establish it exactly as InitGenesis would, so absence has to
+		// be created on purpose to be tested.
+		require.NoError(t, k.OutstandingEntitlementLiability.Remove(ctx))
 		_, err := k.GetOutstandingEntitlementLiability(ctx)
 		require.ErrorIs(t, err, types.ErrInvalidState)
 	})
@@ -333,33 +337,6 @@ func TestFreshGenesisCarriesNoObligations(t *testing.T) {
 		require.NoError(t, k.InitGenesis(ctx, *types.DefaultGenesis()))
 		requireLiability(t, k, ctx, "0")
 	})
-}
-
-// TestEntitlementCreationHasNoProductionCallerYet is the gate boundary.
-//
-// T1-A2 lands the state and the creation primitive; the switchover that makes
-// finalization create entitlements is a later gate. Driving a real epoch close
-// here must therefore produce no obligation and leave the accumulator untouched —
-// and, critically, must still write the ClaimRecords the current path owes, so
-// this intermediate state has exactly one payable representation rather than two.
-func TestEntitlementCreationHasNoProductionCallerYet(t *testing.T) {
-	k, ctx, _, _ := setupFinalization(t, false)
-	require.NoError(t, k.SetOutstandingEntitlementLiability(ctx, sdkmath.ZeroInt()))
-
-	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
-
-	rows, err := k.IterateEntitlementsForEpoch(ctx, 1)
-	require.NoError(t, err)
-	require.Empty(t, rows, "finalization must not create entitlements before the switchover gate")
-	requireLiability(t, k, ctx, "0")
-
-	// Exactly one payable representation exists for the epoch that just closed.
-	_, found, err := k.GetClaimRecord(ctx, 1, 1)
-	require.NoError(t, err)
-	require.True(t, found, "the legacy path still owns the obligation at this gate")
-	_, found, err = k.GetSlotEntitlement(ctx, 1, 1)
-	require.NoError(t, err)
-	require.False(t, found)
 }
 
 // entitlementTestKey mirrors the keeper's canonical (epoch, slot_id) key so

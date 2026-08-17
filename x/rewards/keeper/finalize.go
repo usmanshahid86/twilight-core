@@ -3,8 +3,10 @@ package keeper
 import (
 	"context"
 
+	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	"github.com/twilight-project/twilight-core/internal/checked"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
@@ -121,6 +123,14 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 		return err
 	}
 
+	// The canonical economics for THIS target (§33, §33.1). Resolved before any
+	// monetary step, and never read from the deprecated snapshot: that mirror is
+	// pinned at genesis and cannot express a configuration that changed since.
+	rewardConfig, err := k.RewardConfigForTarget(ctx, state.CurrentEpoch)
+	if err != nil {
+		return err
+	}
+
 	cumulative, err := types.ParseAmountString("cumulative emitted", state.CumulativeEmitted)
 	if err != nil {
 		return err
@@ -129,7 +139,7 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	initialSubsidy, err := types.ParseAmountString("initial block subsidy", cfg.InitialBlockSubsidy)
+	initialSubsidy, err := types.ParseAmountString("initial block subsidy", rewardConfig.InitialBlockSubsidy)
 	if err != nil {
 		return err
 	}
@@ -137,12 +147,14 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 	// authorities and is retired. Emission now follows the canonical counter, so a
 	// paused epoch emits nothing because it counted no reward-enabled blocks —
 	// not because a separate boolean suppressed the mint.
+	// The halving mode is genesis-fixed protocol configuration (§33), not part of
+	// the versioned reward configuration, so it comes from Params.
 	emission, cumulativeAfter, err := ComputeEpochEmission(
 		cumulative,
 		rewardEnabledBlocks,
 		maxSupply,
 		initialSubsidy,
-		cfg.HalvingMode,
+		params.HalvingMode,
 	)
 	if err != nil {
 		return err
@@ -164,19 +176,27 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	fees, err := k.GetDistributableFees(ctx, params)
+	treasuryAmount, err := ComputeEmissionTreasuryAmount(emission, rewardConfig.EmissionTreasuryShareBps)
 	if err != nil {
 		return err
 	}
-	treasuryAmount, err := ComputeEmissionTreasuryAmount(emission, cfg.EmissionTreasuryShareBps)
+	// Zero-guarded inside PayTreasury: at zero there is no send and no
+	// transfer-time revalidation of the destination (§33.2).
+	if err := k.PayTreasury(ctx, rewardConfig.TreasuryAddress, treasuryAmount, params.NativeDenom); err != nil {
+		return err
+	}
+	// The canonical V2 pool has no fee term. Fee distribution is disabled and
+	// distributable_fees_E is zero by definition (§33), so the term is removed
+	// rather than added as a zero — an input that is always zero is a place for a
+	// future edit to reintroduce a value the architecture excludes.
+	pool, err := ComputeRewardPoolV2(emission, treasuryAmount, carryIn)
 	if err != nil {
 		return err
 	}
-	if err := k.PayTreasury(ctx, cfg.TreasuryAddress, treasuryAmount, params.NativeDenom); err != nil {
-		return err
-	}
-	pool := emission.Add(carryIn).Add(fees).Sub(treasuryAmount)
 
+	// The payout snapshot is taken here: end of the closing block, after that
+	// block's transactions have executed (§32). A payout address changed earlier in
+	// this same block is therefore eligible to be snapshotted for this epoch.
 	snapshots := make(map[uint64]SlotRewardSnapshot, len(rows))
 	for _, row := range rows {
 		if row.BlocksActive == 0 {
@@ -188,34 +208,47 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 		}
 		snapshots[row.SlotId] = snapshot
 	}
-	rewards, allocated, carryOut, err := AllocateUniformActiveBlocks(state.CurrentEpoch, pool, rows, snapshots)
+	height, err := checked.Uint64FromInt64(sdk.UnwrapSDKContext(ctx).BlockHeight())
+	if err != nil {
+		return types.ErrInvalidState.Wrapf("block height is not representable: %v", err)
+	}
+	entitlements, allocated, carryOut, nPos, err := AllocateSlotEntitlements(
+		state.CurrentEpoch, pool, rows, snapshots, rewardConfig.Version, height)
 	if err != nil {
 		return err
 	}
+	if err := assertAllocationConservation(state.CurrentEpoch, pool, allocated, carryOut, nPos); err != nil {
+		return err
+	}
 
-	epochRewards := make([]*types.EligibleSlotReward, 0, len(rewards))
-	for i := range rewards {
-		reward := rewards[i]
-		if err := k.SetClaimRecord(ctx, reward); err != nil {
+	// Authoritative obligation creation. Each write also raises the outstanding
+	// liability by exactly its amount, so the two cannot commit apart.
+	for _, entitlement := range entitlements {
+		if err := k.CreateSlotEntitlement(ctx, entitlement); err != nil {
 			return err
 		}
-		epochRewards = append(epochRewards, &reward)
 	}
+
 	cfgCopy := cfg
 	epoch := types.EpochReward{
-		EpochNumber:                 state.CurrentEpoch,
-		StartHeight:                 state.CurrentEpochStartHeight,
-		EndHeight:                   endHeight,
-		MintedEmission:              emission.String(),
-		CarryIn:                     carryIn.String(),
-		DistributableFees:           fees.String(),
-		TreasuryAmount:              treasuryAmount.String(),
-		RewardPool:                  pool.String(),
-		AllocatedAmount:             allocated.String(),
-		CarryOut:                    carryOut.String(),
-		DistributionMethod:          cfg.DistributionMethod,
-		RemainderPolicy:             cfg.RemainderPolicy,
-		Rewards:                     epochRewards,
+		EpochNumber:    state.CurrentEpoch,
+		StartHeight:    state.CurrentEpochStartHeight,
+		EndHeight:      endHeight,
+		MintedEmission: emission.String(),
+		CarryIn:        carryIn.String(),
+		// Permanently zero in V2: there is no fee input to the reward pool.
+		DistributableFees:  "0",
+		TreasuryAmount:     treasuryAmount.String(),
+		RewardPool:         pool.String(),
+		AllocatedAmount:    allocated.String(),
+		CarryOut:           carryOut.String(),
+		DistributionMethod: cfg.DistributionMethod,
+		RemainderPolicy:    cfg.RemainderPolicy,
+		// Rewards is deliberately left empty. The canonical per-Slot record is now
+		// SlotEntitlement; populating this too would archive a second immutable copy
+		// of the same obligation, free to drift from the one that can actually be
+		// paid. The field stays on the wire and its number is never recycled.
+		Rewards:                     nil,
 		CumulativeEmittedAfterEpoch: cumulativeAfter.String(),
 		Config:                      &cfgCopy,
 		RewardEnabledBlocks:         rewardEnabledBlocks,
@@ -260,9 +293,80 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 		return err
 	}
 
+	// Solvency, asserted after every transfer this epoch performs (§33). It is the
+	// one check that spans the whole transition rather than any single step, and it
+	// is what catches an obligation created without a matching liability, or a
+	// carry that does not account for what stayed behind.
+	if err := k.assertEscrowSolvency(ctx, params.NativeDenom, carryOut); err != nil {
+		return err
+	}
+
 	emitEpochFinalized(ctx, epoch, uint64(len(snapshots)))
 	if treasuryAmount.IsPositive() {
-		emitTreasuryPaid(ctx, cfg.TreasuryAddress, treasuryAmount.String())
+		emitTreasuryPaid(ctx, rewardConfig.TreasuryAddress, treasuryAmount.String())
+	}
+	return nil
+}
+
+// assertAllocationConservation applies the independent checks §31 requires before
+// carry is treated as final.
+//
+// The residue bound is the substantive one. allocated <= pool and carry >= 0 both
+// follow from the arithmetic and would survive most defects; carry <= n_pos - 1
+// does not. It follows from flooring exactly once per participating Slot, so a
+// wrong denominator, a double-counted Slot, or an iteration that visited a Slot
+// twice all break it while still producing a superficially plausible split.
+func assertAllocationConservation(epoch uint64, pool, allocated, carryOut sdkmath.Int, nPos uint64) error {
+	if allocated.IsNegative() {
+		return types.ErrInvalidState.Wrapf("epoch %d allocated a negative amount %s", epoch, allocated)
+	}
+	if allocated.GT(pool) {
+		return types.ErrInvalidState.Wrapf(
+			"epoch %d allocated %s from a pool of %s", epoch, allocated, pool)
+	}
+	if carryOut.IsNegative() {
+		return types.ErrInvalidState.Wrapf("epoch %d carries a negative remainder %s", epoch, carryOut)
+	}
+	if nPos == 0 {
+		return nil
+	}
+	bound := sdkmath.NewIntFromUint64(nPos).SubRaw(1)
+	if carryOut.GT(bound) {
+		return types.ErrInvalidState.Wrapf(
+			"epoch %d carries %s across %d participating slots, above the residue bound of %s",
+			epoch, carryOut, nPos, bound)
+	}
+	return nil
+}
+
+// assertEscrowSolvency proves the module holds exactly what it owes.
+//
+//	rewards escrow balance == outstanding entitlement liability + carry
+//
+// Equality rather than coverage, because a surplus is as much a defect as a
+// shortfall: it means value entered escrow that no obligation and no carry
+// accounts for. The equality is safe to assert because the rewards module account
+// is a blocked destination for ordinary transfers, so nobody can push funds in
+// from outside and turn a correct chain into a halted one. That property is
+// asserted at app level, where the bank configuration that provides it lives.
+func (k Keeper) assertEscrowSolvency(ctx context.Context, denom string, carryOut sdkmath.Int) error {
+	address := k.accountKeeper.GetModuleAddress(types.ModuleName)
+	if address == nil {
+		return types.ErrInvalidState.Wrap("rewards module account is missing")
+	}
+	liability, err := k.GetOutstandingEntitlementLiability(ctx)
+	if err != nil {
+		return err
+	}
+	owed, err := liability.SafeAdd(carryOut)
+	if err != nil {
+		return types.ErrInvalidState.Wrapf("outstanding liability plus carry overflows: %v", err)
+	}
+	balance := k.bankKeeper.GetBalance(ctx, address, denom).Amount
+	if !balance.Equal(owed) {
+		return types.ErrInvalidState.Wrapf(
+			"rewards escrow holds %s but owes %s (liability %s + carry %s)",
+			balance, owed, liability, carryOut)
 	}
 	return nil
 }

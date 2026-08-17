@@ -3,20 +3,26 @@ package keeper
 import (
 	"context"
 
-	sdkmath "cosmossdk.io/math"
-
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
+// SlotRewardSnapshot is CoreSlot state as of the moment an entitlement is
+// created: the end of the closing block, after that block's transactions have
+// executed (§32).
+//
+// The payout address is the only field that becomes a value destination. Status
+// and activation sequence are carried for the entitlement's audit fields and
+// decide nothing monetary — V2.2 has no activation_participation[], and lifecycle
+// generation cannot confiscate or enlarge an entitlement that was already earned.
 type SlotRewardSnapshot struct {
-	SlotID          uint64
-	OperatorAddress sdk.AccAddress
-	PayoutAddress   sdk.AccAddress
-	Status          coreslottypes.SlotStatus
-	RewardWeight    sdkmath.LegacyDec
+	SlotID             uint64
+	OperatorAddress    sdk.AccAddress
+	PayoutAddress      sdk.AccAddress
+	Status             coreslottypes.SlotStatus
+	ActivationSequence uint64
 }
 
 func (k Keeper) GetActiveSlotSnapshots(ctx context.Context) ([]SlotRewardSnapshot, error) {
@@ -65,22 +71,11 @@ func (k Keeper) slotRewardSnapshot(ctx context.Context, slot coreslottypes.CoreS
 	if err != nil {
 		return SlotRewardSnapshot{}, types.ErrInvalidAddress.Wrapf("slot %d payout address: %v", slot.SlotId, err)
 	}
-	weight, err := k.coreSlotKeeper.GetRewardWeight(ctx, slot.SlotId)
-	if err != nil {
-		return SlotRewardSnapshot{}, err
-	}
-	finalWeight, err := sdkmath.LegacyNewDecFromStr(weight.FinalWeight)
-	if err != nil {
-		return SlotRewardSnapshot{}, err
-	}
-	if finalWeight.IsNegative() {
-		return SlotRewardSnapshot{}, coreslottypes.ErrInvalidParams.Wrap("reward weight cannot be negative")
-	}
 	return SlotRewardSnapshot{
-		SlotID:          slot.SlotId,
-		OperatorAddress: operator,
-		PayoutAddress:   payout,
-		Status:          slot.Status,
-		RewardWeight:    finalWeight,
+		SlotID:             slot.SlotId,
+		OperatorAddress:    operator,
+		PayoutAddress:      payout,
+		Status:             slot.Status,
+		ActivationSequence: slot.ActivationSequence,
 	}, nil
 }
