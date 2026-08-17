@@ -37,6 +37,15 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 	if err := types.ValidateFreshGenesisInitialHeight(&genState, initialHeight); err != nil {
 		return err
 	}
+	// The escrow relation, still part of the preflight rather than a closing check.
+	//
+	// It reads the bank, which is initialized before rewards, so it can run here —
+	// and it must, for the same reason as everything else above: rejection has to be
+	// total. Asserting it after the writes would leave a fully imported rewards
+	// module behind a returned error.
+	if err := k.assertGenesisEscrowMatchesCarry(ctx, *genState.Params, *genState.State); err != nil {
+		return err
+	}
 	if err := k.SetParams(ctx, *genState.Params); err != nil {
 		return err
 	}
@@ -78,7 +87,7 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 			return err
 		}
 	}
-	return k.assertGenesisEscrowMatchesCarry(ctx, *genState.Params, *genState.State)
+	return nil
 }
 
 // assertGenesisEscrowMatchesCarry proves the chain starts solvent.

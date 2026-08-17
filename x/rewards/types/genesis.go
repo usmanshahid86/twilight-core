@@ -83,7 +83,7 @@ func (g GenesisState) Validate() error {
 	// The two loops below are reached only by a document that carries closed-epoch
 	// state, which validateFreshLedgerState above now refuses. They are kept rather
 	// than deleted: they are the RECORD-level rules for these types, and a
-	// continuation importer — which is deferred, not cancelled — needs exactly them.
+	// continuation importer — which is deferred, not canceled — needs exactly them.
 	// Removing the shape rules for a collection because the current importer will
 	// not see one would be retiring the legacy surface, which belongs elsewhere.
 	epochs := make(map[uint64]struct{}, len(g.FinalizedEpochs))

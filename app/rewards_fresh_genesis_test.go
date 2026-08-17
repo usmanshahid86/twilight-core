@@ -192,3 +192,27 @@ func freshAppState(t *testing.T, a *app.App, rewardsGen *rewardstypes.GenesisSta
 	require.NoError(t, err)
 	return appState
 }
+
+// TestFreshGenesisEscrowMismatchLeavesNoRewardsState is the preflight half of the
+// escrow rule.
+//
+// Every other genesis rule is checked before the first write so that rejection is
+// total. The escrow relation has to read the bank, which made it tempting to check
+// it last — and last would mean a fully imported rewards module sitting behind a
+// returned error. Bank initializes before rewards, so it belongs in the preflight
+// with the rest.
+func TestFreshGenesisEscrowMismatchLeavesNoRewardsState(t *testing.T) {
+	a := bootApp(t)
+	ctx := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
+
+	err := a.RewardsKeeper.InitGenesis(ctx, *freshRewardsGenesis(t, "250"))
+	require.ErrorIs(t, err, rewardstypes.ErrInvalidGenesis)
+	require.Contains(t, err.Error(), "funds the rewards escrow with")
+
+	_, err = a.RewardsKeeper.GetParams(ctx)
+	require.Error(t, err, "params must not survive a rejected genesis")
+	_, err = a.RewardsKeeper.GetState(ctx)
+	require.Error(t, err, "rewards state must not survive a rejected genesis")
+	_, err = a.RewardsKeeper.GenesisRewardConfigVersion(ctx)
+	require.Error(t, err, "the reward configuration anchor must not survive a rejected genesis")
+}

@@ -106,6 +106,13 @@ func (k Keeper) requireRewardConfigAnchor(ctx context.Context) error {
 
 // rewardConfigPredecessor returns the history row immediately before the given
 // effective epoch, reporting whether one exists.
+//
+// Held to the record's SHAPE only, not to the complete rule
+// validateResolvedRewardConfig applies. That is deliberate: a predecessor is read
+// to establish an ordering relation, never to compute money from, so requiring it
+// to name a usable treasury destination would refuse a resolution over a
+// configuration that is not the one being resolved. The row that governs is
+// validated completely, where it is resolved.
 func (k Keeper) rewardConfigPredecessor(
 	ctx context.Context, effectiveEpoch uint64,
 ) (types.RewardConfigVersion, bool, error) {
