@@ -140,24 +140,48 @@ func TestEntitlementCreationRequiresAnAdmissibleDestination(t *testing.T) {
 	}
 }
 
-// TestEntitlementCreationRequiresAResolvableRewardConfigVersion is the
+// TestEntitlementCreationRequiresTheGoverningRewardConfigVersion is the
 // referential-integrity rule.
 //
 // An entitlement records which configuration governed the epoch that created it.
-// A version that resolves to nothing makes that record unauditable — there would
-// be no way to check afterwards what the payout was computed under.
-func TestEntitlementCreationRequiresAResolvableRewardConfigVersion(t *testing.T) {
+// The check is not "a version with this number exists" but "this is the version
+// that governs this epoch" — the weaker form would admit a record naming some
+// unrelated version, which is exactly the record that makes a payout unauditable
+// afterwards.
+func TestEntitlementCreationRequiresTheGoverningRewardConfigVersion(t *testing.T) {
 	k, ctx, _ := setupEntitlements(t)
-
-	entitlement := entitlementFor(1, 1, "500")
-	entitlement.RewardConfigVersion = 9
-	require.ErrorIs(t, k.CreateSlotEntitlement(ctx, entitlement), types.ErrRewardConfigNotFound)
-	requireLiability(t, k, ctx, "0")
-
-	// The same record becomes admissible once the version it names exists.
+	// A second version that genuinely exists, and does NOT govern epoch 1.
 	seedRewardVersion(t, k, ctx, rewardVersionAt(9, 40, "20"))
-	require.NoError(t, k.CreateSlotEntitlement(ctx, entitlement))
-	requireLiability(t, k, ctx, "500")
+
+	t.Run("a version that exists but does not govern this epoch", func(t *testing.T) {
+		entitlement := entitlementFor(1, 1, "500")
+		entitlement.RewardConfigVersion = 9
+		require.ErrorIs(t, k.CreateSlotEntitlement(ctx, entitlement), types.ErrInvalidState)
+		requireLiability(t, k, ctx, "0")
+	})
+
+	t.Run("a version that does not exist at all", func(t *testing.T) {
+		entitlement := entitlementFor(2, 1, "500")
+		entitlement.RewardConfigVersion = 77
+		require.Error(t, k.CreateSlotEntitlement(ctx, entitlement))
+		requireLiability(t, k, ctx, "0")
+	})
+
+	t.Run("the governing version is admitted", func(t *testing.T) {
+		// Epoch 1 bootstraps to the genesis anchor, version 1.
+		require.NoError(t, k.CreateSlotEntitlement(ctx, entitlementFor(1, 1, "500")))
+		requireLiability(t, k, ctx, "500")
+	})
+
+	t.Run("an epoch whose binding resolves the later version", func(t *testing.T) {
+		// Target 42 binds epoch 40, which version 9 governs.
+		entitlement := entitlementFor(1, 42, "500")
+		entitlement.RewardConfigVersion = 1
+		require.ErrorIs(t, k.CreateSlotEntitlement(ctx, entitlement), types.ErrInvalidState)
+
+		entitlement.RewardConfigVersion = 9
+		require.NoError(t, k.CreateSlotEntitlement(ctx, entitlement))
+	})
 }
 
 // TestEntitlementReadsFailClosedOnCorruptRecords proves a stored record that

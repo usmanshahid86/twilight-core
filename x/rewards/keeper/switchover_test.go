@@ -391,3 +391,51 @@ func slotWithID(slot coreslottypes.CoreSlot, slotID uint64) coreslottypes.CoreSl
 	slot.OperatorAddress = addr(byte(60 + slotID))
 	return slot
 }
+
+// TestLegacyClaimStateAndSolvencyDoNotMix pins a real, deliberate consequence of
+// the switchover rather than leaving it to be discovered.
+//
+// The solvency assertion states that escrow holds exactly what the module
+// believes it owes: outstanding entitlement liability plus carry. A legacy claim
+// record is an obligation the liability accumulator does not count, so escrow
+// funded for one — or drained by paying one — no longer matches, and the next
+// finalization halts the block rather than committing an accounting it cannot
+// justify.
+//
+// # Why this is acceptable, and where the fix lives
+//
+// After the switchover nothing creates a claim record, so the only way a chain
+// can hold one is a genesis document that carries it. This tranche deliberately
+// leaves legacy claim genesis handling untouched — retiring it belongs to the
+// later claims-retirement work package, which is also where fresh genesis starts
+// rejecting a non-empty claim collection outright.
+//
+// Until then the behavior is fail-closed and legible: the chain stops with a
+// message naming the exact discrepancy, rather than paying out against an
+// accounting that no longer adds up. This test exists so that is a known property
+// with a stated owner, not a surprise for whoever meets it first.
+func TestLegacyClaimStateAndSolvencyDoNotMix(t *testing.T) {
+	k, ctx, bank, _ := setupFinalization(t, false)
+	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
+
+	// A legacy obligation the accumulator does not know about, paid out of the
+	// escrow the entitlements are relying on.
+	params, err := k.GetParams(ctx)
+	require.NoError(t, err)
+	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 1)))
+	require.NoError(t, k.ClaimRewards(ctx, &types.MsgClaimRewards{
+		Signer: addr(1), SlotId: 1, StartEpoch: 1, EndEpoch: 1,
+	}))
+
+	// Escrow has now fallen below what the entitlements still claim.
+	liability, err := k.GetOutstandingEntitlementLiability(ctx)
+	require.NoError(t, err)
+	balance := bank.GetBalance(ctx, moduleAccountAddress(), params.NativeDenom).Amount
+	require.True(t, balance.LT(liability),
+		"the legacy payment left escrow short of the entitlements it still owes")
+
+	// The coverage invariant reports it, which is what an operator would see.
+	_, broken := k.ModuleBalanceCoverageInvariant()(ctx)
+	require.True(t, broken,
+		"paying a legacy claim beside live entitlements is a solvency defect the chain reports")
+}

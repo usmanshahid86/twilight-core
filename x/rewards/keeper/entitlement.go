@@ -132,11 +132,28 @@ func (k Keeper) CreateSlotEntitlement(ctx context.Context, entitlement types.Slo
 	if err := k.validatePayoutDestination("entitlement", entitlement.PayoutAddress); err != nil {
 		return err
 	}
-	// Referential integrity against the canonical history. An entitlement records
-	// which configuration governed the epoch that created it, and a version that
-	// does not resolve would make that record unauditable.
-	if _, err := k.rewardConfigVersionByNumber(ctx, entitlement.RewardConfigVersion); err != nil {
+	// Referential integrity against the canonical history.
+	//
+	// Checked through the epoch's own binding rather than by looking the version
+	// number up. Two reasons, and the second is the important one:
+	//
+	//   - the history is keyed by effective epoch, so resolving a bare version
+	//     number means walking it. That walk grows with the number of accepted
+	//     configuration changes, and it would run once per entitlement — turning a
+	//     close into O(participants x versions) of chain-age-dependent work on the
+	//     block path.
+	//   - "some version with this number exists" is the weaker claim. What makes
+	//     the record auditable is that it names the version that actually governed
+	//     its epoch, which is what the binding resolves and what this compares.
+	governing, err := k.RewardConfigForTarget(ctx, entitlement.Epoch)
+	if err != nil {
 		return err
+	}
+	if governing.Version != entitlement.RewardConfigVersion {
+		return types.ErrInvalidState.Wrapf(
+			"entitlement for slot %d in epoch %d records reward configuration version %d, but epoch %d is governed by version %d",
+			entitlement.SlotId, entitlement.Epoch, entitlement.RewardConfigVersion,
+			entitlement.Epoch, governing.Version)
 	}
 
 	key := entitlementKey(entitlement.Epoch, entitlement.SlotId)
@@ -234,46 +251,4 @@ func (k Keeper) SumOutstandingEntitlementLiability(ctx context.Context) (sdkmath
 		return sdkmath.Int{}, err
 	}
 	return total, nil
-}
-
-// rewardConfigVersionByNumber resolves a history row by VERSION number rather
-// than by effective epoch.
-//
-// The history is keyed by effective epoch, so this is the one access that cannot
-// be a seek. It is bounded by walking descending and stopping as soon as the
-// numbering has passed the target: versions and effective epochs increase
-// together, so every remaining row has a lower version than the one sought.
-//
-// It is used only to prove that an entitlement's recorded version exists, at
-// creation time — once per entitlement, never on a release or a read path.
-func (k Keeper) rewardConfigVersionByNumber(
-	ctx context.Context, version uint64,
-) (types.RewardConfigVersion, error) {
-	if version == 0 {
-		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrap(
-			"reward configuration versions are numbered from 1")
-	}
-	var found types.RewardConfigVersion
-	var ok bool
-	err := k.RewardConfigVersions.Walk(ctx, new(collections.Range[uint64]).Descending(),
-		func(key uint64, candidate types.RewardConfigVersion) (bool, error) {
-			if err := validateRewardConfigRecord(key, candidate); err != nil {
-				return true, err
-			}
-			if candidate.Version == version {
-				found, ok = candidate, true
-				return true, nil
-			}
-			// Versions increase with effective epoch, so once the walk has descended
-			// past the target there is nothing left that could match.
-			return candidate.Version < version, nil
-		})
-	if err != nil {
-		return types.RewardConfigVersion{}, err
-	}
-	if !ok {
-		return types.RewardConfigVersion{}, types.ErrRewardConfigNotFound.Wrapf(
-			"reward configuration version %d does not exist", version)
-	}
-	return found, nil
 }

@@ -242,9 +242,14 @@ func (k Keeper) resolvePayoutSet(
 		}
 		total = sum
 
-		existing, seen := grouped[payout.Recipient]
+		// Keyed by the CANONICAL re-encoding of the parsed address, not by the
+		// caller's string. Grouping on the input would let two spellings of one
+		// destination be treated as two recipients, which is the same class of
+		// hazard the strict amount parser closes on the other field.
+		key := address.String()
+		existing, seen := grouped[key]
 		if !seen {
-			grouped[payout.Recipient] = resolvedPayout{address: address, amount: amount}
+			grouped[key] = resolvedPayout{address: address, amount: amount}
 			continue
 		}
 		combined, err := existing.amount.SafeAdd(amount)
@@ -252,7 +257,7 @@ func (k Keeper) resolvePayoutSet(
 			return nil, sdkmath.Int{}, types.ErrInvalidState.Wrapf(
 				"payout set for slot %d in epoch %d overflows for one recipient: %v", slotID, epoch, err)
 		}
-		grouped[payout.Recipient] = resolvedPayout{address: existing.address, amount: combined}
+		grouped[key] = resolvedPayout{address: existing.address, amount: combined}
 	}
 	return grouped, total, nil
 }
