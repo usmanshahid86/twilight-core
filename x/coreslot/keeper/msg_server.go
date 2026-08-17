@@ -15,13 +15,13 @@ type msgServer struct{ Keeper }
 func NewMsgServer(k Keeper) types.MsgServer { return msgServer{Keeper: k} }
 
 // cancelRotationAndEmit cancels any pending consensus-key rotation for the slot
-// during a lifecycle change (F1) and emits coreslot_rotation_cancelled.
+// during a lifecycle change (F1) and emits coreslot_rotation_canceled.
 func (m msgServer) cancelRotationAndEmit(ctx context.Context, slot types.CoreSlot) error {
-	rotation, cancelled, err := m.cancelPendingRotation(ctx, slot.SlotId)
+	rotation, canceled, err := m.cancelPendingRotation(ctx, slot.SlotId)
 	if err != nil {
 		return err
 	}
-	if cancelled {
+	if canceled {
 		// The slot's current key (unchanged by cancellation) is the "old"/current
 		// consensus address; the staged-but-never-active key is the "new" one.
 		curConsAddr, _, err := consensusKey(slot.ConsensusPubkey)
@@ -33,7 +33,7 @@ func (m msgServer) cancelRotationAndEmit(ctx context.Context, slot types.CoreSlo
 			return err
 		}
 		height := sdk.UnwrapSDKContext(ctx).BlockHeight()
-		emitRotationCancelled(ctx, slot.SlotId, slot.OperatorAddress, curConsAddr, newConsAddr, types.RotationCancelReasonLifecycle, height)
+		emitRotationCanceled(ctx, slot.SlotId, slot.OperatorAddress, curConsAddr, newConsAddr, types.RotationCancelReasonLifecycle, height)
 	}
 	return nil
 }
@@ -347,7 +347,7 @@ func (m msgServer) RemoveCoreSlot(ctx context.Context, msg *types.MsgRemoveCoreS
 		return nil, err
 	}
 	// Defensive: removal is only reachable from a non-active slot, whose pending
-	// rotation (if any) was already cancelled on inactivate/suspend, but cancel
+	// rotation (if any) was already canceled on inactivate/suspend, but cancel
 	// again so a REMOVED slot can never carry a stale rotation (F1).
 	if err := m.cancelRotationAndEmit(ctx, slot); err != nil {
 		return nil, err

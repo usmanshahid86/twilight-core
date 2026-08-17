@@ -173,7 +173,7 @@ func TestRotationCancelEventContainsReasonAndAddresses(t *testing.T) {
 	_, err = msgs.InactivateCoreSlot(ctx, &types.MsgInactivateCoreSlot{AuthorityOrOperator: authority, SlotId: 1, Reason: "maintenance"})
 	require.NoError(t, err)
 
-	ev := firstEvent(t, ctx, types.EventTypeRotationCancelled)
+	ev := firstEvent(t, ctx, types.EventTypeRotationCanceled)
 	require.Equal(t, "1", attrValue(t, ev, types.AttributeKeySlotID))
 	require.Equal(t, op1, attrValue(t, ev, types.AttributeKeyOperatorAddress))
 	require.Equal(t, consAddrHex(t, pubkey(t, 1)), attrValue(t, ev, types.AttributeKeyOldConsensusAddress))
@@ -262,8 +262,8 @@ func TestStaleRotationCancelEventExactValues(t *testing.T) {
 	_, err = k.EndBlock(ctx)
 	require.NoError(t, err)
 
-	require.Equal(t, 1, countEvents(ctx, types.EventTypeRotationCancelled))
-	ev := firstEvent(t, ctx, types.EventTypeRotationCancelled)
+	require.Equal(t, 1, countEvents(ctx, types.EventTypeRotationCanceled))
+	ev := firstEvent(t, ctx, types.EventTypeRotationCanceled)
 	require.Equal(t, "1", attrValue(t, ev, types.AttributeKeySlotID))
 	require.Equal(t, op1, attrValue(t, ev, types.AttributeKeyOperatorAddress))
 	require.Equal(t, consAddrHex(t, pubkey(t, 1)), attrValue(t, ev, types.AttributeKeyOldConsensusAddress))
@@ -330,7 +330,7 @@ func TestEventAttributesComplete(t *testing.T) {
 	_, err = k.EndBlock(ctx) // applies slot1 rotation -> key_rotated
 	require.NoError(t, err)
 
-	// Queue a rotation on slot2 then cancel it via inactivate -> rotation_cancelled.
+	// Queue a rotation on slot2 then cancel it via inactivate -> rotation_canceled.
 	_, err = msgs.RotateConsensusKey(ctx, &types.MsgRotateConsensusKey{Authority: authority, SlotId: 2, NewConsensusPubkey: pubkey(t, 8)})
 	require.NoError(t, err)
 	_, err = msgs.InactivateCoreSlot(ctx, &types.MsgInactivateCoreSlot{AuthorityOrOperator: authority, SlotId: 2, Reason: "maint"})
@@ -365,7 +365,7 @@ func TestEventAttributesComplete(t *testing.T) {
 		},
 		types.EventTypeParamsUpdated:          {types.AttributeKeyAuthority},
 		types.EventTypeValidatorUpdateEmitted: {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyConsensusAddress, types.AttributeKeyPower, types.AttributeKeyHeight},
-		types.EventTypeRotationCancelled:      {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldConsensusAddress, types.AttributeKeyNewConsensusAddress, types.AttributeKeyReason, types.AttributeKeyHeight},
+		types.EventTypeRotationCanceled:       {types.AttributeKeySlotID, types.AttributeKeyOperatorAddress, types.AttributeKeyOldConsensusAddress, types.AttributeKeyNewConsensusAddress, types.AttributeKeyReason, types.AttributeKeyHeight},
 	}
 
 	for evtType, attrs := range required {

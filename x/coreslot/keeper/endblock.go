@@ -75,7 +75,7 @@ func (k Keeper) endBlock(ctx context.Context) ([]abci.ValidatorUpdate, error) {
 				"slot %d has a due key rotation but its record could not be read: %v", rotation.SlotId, err)
 		}
 		if slot.Status != types.SlotStatus_SLOT_STATUS_ACTIVE {
-			// Lifecycle change should have cancelled this already; never mutate a
+			// Lifecycle change should have canceled this already; never mutate a
 			// non-active (in particular REMOVED) slot from a stale rotation (F1).
 			if err := k.dropStaleRotation(ctx, rotation); err != nil {
 				return nil, err
@@ -127,7 +127,7 @@ func (k Keeper) dropStaleRotation(ctx context.Context, rotation types.PendingKey
 		return err
 	}
 	height := sdk.UnwrapSDKContext(ctx).BlockHeight()
-	emitRotationCancelled(ctx, rotation.SlotId, k.operatorForSlot(ctx, rotation.SlotId), oldKey, newKey, types.RotationCancelReasonStale, height)
+	emitRotationCanceled(ctx, rotation.SlotId, k.operatorForSlot(ctx, rotation.SlotId), oldKey, newKey, types.RotationCancelReasonStale, height)
 	return nil
 }
 
