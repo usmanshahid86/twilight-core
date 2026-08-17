@@ -361,3 +361,10 @@ func TestEntitlementCreationHasNoProductionCallerYet(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 }
+
+// entitlementTestKey mirrors the keeper's canonical (epoch, slot_id) key so
+// fixtures can write straight to the store when they need to plant a record that
+// the admission path would refuse.
+func entitlementTestKey(slotID, epoch uint64) collections.Pair[uint64, uint64] {
+	return collections.Join(epoch, slotID)
+}
