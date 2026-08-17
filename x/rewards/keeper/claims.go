@@ -14,7 +14,7 @@ import (
 func (k Keeper) ClaimRewards(ctx context.Context, msg *types.MsgClaimRewards) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	cacheCtx, write := sdkCtx.CacheContext()
-	if err := k.claimRewards(sdk.WrapSDKContext(cacheCtx), msg); err != nil {
+	if err := k.claimRewards(cacheCtx, msg); err != nil {
 		return err
 	}
 	write()

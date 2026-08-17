@@ -39,7 +39,7 @@ import (
 func (k Keeper) EndBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	cacheCtx, write := sdkCtx.CacheContext()
-	cacheGoCtx := sdk.WrapSDKContext(cacheCtx)
+	cacheGoCtx := cacheCtx
 
 	height, err := checked.Uint64FromInt64(cacheCtx.BlockHeight())
 	if err != nil {
