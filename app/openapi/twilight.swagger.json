@@ -2377,6 +2377,22 @@
             "in": "query",
             "required": false,
             "type": "boolean"
+          },
+          {
+            "name": "scheduled_start_epoch",
+            "description": "Bounded window over the future schedule, which is a separate collection and\ncannot share the history's page cursor. It is expressed as an explicit\nepoch cursor rather than a second PageRequest because the schedule is keyed\nby effective epoch and is walked in that order.\n\nZero starts at the first scheduled epoch.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "scheduled_limit",
+            "description": "Maximum number of scheduled entries to return. Zero applies the server\ndefault; values above the server maximum are reduced to it.",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int64"
           }
         ],
         "tags": [
@@ -4243,6 +4259,11 @@
         },
         "pagination": {
           "$ref": "#/definitions/v1beta1PageResponse"
+        },
+        "scheduled_next_epoch": {
+          "type": "string",
+          "format": "uint64",
+          "description": "Effective epoch of the first scheduled entry NOT included in `scheduled`,\nto be passed back as scheduled_start_epoch. Zero when the window reached\nthe end of the schedule."
         }
       }
     },

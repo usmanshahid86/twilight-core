@@ -21,6 +21,11 @@ import (
 // protocol value: no consensus path projects boundaries.
 const epochProjectionHorizon = 1_000
 
+// maxScheduledEpochConfigsPerPage caps one page of the future schedule. Like the
+// projection horizon it bounds query work only and is not a protocol value: no
+// consensus path reads the schedule in pages.
+const maxScheduledEpochConfigsPerPage = 100
+
 type queryServer struct{ Keeper }
 
 // NewQueryServer returns a read-only gRPC query server. It performs no state
@@ -36,13 +41,19 @@ func (q queryServer) Params(ctx context.Context, _ *types.QueryParamsRequest) (*
 }
 
 func (q queryServer) EpochInfo(ctx context.Context, _ *types.QueryEpochInfoRequest) (*types.QueryEpochInfoResponse, error) {
+	// Every read below is of canonical module state that InitGenesis wrote and no
+	// path deletes. There is no "not configured yet" answer to give: after
+	// initialization, an absent or undecodable record is corruption, and the
+	// contract for corruption is Internal. Returning the raw collections error
+	// would surface it as an unclassified gRPC Unknown, which tells a client
+	// nothing and is indistinguishable from a transport fault.
 	state, err := q.GetState(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("rewards state", err)
 	}
 	cfg, err := q.GetCurrentEpochConfig(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("current epoch configuration", err)
 	}
 	// Canonical geometry, from EpochConfigVersion history rather than from the
 	// deprecated snapshot mirror the response still carries for compatibility.
@@ -60,7 +71,7 @@ func (q queryServer) EpochInfo(ctx context.Context, _ *types.QueryEpochInfoReque
 	}
 	openBlocks, err := q.GetOpenRewardEnabledBlocks(ctx)
 	if err != nil {
-		return nil, epochQueryError(err)
+		return nil, canonicalStateQueryError("open reward-enabled block count", err)
 	}
 	resp := &types.QueryEpochInfoResponse{
 		State:                    &state,
@@ -71,7 +82,7 @@ func (q queryServer) EpochInfo(ctx context.Context, _ *types.QueryEpochInfoReque
 		OpenRewardEnabledBlocks:  openBlocks,
 	}
 	if pending, found, err := q.GetPendingParams(ctx); err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("pending params", err)
 	} else if found {
 		resp.HasPendingParams = true
 		resp.PendingParams = &pending
@@ -294,18 +305,58 @@ func epochQueryError(err error) error {
 	}
 }
 
+// canonicalStateQueryError maps a failed read of canonical module state onto the
+// query contract.
+//
+// The distinction epochQueryError draws does not apply here, and pretending it
+// does would be the bug. None of these records is optional: genesis writes all of
+// them and nothing removes them, so there is no modeled absence for a client to
+// be told about. collections.ErrNotFound on one of them means the store lost a
+// record, which is a state-integrity failure and reaches the caller as Internal —
+// never as NotFound, which would read as "this chain has no rewards state".
+//
+// An error already carrying a transport code is passed through, so a canceled or
+// deadline-exceeded query is not relabelled as corruption.
+func canonicalStateQueryError(what string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := status.FromError(err); ok && status.Code(err) != codes.Unknown {
+		return err
+	}
+	return status.Errorf(codes.Internal, "canonical %s could not be read: %v", what, err)
+}
+
 // EpochConfigVersions returns the canonical epoch-configuration history together
 // with any future schedule.
+//
+// Both collections are paginated, and independently: history is append-only and
+// grows with every accepted geometry change, while the schedule is transient and
+// grows with pending ones. An unbounded walk of either would let a single query
+// force the node to materialize an entire collection, and the schedule is the
+// more exposed of the two because its size is not bounded by chain age.
+//
+// Rows are validated on the way out. A malformed row is not history — presenting
+// it as though it were would let a client build a boundary derivation on a record
+// consensus itself would refuse, so the query fails closed exactly as the block
+// path does.
 func (q queryServer) EpochConfigVersions(
 	ctx context.Context, req *types.QueryEpochConfigVersionsRequest,
 ) (*types.QueryEpochConfigVersionsResponse, error) {
-	var pageReq *query.PageRequest
+	var historyPage *query.PageRequest
+	var startEpoch uint64
+	var limit uint32
 	if req != nil {
-		pageReq = req.Pagination
+		historyPage = req.Pagination
+		startEpoch = req.ScheduledStartEpoch
+		limit = req.ScheduledLimit
 	}
 	versions, pageRes, err := query.CollectionPaginate(
-		ctx, q.Keeper.EpochConfigVersions, pageReq,
-		func(_ uint64, version types.EpochConfigVersion) (*types.EpochConfigVersion, error) {
+		ctx, q.Keeper.EpochConfigVersions, historyPage,
+		func(key uint64, version types.EpochConfigVersion) (*types.EpochConfigVersion, error) {
+			if err := validateEpochConfigRecord(key, version); err != nil {
+				return nil, err
+			}
 			value := version
 			return &value, nil
 		},
@@ -313,36 +364,98 @@ func (q queryServer) EpochConfigVersions(
 	if err != nil {
 		return nil, epochQueryError(err)
 	}
-	resp := &types.QueryEpochConfigVersionsResponse{Versions: versions, Pagination: pageRes}
-	if err := q.ScheduledEpochConfigs.Walk(ctx, nil, func(_ uint64, scheduled types.ScheduledEpochConfig) (bool, error) {
-		value := scheduled
-		resp.Scheduled = append(resp.Scheduled, &value)
-		return false, nil
-	}); err != nil {
+	scheduled, nextEpoch, err := q.scheduledEpochConfigPage(ctx, startEpoch, limit)
+	if err != nil {
 		return nil, epochQueryError(err)
 	}
-	return resp, nil
+	return &types.QueryEpochConfigVersionsResponse{
+		Versions:           versions,
+		Scheduled:          scheduled,
+		Pagination:         pageRes,
+		ScheduledNextEpoch: nextEpoch,
+	}, nil
+}
+
+// scheduledEpochConfigPage returns one bounded window of the future schedule,
+// ascending by effective epoch, together with the cursor for the next window.
+//
+// It walks at most limit+1 entries: the extra one is read to learn whether the
+// schedule continues, and is reported as a cursor rather than returned. So the
+// work this query can be made to do is bounded by the caller's limit, capped by
+// the server, and independent of how large the schedule actually is.
+func (q queryServer) scheduledEpochConfigPage(
+	ctx context.Context, startEpoch uint64, limit uint32,
+) ([]*types.ScheduledEpochConfig, uint64, error) {
+	size := uint64(limit)
+	if size == 0 || size > maxScheduledEpochConfigsPerPage {
+		size = maxScheduledEpochConfigsPerPage
+	}
+	rng := new(collections.Range[uint64])
+	if startEpoch > 0 {
+		rng = rng.StartInclusive(startEpoch)
+	}
+	iter, err := q.ScheduledEpochConfigs.Iterate(ctx, rng)
+	if err != nil {
+		return nil, 0, types.ErrInvalidState.Wrapf(
+			"scheduled epoch configurations could not be read: %v", err)
+	}
+	defer iter.Close()
+
+	page := make([]*types.ScheduledEpochConfig, 0, size)
+	for ; iter.Valid(); iter.Next() {
+		key, err := iter.Key()
+		if err != nil {
+			return nil, 0, types.ErrInvalidState.Wrapf(
+				"scheduled epoch configuration key could not be read: %v", err)
+		}
+		if uint64(len(page)) == size {
+			// One past the window: reported as the next cursor, not returned.
+			return page, key, nil
+		}
+		value, err := iter.Value()
+		if err != nil {
+			return nil, 0, types.ErrInvalidState.Wrapf(
+				"scheduled epoch configuration at epoch %d could not be read: %v", key, err)
+		}
+		if err := ValidateScheduledEpochConfigRecord(key, value); err != nil {
+			return nil, 0, err
+		}
+		entry := value
+		page = append(page, &entry)
+	}
+	return page, 0, nil
 }
 
 // EpochBoundaries returns the canonical start and end height of one epoch.
 //
 // Boundaries beyond the supported derivation horizon are refused rather than
 // clamped or invented (§68).
+//
+// All three returned numbers describe ONE geometry. Start and end come from the
+// schedule-aware projection, so the length must too — resolving it separately
+// from immutable history alone would answer a different question for an epoch a
+// pending schedule entry has already changed, and would publish a triple whose
+// own members contradict each other.
 func (q queryServer) EpochBoundaries(
 	ctx context.Context, req *types.QueryEpochBoundariesRequest,
 ) (*types.QueryEpochBoundariesResponse, error) {
 	if req == nil || req.EpochNumber == 0 {
 		return nil, status.Error(codes.InvalidArgument, "epoch number must be positive")
 	}
+	// The successor is a real arithmetic step, not a formality: at the maximum
+	// epoch number an unchecked +1 wraps to zero and the projection would then
+	// answer about epoch 0 — an epoch that cannot exist — instead of failing.
+	successor, err := checked.AddUint64(req.EpochNumber, 1)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"epoch %d has no representable successor, so its end height is not derivable",
+			req.EpochNumber)
+	}
 	start, err := q.ProjectEpochStartHeight(ctx, req.EpochNumber, epochProjectionHorizon)
 	if err != nil {
 		return nil, epochQueryError(err)
 	}
-	next, err := q.ProjectEpochStartHeight(ctx, req.EpochNumber+1, epochProjectionHorizon)
-	if err != nil {
-		return nil, epochQueryError(err)
-	}
-	length, err := q.EpochLengthForEpoch(ctx, req.EpochNumber)
+	next, err := q.ProjectEpochStartHeight(ctx, successor, epochProjectionHorizon)
 	if err != nil {
 		return nil, epochQueryError(err)
 	}
@@ -355,11 +468,16 @@ func (q queryServer) EpochBoundaries(
 		return nil, epochQueryError(types.ErrInvalidState.Wrapf(
 			"epoch %d end height underflows", req.EpochNumber))
 	}
+	span, err := checked.SubUint64(next, start)
+	if err != nil || span == 0 {
+		return nil, epochQueryError(types.ErrInvalidState.Wrapf(
+			"epoch %d projects to the empty span [%d, %d]", req.EpochNumber, start, next))
+	}
 	return &types.QueryEpochBoundariesResponse{
 		EpochNumber:       req.EpochNumber,
 		StartHeight:       start,
 		EndHeight:         end,
-		EpochLengthBlocks: length,
+		EpochLengthBlocks: span,
 	}, nil
 }
 

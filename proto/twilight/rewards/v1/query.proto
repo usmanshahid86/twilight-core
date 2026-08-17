@@ -122,12 +122,27 @@ message QueryModuleBalancesResponse {
 }
 
 message QueryEpochConfigVersionsRequest {
+  // Paginates the immutable history.
   cosmos.base.query.v1beta1.PageRequest pagination = 1;
+  // Bounded window over the future schedule, which is a separate collection and
+  // cannot share the history's page cursor. It is expressed as an explicit
+  // epoch cursor rather than a second PageRequest because the schedule is keyed
+  // by effective epoch and is walked in that order.
+  //
+  // Zero starts at the first scheduled epoch.
+  uint64 scheduled_start_epoch = 2;
+  // Maximum number of scheduled entries to return. Zero applies the server
+  // default; values above the server maximum are reduced to it.
+  uint32 scheduled_limit = 3;
 }
 message QueryEpochConfigVersionsResponse {
   repeated EpochConfigVersion versions = 1;
   repeated ScheduledEpochConfig scheduled = 2;
   cosmos.base.query.v1beta1.PageResponse pagination = 3;
+  // Effective epoch of the first scheduled entry NOT included in `scheduled`,
+  // to be passed back as scheduled_start_epoch. Zero when the window reached
+  // the end of the schedule.
+  uint64 scheduled_next_epoch = 4;
 }
 
 message QueryEpochBoundariesRequest { uint64 epoch_number = 1; }

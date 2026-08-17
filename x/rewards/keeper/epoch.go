@@ -20,16 +20,43 @@ import (
 // advances at BeginBlock, the boundary would pass, the next epoch would open, and
 // the skipped epoch could never be finalized under a later block's clock (§33).
 // It would be a permanent hole in the finalized-epoch sequence.
+//
+// The comparison is EXACT, not "at or past". A boundary is a single block, and it
+// is consumed exactly once:
+//
+//	height <  canonical end -> not ready
+//	height == canonical end -> finalize
+//	height >  canonical end -> ErrInvalidState
+//
+// The third case is not a late finalization to be caught up. Finalizing under a
+// later block's clock would mint for an epoch whose closing block already
+// committed without it, and would do so using whatever counters the intervening
+// blocks left behind — a monetary transition executed against the wrong epoch.
+// Because the boundary can only be passed if a block that owed the transition did
+// not run it, arriving here at all means state has already diverged, so the block
+// halts instead of transacting on it.
 func (k Keeper) ShouldFinalizeAtHeight(ctx context.Context, height uint64) (bool, error) {
 	state, err := k.GetState(ctx)
 	if err != nil {
+		return false, err
+	}
+	if err := k.verifyCurrentEpochAnchor(ctx, state); err != nil {
 		return false, err
 	}
 	endHeight, err := k.EpochEndHeight(ctx, state.CurrentEpoch)
 	if err != nil {
 		return false, err
 	}
-	return height >= endHeight, nil
+	switch {
+	case height < endHeight:
+		return false, nil
+	case height == endHeight:
+		return true, nil
+	default:
+		return false, types.ErrInvalidState.Wrapf(
+			"epoch %d was due to finalize at height %d but the current block is %d",
+			state.CurrentEpoch, endHeight, height)
+	}
 }
 
 // ConfiguredEpochEndHeight derives an epoch end from a stored snapshot.

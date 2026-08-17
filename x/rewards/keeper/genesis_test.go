@@ -40,6 +40,42 @@ func TestPopulatedGenesisInitExportRoundTrip(t *testing.T) {
 	require.Zero(t, bank.sendCalls)
 }
 
+// TestInitGenesisNormalizesTheCanonicalPauseState is the module-level half of the
+// ratified fresh-genesis pause rule: the import itself refuses a pending
+// transition, and refuses it before writing anything.
+func TestInitGenesisNormalizesTheCanonicalPauseState(t *testing.T) {
+	t.Run("an explicit paused start is imported verbatim", func(t *testing.T) {
+		k, ctx, _ := setupKeeper(t, &coreSlotKeeperMock{})
+		genesis := types.DefaultGenesis()
+		genesis.PauseState = &types.RewardsPauseState{CurrentPaused: true}
+		require.NoError(t, k.InitGenesis(ctx, *genesis))
+
+		state, err := k.GetPauseState(ctx)
+		require.NoError(t, err)
+		require.True(t, state.CurrentPaused)
+		require.False(t, state.HasPending)
+		require.Zero(t, state.PendingEffectiveHeight)
+	})
+
+	for _, tc := range []struct {
+		name   string
+		height uint64
+	}{
+		{name: "due at the initial height", height: 1},
+		{name: "due at the initial height plus one", height: 2},
+		{name: "due far in the future", height: 10_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			k, ctx, _ := setupKeeper(t, &coreSlotKeeperMock{})
+			genesis := types.DefaultGenesis()
+			genesis.PauseState = &types.RewardsPauseState{
+				HasPending: true, PendingValue: true, PendingEffectiveHeight: tc.height,
+			}
+			require.Error(t, k.InitGenesis(ctx, *genesis))
+		})
+	}
+}
+
 func TestGenesisValidationBoundaries(t *testing.T) {
 	t.Run("invalid denom", func(t *testing.T) {
 		genesis := types.DefaultGenesis()

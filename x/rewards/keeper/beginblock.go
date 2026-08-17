@@ -119,6 +119,13 @@ func (k Keeper) advanceEpochIfDue(ctx context.Context, height uint64) error {
 	if err != nil {
 		return err
 	}
+	// Before deciding anything about the NEXT boundary, confirm the current one is
+	// where the canonical history says it is. Every comparison below is against a
+	// derived height; if the open epoch is already anchored somewhere the history
+	// does not put it, the comparison is being made in the wrong frame.
+	if err := k.verifyCurrentEpochAnchor(ctx, state); err != nil {
+		return err
+	}
 	nextEpoch, err := checked.AddUint64(state.CurrentEpoch, 1)
 	if err != nil {
 		return types.ErrInvalidState.Wrap("epoch numbering is exhausted")
@@ -144,8 +151,24 @@ func (k Keeper) advanceEpochIfDue(ctx context.Context, height uint64) error {
 			nextEpoch, nextStart, height)
 	}
 
-	if _, err := k.consumeScheduledEpochConfig(ctx, nextEpoch, height); err != nil {
+	consumed, err := k.consumeScheduledEpochConfig(ctx, nextEpoch, height)
+	if err != nil {
 		return err
+	}
+	if consumed {
+		// Refresh the deprecated snapshot mirror inside the same cached transition
+		// that created the canonical version.
+		//
+		// The mirror is not an authority and nothing derives a boundary from it, but
+		// it IS observable: EpochInfo returns it, and finalization embeds it in the
+		// epoch record that becomes permanent. Leaving it holding the previous
+		// length would publish, and then permanently archive, a number contradicting
+		// the geometry the epoch actually ran under. Only the length is touched —
+		// the snapshot's economics belong to the epoch configuration and are not the
+		// schedule's to change.
+		if err := k.syncEpochConfigMirror(ctx, nextEpoch); err != nil {
+			return err
+		}
 	}
 
 	state.CurrentEpoch = nextEpoch
@@ -157,4 +180,26 @@ func (k Keeper) advanceEpochIfDue(ctx context.Context, height uint64) error {
 	// and carrying the predecessor's total forward would inflate the first
 	// epoch's emission by the whole previous epoch.
 	return k.SetOpenRewardEnabledBlocks(ctx, 0)
+}
+
+// syncEpochConfigMirror copies the canonical epoch length of the given epoch into
+// the deprecated EpochConfigSnapshot mirror.
+//
+// One direction only, and one field only: canonical history is the source, the
+// snapshot is the copy. Nothing reads geometry back out of the snapshot, and this
+// function must never be used to move a value the other way.
+func (k Keeper) syncEpochConfigMirror(ctx context.Context, epoch uint64) error {
+	length, err := k.EpochLengthForEpoch(ctx, epoch)
+	if err != nil {
+		return err
+	}
+	cfg, err := k.GetCurrentEpochConfig(ctx)
+	if err != nil {
+		return err
+	}
+	if cfg.EpochLengthBlocks == length {
+		return nil
+	}
+	cfg.EpochLengthBlocks = length
+	return k.SetCurrentEpochConfig(ctx, cfg)
 }

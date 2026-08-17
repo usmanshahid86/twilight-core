@@ -114,6 +114,23 @@ func (g GenesisState) validateEpochTimeline() error {
 	if err := g.PauseState.Validate(); err != nil {
 		return ErrInvalidGenesis.Wrap(err.Error())
 	}
+	// Fresh genesis carries NO pending pause transition, at any height.
+	//
+	// A pending transition is not a configuration choice; it is the residue of an
+	// authority transaction accepted in block H and due at H+1. Fresh genesis has
+	// no pre-genesis block and therefore no transaction that could have created
+	// one. Genesis already selects the initial reward state directly through
+	// current_paused, so a pending entry is never the only way to express an
+	// intent — it is either meaningless or a second, contradictory answer to the
+	// question current_paused already answers.
+	//
+	// This is a FRESH-genesis rule only. Continuation import, when it exists, must
+	// preserve a pending H+1 transition: there the transition really was created
+	// by a transaction on the exporting chain, and dropping it would silently
+	// discard an accepted authority decision.
+	if err := validateFreshGenesisPauseState(*g.PauseState); err != nil {
+		return err
+	}
 
 	// §80 requires an empty schedule at fresh genesis. This is a canonical
 	// CONTENT rule about which entries may exist, and is independent of the open
@@ -180,6 +197,31 @@ func (g GenesisState) validateEpochTimeline() error {
 	return nil
 }
 
+// validateFreshGenesisPauseState requires the normalized fresh-genesis shape of
+// the canonical pause state: an explicit current value and no pending
+// transition of any kind.
+//
+// The three fields are checked individually rather than through the has-pending
+// flag alone, because a cleared flag over a non-zero pending value or height is
+// exactly the inconsistency that would later be read back as a transition nobody
+// scheduled.
+func validateFreshGenesisPauseState(state RewardsPauseState) error {
+	if state.HasPending {
+		return ErrInvalidGenesis.Wrapf(
+			"fresh genesis carries a pending rewards pause transition to %t at height %d; "+
+				"fresh genesis has no pre-genesis transaction able to create one, and selects "+
+				"the initial state through current_paused",
+			state.PendingValue, state.PendingEffectiveHeight)
+	}
+	if state.PendingValue || state.PendingEffectiveHeight != 0 {
+		return ErrInvalidGenesis.Wrapf(
+			"fresh genesis rewards pause state declares no pending transition but carries "+
+				"pending value %t at height %d",
+			state.PendingValue, state.PendingEffectiveHeight)
+	}
+	return nil
+}
+
 // ValidateFreshGenesisInitialHeight pins the height-bearing portions of the
 // canonical epoch timeline to the chain's effective first-block height.
 //
@@ -188,13 +230,15 @@ func (g GenesisState) validateEpochTimeline() error {
 //   - the original-genesis anchor starts at the initial height. §11 makes this
 //     the permanent anchor of every later boundary, so an anchor that disagrees
 //     with the chain's own first block misplaces the entire history.
-//   - a pending pause transition that is already due is rejected. Transitions are
-//     consumed exactly once at the height they name, so one naming a height at or
-//     below the first block could never be applied by any block.
+//   - the pause state carries no pending transition. This restates the rule the
+//     document-level validation already applies, because this function is the
+//     last preflight before the module's first write and the rule is a
+//     fresh-genesis rule: a continuation importer must NOT reuse it.
 //
-// It deliberately takes NO position on a pending transition scheduled for a
-// future height. Whether fresh genesis may seed one is unresolved, and both
-// accepting and rejecting it here would settle that question by implementation.
+// The pending rule is deliberately not expressed relative to initialHeight. It
+// is not that an already-due transition is stale and a future one might be
+// admissible — no pending transition is admissible at fresh genesis at all, so
+// the initial height is irrelevant to the decision.
 func ValidateFreshGenesisInitialHeight(genesis *GenesisState, initialHeight int64) error {
 	if genesis == nil {
 		return ErrInvalidGenesis.Wrap("genesis state is nil")
@@ -217,11 +261,10 @@ func ValidateFreshGenesisInitialHeight(genesis *GenesisState, initialHeight int6
 			"the open epoch starts at height %d but the chain starts at height %d",
 			genesis.State.CurrentEpochStartHeight, height)
 	}
-	if genesis.PauseState != nil && genesis.PauseState.HasPending &&
-		genesis.PauseState.PendingEffectiveHeight <= height {
-		return ErrInvalidGenesis.Wrapf(
-			"a rewards pause transition is pending for height %d, which the chain has already reached at height %d",
-			genesis.PauseState.PendingEffectiveHeight, height)
+	if genesis.PauseState != nil {
+		if err := validateFreshGenesisPauseState(*genesis.PauseState); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -158,18 +158,96 @@ func TestFreshGenesisInitialHeightAnchoring(t *testing.T) {
 			"the anchor is the origin of every later boundary and cannot be off by any amount")
 	})
 
-	t.Run("a stale pending pause transition is refused", func(t *testing.T) {
-		genesis := build(t, 500)
-		// Due at or before the first block: no block could ever apply it, so it
-		// would sit pending forever and later fail closed.
-		genesis.PauseState = &types.RewardsPauseState{
-			HasPending: true, PendingValue: true, PendingEffectiveHeight: 500,
-		}
-		require.Error(t, types.ValidateFreshGenesisInitialHeight(genesis, 500))
-	})
+	// The pause rule is covered in full by TestFreshGenesisForbidsAnyPending-
+	// PauseTransition below, which is where it belongs: it does not depend on the
+	// initial height.
+}
 
-	// A pending transition scheduled for a FUTURE height is deliberately not
-	// covered here, in either direction. Whether fresh genesis may seed one is an
-	// open architecture question, and a test asserting acceptance or rejection
-	// would settle it by implementation.
+// TestFreshGenesisForbidsAnyPendingPauseTransition covers the ratified rule.
+//
+// A pending transition is the residue of an authority transaction accepted in
+// block H and due at H+1. Fresh genesis has no pre-genesis block, so no such
+// transaction can have happened, and genesis already selects the initial reward
+// state directly through current_paused. The rule is therefore not "reject stale
+// ones" — no pending transition is admissible at any height, and the height it
+// names does not enter the decision.
+//
+// This is FRESH genesis only. Continuation import must preserve a pending H+1
+// transition, because there it really was created by a transaction on the
+// exporting chain.
+func TestFreshGenesisForbidsAnyPendingPauseTransition(t *testing.T) {
+	const initialHeight = 500
+
+	build := func(t *testing.T, pause types.RewardsPauseState) *types.GenesisState {
+		t.Helper()
+		params := types.DefaultParams()
+		snapshot := types.DefaultEpochConfigSnapshot(params)
+		anchor := types.DefaultEpochConfigVersion(params, initialHeight)
+		return &types.GenesisState{
+			Params: &params,
+			State: &types.RewardsState{
+				CurrentEpoch: 1, CurrentEpochStartHeight: initialHeight,
+				CumulativeEmitted: "0", CarryForwardRemainder: "0",
+			},
+			CurrentEpochConfig:  &snapshot,
+			EpochConfigVersions: []*types.EpochConfigVersion{&anchor},
+			PauseState:          &pause,
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		pause  types.RewardsPauseState
+		accept bool
+	}{
+		{
+			name:   "no pending transition, starting unpaused",
+			pause:  types.RewardsPauseState{CurrentPaused: false},
+			accept: true,
+		},
+		{
+			name:   "no pending transition, starting paused",
+			pause:  types.RewardsPauseState{CurrentPaused: true},
+			accept: true,
+		},
+		{
+			name: "pending at the initial height",
+			pause: types.RewardsPauseState{
+				HasPending: true, PendingValue: true, PendingEffectiveHeight: initialHeight,
+			},
+		},
+		{
+			name: "pending at the initial height plus one",
+			pause: types.RewardsPauseState{
+				HasPending: true, PendingValue: true, PendingEffectiveHeight: initialHeight + 1,
+			},
+		},
+		{
+			name: "pending far in the future",
+			pause: types.RewardsPauseState{
+				HasPending: true, PendingValue: false, PendingEffectiveHeight: initialHeight + 10_000,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			genesis := build(t, tc.pause)
+			// Both entry points agree: the document-level rule and the last preflight
+			// before the module's first write.
+			if tc.accept {
+				require.NoError(t, genesis.Validate())
+				require.NoError(t, types.ValidateFreshGenesisInitialHeight(genesis, initialHeight))
+				return
+			}
+			require.Error(t, genesis.Validate())
+			require.Error(t, types.ValidateFreshGenesisInitialHeight(genesis, initialHeight))
+		})
+	}
+
+	t.Run("a cleared flag over residual pending fields is still refused", func(t *testing.T) {
+		// has_pending false with a height left behind is the inconsistency that
+		// would later read back as a transition nobody scheduled.
+		genesis := build(t, types.RewardsPauseState{PendingEffectiveHeight: initialHeight + 1})
+		require.Error(t, genesis.Validate())
+		require.Error(t, types.ValidateFreshGenesisInitialHeight(genesis, initialHeight))
+	})
 }

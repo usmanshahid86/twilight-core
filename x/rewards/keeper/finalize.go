@@ -18,6 +18,50 @@ func (k Keeper) FinalizeEpoch(ctx context.Context) error {
 	return nil
 }
 
+// validateEpochParticipation checks the counters that drive emission and
+// allocation against the geometry of the epoch they claim to describe.
+//
+// Two relations, both arithmetically impossible to violate through the block
+// path, and therefore both meaningful as corruption detectors:
+//
+//   - an epoch cannot have counted more reward-enabled blocks than it has blocks.
+//     BeginBlock increments the counter at most once per block of the open epoch,
+//     so a count above the canonical length means either the counter was not reset
+//     when the epoch opened or the length it is being measured against is not the
+//     one the epoch ran under. Either way the multiplier feeding the mint is wrong.
+//   - a slot cannot have been reward-active in more blocks than were
+//     reward-enabled. Participation is credited only on blocks that also advance
+//     the counter, so a row above it would claim a share of a pool computed from
+//     fewer blocks than the row itself asserts.
+//
+// Zero rows is not an error: a fully paused epoch, or one with no ACTIVE slots,
+// legitimately closes with none.
+func (k Keeper) validateEpochParticipation(
+	ctx context.Context, epoch, rewardEnabledBlocks uint64, rows []types.SlotActiveBlocks,
+) error {
+	length, err := k.EpochLengthForEpoch(ctx, epoch)
+	if err != nil {
+		return err
+	}
+	if rewardEnabledBlocks > length {
+		return types.ErrInvalidState.Wrapf(
+			"epoch %d counted %d reward-enabled blocks but is only %d blocks long",
+			epoch, rewardEnabledBlocks, length)
+	}
+	for _, row := range rows {
+		if row.SlotId == 0 {
+			return types.ErrInvalidState.Wrapf(
+				"epoch %d carries a participation row for slot 0", epoch)
+		}
+		if row.BlocksActive > rewardEnabledBlocks {
+			return types.ErrInvalidState.Wrapf(
+				"slot %d is recorded active for %d blocks of epoch %d, which counted %d reward-enabled blocks",
+				row.SlotId, row.BlocksActive, epoch, rewardEnabledBlocks)
+		}
+	}
+	return nil
+}
+
 func (k Keeper) finalizeEpoch(ctx context.Context) error {
 	params, err := k.GetParams(ctx)
 	if err != nil {
@@ -25,6 +69,13 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 	}
 	state, err := k.GetState(ctx)
 	if err != nil {
+		return err
+	}
+	// The epoch about to be closed must be anchored where the canonical history
+	// puts it. The stored start height is written verbatim into the permanent
+	// EpochReward record below, so a disagreement here would archive a span that
+	// never existed alongside a real mint.
+	if err := k.verifyCurrentEpochAnchor(ctx, state); err != nil {
 		return err
 	}
 	cfg, err := k.GetCurrentEpochConfig(ctx)
@@ -50,6 +101,23 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 	// paused; a paused epoch counted fewer, and a fully paused epoch counted none.
 	rewardEnabledBlocks, err := k.GetOpenRewardEnabledBlocks(ctx)
 	if err != nil {
+		return err
+	}
+	// Participation state is validated HERE, before the first monetary operation,
+	// not where it happens to be consumed.
+	//
+	// These counters stopped being bookkeeping the moment emission started
+	// following them: reward_enabled_blocks multiplies the block subsidy, and each
+	// slot's active-block count is its share of the pool. Validating them after the
+	// mint would still roll back — the whole finalization runs in a cache — but it
+	// would mean the mint and the treasury send were computed from state already
+	// known to be impossible, and it would put the check behind whichever
+	// operation happened to fail first.
+	rows, err := k.IterateActiveBlocksForEpoch(ctx, state.CurrentEpoch)
+	if err != nil {
+		return err
+	}
+	if err := k.validateEpochParticipation(ctx, state.CurrentEpoch, rewardEnabledBlocks, rows); err != nil {
 		return err
 	}
 
@@ -109,10 +177,6 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 	}
 	pool := emission.Add(carryIn).Add(fees).Sub(treasuryAmount)
 
-	rows, err := k.IterateActiveBlocksForEpoch(ctx, state.CurrentEpoch)
-	if err != nil {
-		return err
-	}
 	snapshots := make(map[uint64]SlotRewardSnapshot, len(rows))
 	for _, row := range rows {
 		if row.BlocksActive == 0 {

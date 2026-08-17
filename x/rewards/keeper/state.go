@@ -7,6 +7,7 @@ import (
 	"cosmossdk.io/collections"
 	sdkmath "cosmossdk.io/math"
 
+	"github.com/twilight-project/twilight-core/internal/checked"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
@@ -82,6 +83,16 @@ func (k Keeper) SetActiveBlocks(ctx context.Context, epoch, slotID, blocks uint6
 	return k.ActiveBlocks.Set(ctx, collections.Join(epoch, slotID), blocks)
 }
 
+// IncrementActiveBlocks credits one slot with one reward-active block.
+//
+// Absence is the ordinary first credit of an epoch and starts the count at zero;
+// only collections.ErrNotFound means absence, and any other read failure
+// propagates rather than being treated as a missing row.
+//
+// The increment is checked. A consensus counter that feeds allocation must not be
+// allowed to wrap: an unchecked +1 at the maximum would reset the slot's
+// participation to zero and silently transfer its share of the pool to everyone
+// else, which is a value transfer, not an overflow.
 func (k Keeper) IncrementActiveBlocks(ctx context.Context, epoch, slotID uint64) error {
 	blocks, err := k.GetActiveBlocks(ctx, epoch, slotID)
 	if errors.Is(err, collections.ErrNotFound) {
@@ -89,7 +100,12 @@ func (k Keeper) IncrementActiveBlocks(ctx context.Context, epoch, slotID uint64)
 	} else if err != nil {
 		return err
 	}
-	return k.SetActiveBlocks(ctx, epoch, slotID, blocks+1)
+	next, err := checked.AddUint64(blocks, 1)
+	if err != nil {
+		return types.ErrInvalidState.Wrapf(
+			"active-block count for slot %d in epoch %d overflows", slotID, epoch)
+	}
+	return k.SetActiveBlocks(ctx, epoch, slotID, next)
 }
 
 func (k Keeper) DeleteActiveBlocksForEpoch(ctx context.Context, epoch uint64) error {

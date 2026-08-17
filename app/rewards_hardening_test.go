@@ -359,9 +359,23 @@ func TestRewardsEndBlockFailClosedNoHalfCommit(t *testing.T) {
 	ctx := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
 
 	params := rewardstypes.DefaultParams()
-	params.EpochLengthBlocks = 2
 	require.NoError(t, a.RewardsKeeper.SetParams(ctx, params))
 	require.NoError(t, a.RewardsKeeper.SetState(ctx, rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"}))
+
+	// Every prerequisite of a real finalization is established first — canonical
+	// history for the open epoch and the reward-enabled count it accrued — so the
+	// boundary genuinely resolves and the injected fault is the reason the block
+	// fails. Without the history, EndBlock would abort while merely trying to
+	// locate the boundary, and this test would pass without ever reaching the
+	// behavior it claims to cover.
+	anchor := rewardstypes.DefaultEpochConfigVersion(params, 1)
+	require.NoError(t, a.RewardsKeeper.EpochConfigVersions.Set(ctx, anchor.EffectiveEpoch, anchor))
+	require.NoError(t, a.RewardsKeeper.SetOpenRewardEnabledBlocks(ctx, params.EpochLengthBlocks))
+
+	boundary := int64(params.EpochLengthBlocks) // epoch 1 runs heights 1..360
+	ready, err := a.RewardsKeeper.ShouldFinalizeAtHeight(ctx, uint64(boundary))
+	require.NoError(t, err)
+	require.True(t, ready, "the fixture must actually reach the canonical boundary")
 
 	// Inject an unsupported (weighted) epoch config directly into the collection,
 	// bypassing the validating setter, to force a finalization fault at the boundary.
@@ -369,9 +383,11 @@ func TestRewardsEndBlockFailClosedNoHalfCommit(t *testing.T) {
 	badCfg.WeightedRewardsEnabled = true
 	require.NoError(t, a.RewardsKeeper.CurrentEpochConfig.Set(ctx, badCfg))
 
-	// At the configured boundary, EndBlock must fail closed.
-	boundaryCtx := ctx.WithBlockHeight(2)
-	require.Error(t, a.RewardsKeeper.EndBlock(boundaryCtx), "unsupported config must abort finalization")
+	// At the configured boundary, EndBlock must fail closed — and specifically on
+	// the injected fault.
+	boundaryCtx := ctx.WithBlockHeight(boundary)
+	require.ErrorIs(t, a.RewardsKeeper.EndBlock(boundaryCtx), rewardstypes.ErrUnsupportedFeature,
+		"unsupported config must abort finalization")
 
 	// No partial commit: no finalized epoch, cumulative unchanged, epoch not advanced.
 	_, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, 1)
