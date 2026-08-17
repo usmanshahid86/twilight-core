@@ -219,10 +219,23 @@ func (q queryServer) ModuleBalances(ctx context.Context, _ *types.QueryModuleBal
 	if rewardsAddr == nil || feePoolAddr == nil {
 		return nil, status.Error(codes.FailedPrecondition, "rewards module accounts are not registered")
 	}
+	// The two quantities the escrow balance must cover, returned beside it so
+	// solvency is checkable from the response alone rather than by correlating
+	// three separate queries.
+	state, err := q.GetState(ctx)
+	if err != nil {
+		return nil, canonicalStateQueryError("rewards state", err)
+	}
+	liability, err := q.GetOutstandingEntitlementLiability(ctx)
+	if err != nil {
+		return nil, canonicalStateQueryError("outstanding entitlement liability", err)
+	}
 	return &types.QueryModuleBalancesResponse{
-		Denom:          denom,
-		RewardsBalance: q.bankKeeper.GetBalance(ctx, rewardsAddr, denom).Amount.String(),
-		FeePoolBalance: q.bankKeeper.GetBalance(ctx, feePoolAddr, denom).Amount.String(),
+		Denom:                           denom,
+		RewardsBalance:                  q.bankKeeper.GetBalance(ctx, rewardsAddr, denom).Amount.String(),
+		FeePoolBalance:                  q.bankKeeper.GetBalance(ctx, feePoolAddr, denom).Amount.String(),
+		OutstandingEntitlementLiability: liability.String(),
+		CarryForwardRemainder:           state.CarryForwardRemainder,
 	}, nil
 }
 
@@ -495,4 +508,119 @@ func (q queryServer) RewardsPauseState(
 		return nil, epochQueryError(err)
 	}
 	return &types.QueryRewardsPauseStateResponse{PauseState: &state, ReleaseEnabled: enabled}, nil
+}
+
+// SlotEntitlement returns one canonical obligation.
+//
+// Absence is a genuine NotFound: a Slot that did not participate, or whose share
+// floored to zero, is owed nothing and has no record. Anything else — a row that
+// disagrees with its key, an unparseable amount, a released amount above the
+// entitlement — is state that exists and cannot be trusted, and is Internal. A
+// client must be able to tell "nothing is owed" from "the chain cannot say".
+func (q queryServer) SlotEntitlement(
+	ctx context.Context, req *types.QuerySlotEntitlementRequest,
+) (*types.QuerySlotEntitlementResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	if req.SlotId == 0 || req.Epoch == 0 {
+		return nil, status.Error(codes.InvalidArgument, "slot id and epoch must be positive")
+	}
+	entitlement, found, err := q.GetSlotEntitlement(ctx, req.SlotId, req.Epoch)
+	if err != nil {
+		return nil, canonicalStateQueryError("slot entitlement", err)
+	}
+	if !found {
+		return nil, status.Errorf(codes.NotFound,
+			"no entitlement exists for slot %d in epoch %d", req.SlotId, req.Epoch)
+	}
+	return &types.QuerySlotEntitlementResponse{Entitlement: &entitlement}, nil
+}
+
+// SlotEntitlementsByEpoch returns one epoch's obligations, ascending by slot_id.
+//
+// The ordering comes from the canonical key rather than from a sort applied here,
+// so a client paging through the epoch sees the same sequence consensus does —
+// which is what later settlement materialization will walk.
+func (q queryServer) SlotEntitlementsByEpoch(
+	ctx context.Context, req *types.QuerySlotEntitlementsByEpochRequest,
+) (*types.QuerySlotEntitlementsByEpochResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request is required")
+	}
+	if req.Epoch == 0 {
+		return nil, status.Error(codes.InvalidArgument, "epoch must be positive")
+	}
+	entitlements, pageRes, err := query.CollectionPaginate(
+		ctx, q.SlotEntitlements, req.Pagination,
+		func(key collections.Pair[uint64, uint64], entitlement types.SlotEntitlement) (*types.SlotEntitlement, error) {
+			if err := validateEntitlementRecord(key, entitlement); err != nil {
+				return nil, err
+			}
+			value := entitlement
+			return &value, nil
+		},
+		query.WithCollectionPaginationPairPrefix[uint64, uint64](req.Epoch),
+	)
+	if err != nil {
+		return nil, canonicalStateQueryError("slot entitlements", err)
+	}
+	return &types.QuerySlotEntitlementsByEpochResponse{
+		Entitlements: entitlements,
+		Pagination:   pageRes,
+	}, nil
+}
+
+// RewardConfigVersions returns the canonical reward-configuration history and the
+// single pending change, if one exists.
+//
+// The schedule is a field rather than a paginated list because at most one entry
+// is valid state (§82). Paginating it would suggest a queue the protocol does not
+// have, and would hide the case this response makes visible instead: a schedule
+// holding anything other than the one admissible entry is corruption, and is
+// reported as such rather than returned as a page of rows.
+func (q queryServer) RewardConfigVersions(
+	ctx context.Context, req *types.QueryRewardConfigVersionsRequest,
+) (*types.QueryRewardConfigVersionsResponse, error) {
+	var page *query.PageRequest
+	if req != nil {
+		page = req.Pagination
+	}
+	versions, pageRes, err := query.CollectionPaginate(
+		// q.Keeper.X, not q.X: the method below shadows the promoted collection
+		// field of the same name inside its own body.
+		ctx, q.Keeper.RewardConfigVersions, page,
+		func(key uint64, version types.RewardConfigVersion) (*types.RewardConfigVersion, error) {
+			if err := validateRewardConfigRecord(key, version); err != nil {
+				return nil, err
+			}
+			value := version
+			return &value, nil
+		},
+	)
+	if err != nil {
+		return nil, canonicalStateQueryError("reward configuration history", err)
+	}
+
+	response := &types.QueryRewardConfigVersionsResponse{Versions: versions, Pagination: pageRes}
+	state, err := q.GetState(ctx)
+	if err != nil {
+		return nil, canonicalStateQueryError("rewards state", err)
+	}
+	effectiveEpoch, err := checked.AddUint64(state.CurrentEpoch, 1)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal,
+			"epoch %d has no representable successor to schedule against", state.CurrentEpoch)
+	}
+	if err := q.assertSingleScheduledRewardConfig(ctx, effectiveEpoch); err != nil {
+		return nil, canonicalStateQueryError("scheduled reward configuration", err)
+	}
+	scheduled, found, err := q.ScheduledRewardConfigFor(ctx, effectiveEpoch)
+	if err != nil {
+		return nil, canonicalStateQueryError("scheduled reward configuration", err)
+	}
+	if found {
+		response.Scheduled = &scheduled
+	}
+	return response, nil
 }

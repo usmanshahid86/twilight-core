@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -51,8 +51,13 @@ localnet-init:
 localnet-smoke:
 	./scripts/localnet/smoke.sh
 
-localnet-rewards-smoke:
+localnet-rewards-epoch-smoke:
 	./scripts/localnet/rewards-smoke.sh
+
+# Retained under its historical name so existing invocations keep working. It is
+# NOT a money-movement gate: V2 release is keeper-only until Settlement, so no
+# public payout exists for a localnet to submit.
+localnet-rewards-smoke: localnet-rewards-epoch-smoke
 
 # Soak harness: runs the four-node rewards localnet for SOAK_DURATION seconds with
 # continuous determinism/accounting assertions + periodic claim/pause/param/restart

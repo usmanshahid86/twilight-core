@@ -45,6 +45,15 @@ service Query {
   rpc EpochBoundaries(QueryEpochBoundariesRequest) returns (QueryEpochBoundariesResponse) {
     option (google.api.http).get = "/twilight/rewards/v1/epochs/{epoch_number}/boundaries";
   }
+  rpc SlotEntitlement(QuerySlotEntitlementRequest) returns (QuerySlotEntitlementResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/slots/{slot_id}/entitlements/{epoch}";
+  }
+  rpc SlotEntitlementsByEpoch(QuerySlotEntitlementsByEpochRequest) returns (QuerySlotEntitlementsByEpochResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/epochs/{epoch}/entitlements";
+  }
+  rpc RewardConfigVersions(QueryRewardConfigVersionsRequest) returns (QueryRewardConfigVersionsResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/reward-config-versions";
+  }
   rpc RewardsPauseState(QueryRewardsPauseStateRequest) returns (QueryRewardsPauseStateResponse) {
     option (google.api.http).get = "/twilight/rewards/v1/pause-state";
   }
@@ -119,6 +128,42 @@ message QueryModuleBalancesResponse {
   string denom = 1;
   string rewards_balance = 2;
   string fee_pool_balance = 3;
+  // The two quantities the escrow balance must cover, so solvency is observable
+  // without reading the database: rewards_balance == outstanding liability +
+  // carry immediately after a finalization commits.
+  string outstanding_entitlement_liability = 4;
+  string carry_forward_remainder = 5;
+}
+
+message QuerySlotEntitlementRequest {
+  uint64 slot_id = 1;
+  uint64 epoch = 2;
+}
+message QuerySlotEntitlementResponse {
+  SlotEntitlement entitlement = 1;
+}
+
+message QuerySlotEntitlementsByEpochRequest {
+  uint64 epoch = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message QuerySlotEntitlementsByEpochResponse {
+  // Ascending by slot_id, which is a property of the canonical key rather than a
+  // sort applied to the response.
+  repeated SlotEntitlement entitlements = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryRewardConfigVersionsRequest {
+  // Paginates the immutable history.
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+message QueryRewardConfigVersionsResponse {
+  repeated RewardConfigVersion versions = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+  // The single pending change, when one exists. At most one is valid, keyed
+  // exactly at current_epoch + 1, so it is a field rather than a paginated list.
+  ScheduledRewardConfig scheduled = 3;
 }
 
 message QueryEpochConfigVersionsRequest {

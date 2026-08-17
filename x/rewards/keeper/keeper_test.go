@@ -18,6 +18,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil/integration"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	"github.com/twilight-project/twilight-core/x/rewards/keeper"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
@@ -271,4 +272,9 @@ func validClaim(slotID, epoch uint64) types.EligibleSlotReward {
 func TestKeeperSchemaConstructs(t *testing.T) {
 	k, _, _ := setupKeeper(t, &coreSlotKeeperMock{})
 	require.NotNil(t, k.Schema)
+}
+
+// coins builds a native-denom amount for funding the bank double.
+func coins(amount int64) sdk.Coins {
+	return sdk.NewCoins(sdk.NewInt64Coin(appparams.NativeBaseDenom, amount))
 }
