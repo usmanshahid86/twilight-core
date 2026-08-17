@@ -226,7 +226,9 @@ func seedEpochTimeline(
 // history no chain can have.
 func seedRewardConfigTimeline(t *testing.T, k keeper.Keeper, ctx sdk.Context, params types.Params) {
 	t.Helper()
-	require.NoError(t, k.RewardConfigVersions.Set(ctx, 1, types.DefaultRewardConfigVersion(params)))
+	anchor := types.DefaultRewardConfigVersion(params)
+	require.NoError(t, k.RewardConfigVersions.Set(ctx, anchor.EffectiveEpoch, anchor))
+	require.NoError(t, k.RewardConfigVersionIndex.Set(ctx, anchor.Version, anchor.EffectiveEpoch))
 }
 
 func (m *bankKeeperMock) failMint() {

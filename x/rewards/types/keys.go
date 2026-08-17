@@ -62,4 +62,20 @@ var (
 	// entitlement value. Genesis writes it explicitly; afterwards an absent or
 	// unreadable value is corruption and must never be defaulted to zero.
 	OutstandingEntitlementLiabilityKey = collections.NewPrefix(0x0F)
+
+	// RewardConfigVersionIndexPrefix maps a reward-configuration VERSION NUMBER to
+	// the effective epoch its record is stored under.
+	//
+	// Purely derived state, and deliberately so. RewardConfigVersions remains the
+	// sole economic authority; this holds no economics at all, only the key needed
+	// to reach one. It exists because the history is keyed by effective epoch, so
+	// answering "which record is version N" without it means walking the history —
+	// a cost that grows with every configuration change the chain has ever
+	// accepted.
+	//
+	// Being derived is what makes it safe to add: it is rebuilt from the canonical
+	// history at genesis, written with it at promotion, absent from the genesis
+	// document, and cross-checked against the row it points at on every read. A
+	// divergence between the two is corruption, never an answer.
+	RewardConfigVersionIndexPrefix = collections.NewPrefix(0x10)
 )

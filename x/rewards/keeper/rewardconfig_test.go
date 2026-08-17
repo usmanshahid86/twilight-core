@@ -37,14 +37,22 @@ func setupRewardConfig(t *testing.T) (keeper.Keeper, sdk.Context, *bankKeeperMoc
 	return setupAccountingKeeper(t, &coreSlotKeeperMock{}, 1, rewardConfigParams())
 }
 
-// seedRewardVersion writes one history row directly, bypassing admission.
+// seedRewardVersion writes one history row and its derived index entry directly,
+// bypassing admission.
 //
 // Fixtures use this to build multi-version histories and to plant records that no
 // admission path would have produced, which is exactly what the read-side checks
 // are supposed to catch.
+//
+// The index is written too, and unguarded. A real chain keeps the two in step, so
+// a fixture that wrote only the history would be testing against a divergence it
+// did not mean to create — every version lookup would report absence for a reason
+// unrelated to the case under test. Fixtures that want a DIVERGENT index write it
+// themselves; see the version-lookup query tests.
 func seedRewardVersion(t *testing.T, k keeper.Keeper, ctx sdk.Context, version types.RewardConfigVersion) {
 	t.Helper()
 	require.NoError(t, k.RewardConfigVersions.Set(ctx, version.EffectiveEpoch, version))
+	require.NoError(t, k.RewardConfigVersionIndex.Set(ctx, version.Version, version.EffectiveEpoch))
 }
 
 func rewardVersionAt(version, effectiveEpoch uint64, subsidy string) types.RewardConfigVersion {

@@ -326,14 +326,24 @@ func (k Keeper) initEntitlementGenesis(ctx context.Context, genState types.Genes
 }
 
 // initRewardConfigGenesis imports the canonical reward-configuration history and
-// its schedule.
+// its schedule, and rebuilds the derived version index from what it imported.
 //
-// Both collections route their duplicate/ordering treatment through
+// Both imported collections route their duplicate/ordering treatment through
 // importGenesisCollection, the single named seam described there.
+//
+// The index deliberately does NOT route through that seam and is deliberately
+// absent from the genesis document. It is derived state: rebuilding it here from
+// the rows actually imported is what makes it impossible for a genesis to ship an
+// index that disagrees with its own history — there is no second value to
+// disagree with. A document that could state the index separately would be a
+// document that could state it wrongly.
 func (k Keeper) initRewardConfigGenesis(ctx context.Context, genState types.GenesisState) error {
 	for _, version := range genState.RewardConfigVersions {
 		if err := importGenesisCollection(ctx, k.RewardConfigVersions, version.EffectiveEpoch, *version); err != nil {
 			return err
+		}
+		if err := k.setRewardConfigVersionIndex(ctx, *version); err != nil {
+			return types.ErrInvalidGenesis.Wrap(err.Error())
 		}
 	}
 	for _, scheduled := range genState.ScheduledRewardConfigs {

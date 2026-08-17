@@ -38,17 +38,31 @@ import (
 // prefix, so it cannot be satisfied by a comment or by a fixture that happens to
 // hold one version.
 
+// storeAccess counts the work done under one store prefix.
+//
+// Two numbers, because two different claims are made about this module's reads.
+// Reads counts point lookups and iterator opens: it answers "how many times did
+// this run consult the collection". Rows counts positions an iterator actually
+// visited: it answers "how much of the collection did it walk". A page bound is a
+// claim about the second, and no amount of the first can substitute for it.
+type storeAccess struct {
+	reads int
+	rows  int
+}
+
 // countingKVStore counts operations whose key or range falls under one prefix.
 type countingKVStore struct {
 	inner  corestore.KVStore
 	prefix []byte
-	reads  *int
+	access *storeAccess
 }
 
-func (s countingKVStore) count(key []byte) {
+func (s countingKVStore) count(key []byte) bool {
 	if bytes.HasPrefix(key, s.prefix) {
-		*s.reads++
+		s.access.reads++
+		return true
 	}
+	return false
 }
 
 func (s countingKVStore) Get(key []byte) ([]byte, error) { s.count(key); return s.inner.Get(key) }
@@ -57,23 +71,47 @@ func (s countingKVStore) Set(key, value []byte) error    { return s.inner.Set(ke
 func (s countingKVStore) Delete(key []byte) error        { return s.inner.Delete(key) }
 
 func (s countingKVStore) Iterator(start, end []byte) (corestore.Iterator, error) {
-	s.count(start)
-	return s.inner.Iterator(start, end)
+	tracked := s.count(start)
+	iter, err := s.inner.Iterator(start, end)
+	if err != nil || !tracked {
+		return iter, err
+	}
+	return countingIterator{Iterator: iter, access: s.access}, nil
 }
 
 func (s countingKVStore) ReverseIterator(start, end []byte) (corestore.Iterator, error) {
-	s.count(start)
-	return s.inner.ReverseIterator(start, end)
+	tracked := s.count(start)
+	iter, err := s.inner.ReverseIterator(start, end)
+	if err != nil || !tracked {
+		return iter, err
+	}
+	return countingIterator{Iterator: iter, access: s.access}, nil
+}
+
+// countingIterator counts every advance the walk makes.
+//
+// Counted on Next rather than on reading a value, because the SDK's offset
+// handling and its count_total loop both advance an iterator WITHOUT reading
+// anything. Measuring value reads would report those two as free, and they are
+// precisely the costs this measurement exists to expose.
+type countingIterator struct {
+	corestore.Iterator
+	access *storeAccess
+}
+
+func (i countingIterator) Next() {
+	i.access.rows++
+	i.Iterator.Next()
 }
 
 type countingKVStoreService struct {
 	inner  corestore.KVStoreService
 	prefix []byte
-	reads  *int
+	access *storeAccess
 }
 
 func (s countingKVStoreService) OpenKVStore(ctx context.Context) corestore.KVStore {
-	return countingKVStore{inner: s.inner.OpenKVStore(ctx), prefix: s.prefix, reads: s.reads}
+	return countingKVStore{inner: s.inner.OpenKVStore(ctx), prefix: s.prefix, access: s.access}
 }
 
 // setupCountingFinalization mirrors the ordinary finalization fixture but routes
@@ -84,7 +122,7 @@ func (s countingKVStoreService) OpenKVStore(ctx context.Context) corestore.KVSto
 // single lookup cost nearly the same and the measurement would prove nothing.
 func setupCountingFinalization(
 	t *testing.T, openEpoch uint64, participants int,
-) (keeper.Keeper, sdk.Context, *int) {
+) (keeper.Keeper, sdk.Context, *storeAccess) {
 	t.Helper()
 	registry := codectypes.NewInterfaceRegistry()
 	types.RegisterInterfaces(registry)
@@ -93,11 +131,11 @@ func setupCountingFinalization(
 	cms := integration.CreateMultiStore(keys, log.NewNopLogger())
 	ctx := sdk.NewContext(cms, cmtproto.Header{Height: 1}, false, log.NewNopLogger())
 
-	reads := 0
+	access := &storeAccess{}
 	service := countingKVStoreService{
 		inner:  runtime.NewKVStoreService(keys[types.StoreKey]),
 		prefix: types.RewardConfigVersionsPrefix.Bytes(),
-		reads:  &reads,
+		access: access,
 	}
 
 	params := rewardConfigParams()
@@ -140,7 +178,7 @@ func setupCountingFinalization(
 	for i := 1; i <= participants; i++ {
 		require.NoError(t, k.SetActiveBlocks(ctx, openEpoch, uint64(i), 1))
 	}
-	return k, ctx, &reads
+	return k, ctx, access
 }
 
 // TestEpochCloseResolvesTheRewardConfigExactlyOnce is B2.
@@ -156,17 +194,17 @@ func TestEpochCloseResolvesTheRewardConfigExactlyOnce(t *testing.T) {
 	baseline := 0
 	for _, participants := range []int{2, 8, 20} {
 		t.Run(fmt.Sprintf("%d participants", participants), func(t *testing.T) {
-			k, ctx, reads := setupCountingFinalization(t, openEpoch, participants)
+			k, ctx, access := setupCountingFinalization(t, openEpoch, participants)
 
 			// One resolution, measured. This is the ordinary N-2 branch: target 9 binds
 			// epoch 7, which is a seek past several versions.
 			governing, err := k.RewardConfigForTarget(ctx, openEpoch)
 			require.NoError(t, err)
 			require.Equal(t, uint64(6), governing.Version, "the fixture must exercise the seek branch")
-			single := *reads
+			single := access.reads
 			require.Positive(t, single, "the counter must be observing the history at all")
 
-			*reads = 0
+			access.reads = 0
 			require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
 
 			entitlements, err := k.IterateEntitlementsForEpoch(ctx, openEpoch)
@@ -174,16 +212,16 @@ func TestEpochCloseResolvesTheRewardConfigExactlyOnce(t *testing.T) {
 			require.Len(t, entitlements, participants,
 				"every participant must have produced an entitlement, or the loop under test did not run")
 
-			require.Equal(t, single, *reads,
+			require.Equal(t, single, access.reads,
 				"closing an epoch that creates %d entitlements must read the reward configuration "+
 					"history exactly as much as resolving it once", participants)
 
 			// And the count does not track the number of participants, which is the
 			// same claim stated so that a single-run regression cannot pass by luck.
 			if baseline == 0 {
-				baseline = *reads
+				baseline = access.reads
 			}
-			require.Equal(t, baseline, *reads,
+			require.Equal(t, baseline, access.reads,
 				"reward-configuration reads must not grow with the participant count")
 		})
 	}

@@ -278,15 +278,55 @@ func (k Keeper) RewardConfigForTarget(ctx context.Context, target uint64) (types
 	return k.rewardConfigVersionFor(ctx, bindingEpoch)
 }
 
+// setRewardConfigVersionIndex records the derived version -> effective epoch
+// mapping for one history row.
+//
+// Write-once. A version number that already has an entry makes "the record for
+// version N" ambiguous, which is not something the lookup can answer, so it is
+// refused rather than overwritten. That is a rule about the DERIVED index's own
+// well-formedness and takes no position on how the history collection treats
+// entries duplicated under its own key, which is a separate open question.
+func (k Keeper) setRewardConfigVersionIndex(ctx context.Context, version types.RewardConfigVersion) error {
+	existing, err := k.RewardConfigVersionIndex.Get(ctx, version.Version)
+	switch {
+	case err == nil:
+		return types.ErrInvalidState.Wrapf(
+			"reward configuration version %d is already indexed at effective epoch %d and cannot also be at epoch %d",
+			version.Version, existing, version.EffectiveEpoch)
+	case !errors.Is(err, collections.ErrNotFound):
+		return types.ErrInvalidState.Wrapf(
+			"reward configuration version index for version %d could not be read: %v", version.Version, err)
+	}
+	return k.RewardConfigVersionIndex.Set(ctx, version.Version, version.EffectiveEpoch)
+}
+
 // RewardConfigVersionByNumber resolves a history entry by its version number,
 // reporting whether one exists.
 //
+// # Why this goes through an index rather than a walk
+//
 // The history is keyed by effective epoch, so a bare version number has no direct
-// key. It is nevertheless bounded work, because version and effective epoch
-// increase together: the walk stops at the first row whose version reaches or
-// passes the one asked for, so it visits at most as many rows as the number the
-// caller supplied. Absence is ordinary — a version that was never accepted has no
-// record — and is reported rather than raised.
+// key. The obvious substitute — walk ascending and stop once the rows pass the
+// number asked for — is wrong twice over, and the second way is the serious one:
+//
+//   - a version that is absent from a long history is only discovered after
+//     visiting every row below it, so the cost of a lookup tracks chain age.
+//   - the stopping rule ASSUMES the ordering it is supposed to be reading. Given a
+//     history holding v1, then v9, then v3, a walk asking for version 3 sees v9,
+//     concludes it has gone past, and reports NotFound — turning corruption into
+//     an ordinary "no such version" answer, which is exactly the confusion every
+//     other read path in this module is built to avoid.
+//
+// Two point reads instead: the index gives an effective epoch, and the canonical
+// row at that epoch is read and validated as usual. The cost does not depend on
+// how many configuration changes the chain has accepted.
+//
+// # The index is checked, not trusted
+//
+// Both directions are verified against the row itself — the row must declare the
+// version that was asked for AND the effective epoch the index pointed at. An
+// index that disagrees with the history is corruption and fails closed; it can
+// never be the reason an answer differs, only the reason one is found quickly.
 //
 // This is a QUERY seam. Nothing on a block path may call it: the epoch's own
 // binding is what money is computed from, and resolving that never needs a
@@ -301,24 +341,41 @@ func (k Keeper) RewardConfigVersionByNumber(
 	if err := k.requireRewardConfigAnchor(ctx); err != nil {
 		return types.RewardConfigVersion{}, false, err
 	}
-	var match types.RewardConfigVersion
-	found := false
-	err := k.RewardConfigVersions.Walk(ctx, nil, func(key uint64, version types.RewardConfigVersion) (bool, error) {
-		if err := k.validateResolvedRewardConfig(key, version); err != nil {
-			return true, err
-		}
-		if version.Version == number {
-			match, found = version, true
-			return true, nil
-		}
-		// Versions ascend with effective epoch, so having passed the requested
-		// number means it is not in the history at all.
-		return version.Version > number, nil
-	})
+
+	effectiveEpoch, err := k.RewardConfigVersionIndex.Get(ctx, number)
+	if errors.Is(err, collections.ErrNotFound) {
+		// Ordinary absence: no such version was ever accepted.
+		return types.RewardConfigVersion{}, false, nil
+	}
 	if err != nil {
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
+			"reward configuration version index for version %d could not be read: %v", number, err)
+	}
+
+	version, err := k.RewardConfigVersions.Get(ctx, effectiveEpoch)
+	if errors.Is(err, collections.ErrNotFound) {
+		// The index names a row the history does not have. Not absence — the two
+		// disagree, and one of them is wrong.
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
+			"reward configuration version %d is indexed at effective epoch %d, where the canonical history has no record",
+			number, effectiveEpoch)
+	}
+	if err != nil {
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
+			"reward configuration version at effective epoch %d could not be read: %v", effectiveEpoch, err)
+	}
+	if err := k.validateResolvedRewardConfig(effectiveEpoch, version); err != nil {
 		return types.RewardConfigVersion{}, false, err
 	}
-	return match, found, nil
+	if version.Version != number {
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
+			"reward configuration version %d is indexed at effective epoch %d, where the canonical history holds version %d",
+			number, effectiveEpoch, version.Version)
+	}
+	if err := k.validateAdjacentRewardConfigEdge(ctx, version); err != nil {
+		return types.RewardConfigVersion{}, false, err
+	}
+	return version, true, nil
 }
 
 // RewardConfigVersionAtEffectiveEpoch reads the history entry stored at one
@@ -422,7 +479,14 @@ func (k Keeper) appendRewardConfigVersion(ctx context.Context, version types.Rew
 			"reward configuration version %d does not advance past the latest version %d",
 			version.Version, latest.Version)
 	}
-	return k.RewardConfigVersions.Set(ctx, version.EffectiveEpoch, version)
+	if err := k.RewardConfigVersions.Set(ctx, version.EffectiveEpoch, version); err != nil {
+		return err
+	}
+	// The derived index moves with the row it describes. Both writes happen inside
+	// the EndBlock cache promotion runs in, so a failure here discards the history
+	// row as well — the two cannot commit apart and leave the index describing a
+	// history that does not exist, or a history the index cannot reach.
+	return k.setRewardConfigVersionIndex(ctx, version)
 }
 
 // ValidateScheduledRewardConfigRecord checks one schedule row against the key it

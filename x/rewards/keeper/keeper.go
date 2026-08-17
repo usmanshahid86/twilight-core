@@ -86,6 +86,15 @@ type Keeper struct {
 	// nothing accepted after that boundary can change what the target pays.
 	RewardConfigVersions collections.Map[uint64, types.RewardConfigVersion]
 
+	// RewardConfigVersionIndex maps a version number to the effective epoch its
+	// history record is stored under.
+	//
+	// DERIVED, not authoritative. It carries no economics — only the key needed to
+	// reach the record that does. Every lookup through it re-reads the canonical row
+	// and requires the two to agree in both directions, so the index can make a
+	// query fast but can never make it answer differently.
+	RewardConfigVersionIndex collections.Map[uint64, uint64]
+
 	// ScheduledRewardConfigs holds the single pending reward-configuration change,
 	// keyed by the epoch it becomes effective at.
 	//
@@ -152,6 +161,8 @@ func NewKeeper(
 			collections.Uint64Key, codec.CollValue[types.ScheduledEpochConfig](cdc)),
 		RewardConfigVersions: collections.NewMap(sb, types.RewardConfigVersionsPrefix, "reward_config_versions",
 			collections.Uint64Key, codec.CollValue[types.RewardConfigVersion](cdc)),
+		RewardConfigVersionIndex: collections.NewMap(sb, types.RewardConfigVersionIndexPrefix,
+			"reward_config_version_index", collections.Uint64Key, collections.Uint64Value),
 		ScheduledRewardConfigs: collections.NewMap(sb, types.ScheduledRewardConfigsPrefix, "scheduled_reward_configs",
 			collections.Uint64Key, codec.CollValue[types.ScheduledRewardConfig](cdc)),
 		SlotEntitlements: collections.NewMap(sb, types.SlotEntitlementsPrefix, "slot_entitlements",
