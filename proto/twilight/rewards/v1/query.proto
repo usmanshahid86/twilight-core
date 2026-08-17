@@ -54,6 +54,9 @@ service Query {
   rpc RewardConfigVersions(QueryRewardConfigVersionsRequest) returns (QueryRewardConfigVersionsResponse) {
     option (google.api.http).get = "/twilight/rewards/v1/reward-config-versions";
   }
+  rpc RewardConfigVersion(QueryRewardConfigVersionRequest) returns (QueryRewardConfigVersionResponse) {
+    option (google.api.http).get = "/twilight/rewards/v1/reward-config-version";
+  }
   rpc RewardsPauseState(QueryRewardsPauseStateRequest) returns (QueryRewardsPauseStateResponse) {
     option (google.api.http).get = "/twilight/rewards/v1/pause-state";
   }
@@ -164,6 +167,23 @@ message QueryRewardConfigVersionsResponse {
   // The single pending change, when one exists. At most one is valid, keyed
   // exactly at current_epoch + 1, so it is a field rather than a paginated list.
   ScheduledRewardConfig scheduled = 3;
+}
+
+// QueryRewardConfigVersionRequest selects one historical reward configuration by
+// its identity.
+//
+// Exactly one selector must be set. Both are IDENTITY fields of a stored record,
+// not queries about which configuration applies somewhere: effective_epoch is the
+// canonical key, and version is the record's own number. Neither resolves a target
+// binding — that is the N-2 rule and it belongs to the module, not to a lookup.
+message QueryRewardConfigVersionRequest {
+  // The record's version number.
+  uint64 version = 1;
+  // The epoch the record became effective at, which is its canonical key.
+  uint64 effective_epoch = 2;
+}
+message QueryRewardConfigVersionResponse {
+  RewardConfigVersion version = 1;
 }
 
 message QueryEpochConfigVersionsRequest {

@@ -2641,6 +2641,46 @@
         ]
       }
     },
+    "/twilight/rewards/v1/reward-config-version": {
+      "get": {
+        "operationId": "Query_RewardConfigVersion",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryRewardConfigVersionResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "version",
+            "description": "The record's version number.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "effective_epoch",
+            "description": "The epoch the record became effective at, which is its canonical key.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
     "/twilight/rewards/v1/reward-config-versions": {
       "get": {
         "operationId": "Query_RewardConfigVersions",
@@ -3313,6 +3353,30 @@
           "description": "reward_enabled_blocks is the count of reward-enabled blocks the epoch\nactually accrued, and is the block-count input the emission recurrence used.\n\nThe open counter is reset when the next epoch opens, so persisting it here\nis what keeps the epoch's accounting observable afterwards. This field is an\nimplementation representation chosen for auditability; the architecture\nrequires the counter to exist and to drive emission, not that the finalized\nrecord carry it."
         }
       }
+    },
+    "rewardsV1RewardConfigVersion": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "effective_epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "initial_block_subsidy": {
+          "type": "string"
+        },
+        "emission_treasury_share_bps": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "treasury_address": {
+          "type": "string"
+        }
+      },
+      "description": "RewardConfigVersion is one immutable entry in the canonical reward-configuration\nhistory, and the sole authority for the economics an epoch's emission is\ncomputed under.\n\nVersion 1 is created at fresh genesis effective at epoch 1 and is never\nrewritten. Every later version is created when a scheduled configuration is\npromoted, which happens in the closing epoch's EndBlock and only after that\nepoch's monetary finalization has succeeded.\n\nA target epoch N binds the version effective at N-2, so an update accepted\nduring epoch E first affects target E+3. Fresh-genesis targets 1 and 2 have no\nN-2 boundary inside chain history and resolve the genesis version directly.\n\nDeliberately absent: effective_start_height. Unlike EpochConfigVersion this\nrecord fixes no geometry, so there is no start-height recurrence and no\ncontinuity equation between adjacent versions — only strictly increasing\nversion and effective epoch."
     },
     "rewardsV1RewardsPauseState": {
       "type": "object",
@@ -4584,6 +4648,14 @@
         }
       }
     },
+    "v1QueryRewardConfigVersionResponse": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/definitions/rewardsV1RewardConfigVersion"
+        }
+      }
+    },
     "v1QueryRewardConfigVersionsResponse": {
       "type": "object",
       "properties": {
@@ -4591,7 +4663,7 @@
           "type": "array",
           "items": {
             "type": "object",
-            "$ref": "#/definitions/v1RewardConfigVersion"
+            "$ref": "#/definitions/rewardsV1RewardConfigVersion"
           }
         },
         "pagination": {
@@ -4690,30 +4762,6 @@
       ],
       "default": "REMAINDER_POLICY_UNSPECIFIED",
       "description": "Enum numeric values are permanent after release. Future upgrades may add\nvalues but must not reuse, reorder, or change existing numeric values."
-    },
-    "v1RewardConfigVersion": {
-      "type": "object",
-      "properties": {
-        "version": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "effective_epoch": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "initial_block_subsidy": {
-          "type": "string"
-        },
-        "emission_treasury_share_bps": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "treasury_address": {
-          "type": "string"
-        }
-      },
-      "description": "RewardConfigVersion is one immutable entry in the canonical reward-configuration\nhistory, and the sole authority for the economics an epoch's emission is\ncomputed under.\n\nVersion 1 is created at fresh genesis effective at epoch 1 and is never\nrewritten. Every later version is created when a scheduled configuration is\npromoted, which happens in the closing epoch's EndBlock and only after that\nepoch's monetary finalization has succeeded.\n\nA target epoch N binds the version effective at N-2, so an update accepted\nduring epoch E first affects target E+3. Fresh-genesis targets 1 and 2 have no\nN-2 boundary inside chain history and resolve the genesis version directly.\n\nDeliberately absent: effective_start_height. Unlike EpochConfigVersion this\nrecord fixes no geometry, so there is no start-height recurrence and no\ncontinuity equation between adjacent versions — only strictly increasing\nversion and effective epoch."
     },
     "v1RewardsState": {
       "type": "object",

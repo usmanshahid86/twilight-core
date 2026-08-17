@@ -271,6 +271,83 @@ func (k Keeper) RewardConfigForTarget(ctx context.Context, target uint64) (types
 	return k.rewardConfigVersionFor(ctx, bindingEpoch)
 }
 
+// RewardConfigVersionByNumber resolves a history entry by its version number,
+// reporting whether one exists.
+//
+// The history is keyed by effective epoch, so a bare version number has no direct
+// key. It is nevertheless bounded work, because version and effective epoch
+// increase together: the walk stops at the first row whose version reaches or
+// passes the one asked for, so it visits at most as many rows as the number the
+// caller supplied. Absence is ordinary — a version that was never accepted has no
+// record — and is reported rather than raised.
+//
+// This is a QUERY seam. Nothing on a block path may call it: the epoch's own
+// binding is what money is computed from, and resolving that never needs a
+// version-number search.
+func (k Keeper) RewardConfigVersionByNumber(
+	ctx context.Context, number uint64,
+) (types.RewardConfigVersion, bool, error) {
+	if number == 0 {
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrap(
+			"reward configuration version numbers start at 1")
+	}
+	if err := k.requireRewardConfigAnchor(ctx); err != nil {
+		return types.RewardConfigVersion{}, false, err
+	}
+	var match types.RewardConfigVersion
+	found := false
+	err := k.RewardConfigVersions.Walk(ctx, nil, func(key uint64, version types.RewardConfigVersion) (bool, error) {
+		if err := k.validateResolvedRewardConfig(key, version); err != nil {
+			return true, err
+		}
+		if version.Version == number {
+			match, found = version, true
+			return true, nil
+		}
+		// Versions ascend with effective epoch, so having passed the requested
+		// number means it is not in the history at all.
+		return version.Version > number, nil
+	})
+	if err != nil {
+		return types.RewardConfigVersion{}, false, err
+	}
+	return match, found, nil
+}
+
+// RewardConfigVersionAtEffectiveEpoch reads the history entry stored at one
+// effective epoch, reporting whether one exists.
+//
+// An EXACT key read, not the predecessor seek rewardConfigVersionFor performs.
+// The two answer different questions and the difference matters to a caller: this
+// says "a configuration became effective at epoch N", while the seek says "epoch N
+// is governed by whatever became effective at or before it". A query that
+// conflated them would report a version as effective at every epoch after it.
+func (k Keeper) RewardConfigVersionAtEffectiveEpoch(
+	ctx context.Context, effectiveEpoch uint64,
+) (types.RewardConfigVersion, bool, error) {
+	if effectiveEpoch == 0 {
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrap("epoch numbers start at 1")
+	}
+	if err := k.requireRewardConfigAnchor(ctx); err != nil {
+		return types.RewardConfigVersion{}, false, err
+	}
+	version, err := k.RewardConfigVersions.Get(ctx, effectiveEpoch)
+	if errors.Is(err, collections.ErrNotFound) {
+		return types.RewardConfigVersion{}, false, nil
+	}
+	if err != nil {
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
+			"reward configuration version at effective epoch %d could not be read: %v", effectiveEpoch, err)
+	}
+	if err := k.validateResolvedRewardConfig(effectiveEpoch, version); err != nil {
+		return types.RewardConfigVersion{}, false, err
+	}
+	if err := k.validateAdjacentRewardConfigEdge(ctx, version); err != nil {
+		return types.RewardConfigVersion{}, false, err
+	}
+	return version, true, nil
+}
+
 // latestRewardConfigVersion returns the newest history entry, which is also the
 // highest version number.
 //
