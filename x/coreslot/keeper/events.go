@@ -148,8 +148,8 @@ func emitValidatorUpdateEmitted(ctx context.Context, slotID uint64, operator, co
 	)
 }
 
-func emitRotationCancelled(ctx context.Context, slotID uint64, operator, oldConsAddr, newConsAddr, reason string, height int64) {
-	emit(ctx, types.EventTypeRotationCancelled,
+func emitRotationCanceled(ctx context.Context, slotID uint64, operator, oldConsAddr, newConsAddr, reason string, height int64) {
+	emit(ctx, types.EventTypeRotationCanceled,
 		sdk.NewAttribute(types.AttributeKeySlotID, u64(slotID)),
 		sdk.NewAttribute(types.AttributeKeyOperatorAddress, operator),
 		sdk.NewAttribute(types.AttributeKeyOldConsensusAddress, oldConsAddr),
