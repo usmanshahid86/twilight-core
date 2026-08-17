@@ -49,6 +49,24 @@ func (k Keeper) GetSlotRewardSnapshot(ctx context.Context, slotID uint64) (SlotR
 	if err != nil {
 		return SlotRewardSnapshot{}, err
 	}
+	// The record has to be the record that was asked for.
+	//
+	// This is not a redundant restatement of the lookup key. x/rewards asks for a
+	// Slot by number and reads a payout address out of the answer; if the answer
+	// declares a different Slot, the address that comes back belongs to somebody
+	// else, and it is then written into an immutable entitlement for the Slot that
+	// earned the money. That is a silent redirection of value, and no later check
+	// can detect it — the entitlement is internally consistent, the amount is right,
+	// and the destination is a perfectly valid address.
+	//
+	// Checked here rather than trusted to x/coreslot because this is the boundary
+	// where a stored value becomes a payment destination, and the point of a
+	// boundary is that it does not depend on the other side being correct.
+	if slot.SlotId != slotID {
+		return SlotRewardSnapshot{}, types.ErrInvalidState.Wrapf(
+			"reward snapshot for slot %d received a core slot record declaring slot %d",
+			slotID, slot.SlotId)
+	}
 	return k.slotRewardSnapshot(ctx, slot)
 }
 

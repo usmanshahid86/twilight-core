@@ -134,6 +134,32 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 		return err
 	}
 
+	// The payout snapshot, taken BEFORE the first monetary operation.
+	//
+	// This is still the §32 boundary — the end of the closing block, after that
+	// block's transactions have executed, so a payout address changed earlier in
+	// this same block is eligible. Nothing between here and where the snapshots are
+	// consumed touches CoreSlot, so moving the read earlier inside the transition
+	// changes what is observed not at all.
+	//
+	// What it changes is what happens when a snapshot cannot be taken. A missing
+	// Slot, a record that declares a different Slot than the one requested, or a
+	// payout address that is no longer an admissible destination used to be
+	// discovered after the mint and the treasury send had already run. They rolled
+	// back, because the whole transition is cached — but the ordering said the chain
+	// was willing to create value before establishing where it could go.
+	snapshots := make(map[uint64]SlotRewardSnapshot, len(rows))
+	for _, row := range rows {
+		if row.BlocksActive == 0 {
+			continue
+		}
+		snapshot, err := k.GetSlotRewardSnapshot(ctx, row.SlotId)
+		if err != nil {
+			return err
+		}
+		snapshots[row.SlotId] = snapshot
+	}
+
 	cumulative, err := types.ParseAmountString("cumulative emitted", state.CumulativeEmitted)
 	if err != nil {
 		return err
@@ -197,20 +223,6 @@ func (k Keeper) finalizeEpoch(ctx context.Context) error {
 		return err
 	}
 
-	// The payout snapshot is taken here: end of the closing block, after that
-	// block's transactions have executed (§32). A payout address changed earlier in
-	// this same block is therefore eligible to be snapshotted for this epoch.
-	snapshots := make(map[uint64]SlotRewardSnapshot, len(rows))
-	for _, row := range rows {
-		if row.BlocksActive == 0 {
-			continue
-		}
-		snapshot, err := k.GetSlotRewardSnapshot(ctx, row.SlotId)
-		if err != nil {
-			return err
-		}
-		snapshots[row.SlotId] = snapshot
-	}
 	height, err := checked.Uint64FromInt64(sdk.UnwrapSDKContext(ctx).BlockHeight())
 	if err != nil {
 		return types.ErrInvalidState.Wrapf("block height is not representable: %v", err)
