@@ -37,12 +37,12 @@ protoc "${INCLUDES[@]}" "$GOCOSMOS_OUT" \
   proto/twilight/rewards/v1/tx.proto \
   proto/twilight/rewards/v1/query.proto
 
-# x/mining. The query and tx services arrive with the Settlement message gates;
-# until then this module generates state and genesis types only, so it has no
-# gateway or OpenAPI entry below.
+# x/mining. The query service arrives with the observability gate; until then this
+# module has no gateway or OpenAPI entry below.
 protoc "${INCLUDES[@]}" "$GOCOSMOS_OUT" \
   proto/twilight/mining/v1/mining.proto \
-  proto/twilight/mining/v1/genesis.proto
+  proto/twilight/mining/v1/genesis.proto \
+  proto/twilight/mining/v1/tx.proto
 
 # REST gateway: generate *.pb.gw.go for the annotated query services only.
 protoc "${INCLUDES[@]}" "$GATEWAY_OUT" proto/twilight/coreslot/v1/query.proto

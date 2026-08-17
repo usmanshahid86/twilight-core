@@ -2,6 +2,7 @@ package keeper_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -9,6 +10,7 @@ import (
 
 	"cosmossdk.io/collections"
 	"cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 
 	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
@@ -76,6 +78,11 @@ type rewardsKeeperMock struct {
 
 	payCalls       int
 	remainderCalls int
+
+	// payErr makes the release boundary refuse. It models the two ways the real
+	// boundary can reject a set x/mining has already admitted: its own entitlement
+	// ceiling, and a bank send that fails partway through the set.
+	payErr error
 }
 
 func newRewardsMock() *rewardsKeeperMock {
@@ -129,15 +136,78 @@ func (m *rewardsKeeperMock) SettlementReleaseEnabled(context.Context) (bool, err
 	return m.releaseEnabled, nil
 }
 
-func (m *rewardsKeeperMock) PayEntitlement(context.Context, uint64, uint64, []rewardstypes.EntitlementPayout) error {
+// PayEntitlement accumulates the released amount on the entitlement, so a later
+// chunk sees what an earlier one released.
+//
+// It deliberately does NOT re-implement the rewards-side entitlement ceiling.
+// That ceiling belongs to x/rewards and is proven against the real implementation
+// by TestPayEntitlementRefusesOverRelease; enforcing it here as well would mask
+// the removal of x/mining's own ceiling, which is the thing these tests exist to
+// pin. Use payErr to model the boundary refusing.
+func (m *rewardsKeeperMock) PayEntitlement(
+	_ context.Context, slotID, epoch uint64, payouts []rewardstypes.EntitlementPayout,
+) error {
 	m.payCalls++
-	return nil
+	if m.payErr != nil {
+		return m.payErr
+	}
+	total := sdkmath.ZeroInt()
+	for _, payout := range payouts {
+		amount, ok := sdkmath.NewIntFromString(payout.Amount)
+		if !ok {
+			return fmt.Errorf("payout amount %q is not an integer", payout.Amount)
+		}
+		total = total.Add(amount)
+	}
+	return m.addReleased(slotID, epoch, total)
+}
+
+// addReleased raises the entitlement-side released amount, which is the
+// authoritative one: x/mining stores no released amount of its own.
+func (m *rewardsKeeperMock) addReleased(slotID, epoch uint64, amount sdkmath.Int) error {
+	list := m.entitlements[epoch]
+	for i := range list {
+		if list[i].SlotId != slotID {
+			continue
+		}
+		released, ok := sdkmath.NewIntFromString(list[i].ReleasedAmount)
+		if !ok {
+			return fmt.Errorf("released amount %q is not an integer", list[i].ReleasedAmount)
+		}
+		list[i].ReleasedAmount = released.Add(amount).String()
+		return nil
+	}
+	return fmt.Errorf("no entitlement for slot %d in epoch %d", slotID, epoch)
 }
 
 func (m *rewardsKeeperMock) PayEntitlementRemainderToOperator(context.Context, uint64, uint64) error {
 	m.remainderCalls++
 	return nil
 }
+
+// settlementSlot is an admitted CoreSlot carrying the settlement credential that
+// authorizes its chunks. The lifecycle status is ACTIVE only because a fixture
+// needs some status; no chunk path reads it.
+func settlementSlot(slotID uint64, settlementAddress string) coreslottypes.CoreSlot {
+	slot := activeSlot(slotID)
+	slot.SettlementAddress = settlementAddress
+	return slot
+}
+
+// account builds a distinct, canonically encoded account address. The leading
+// byte orders them, which is what the strictly-ascending recipient rule is
+// measured against.
+func account(marker byte) string {
+	raw := make([]byte, 20)
+	raw[0] = marker
+	return sdk.AccAddress(raw).String()
+}
+
+// fixtureModuleAccount is the one module-account name the test economic-address
+// rule knows about. A validator that knew of no module accounts could not refuse a
+// payout to one, so the fixtures declare exactly one and the chunk tests use its
+// address to prove the refusal.
+const fixtureModuleAccount = "mining_test_module_account"
 
 func setupKeeper(t *testing.T, core keeper.CoreSlotKeeper) (keeper.Keeper, sdk.Context) {
 	k, ctx, _ := setupKeeperWithRewards(t, core, newRewardsMock())
@@ -159,7 +229,7 @@ func setupKeeperWithRewards(
 	// could not refuse a payout to one.
 	validator, err := economicaddress.New(
 		addresscodec.NewBech32Codec(sdk.GetConfig().GetBech32AccountAddrPrefix()),
-		[]string{"mining_test_module_account"},
+		[]string{fixtureModuleAccount},
 		nil,
 	)
 	require.NoError(t, err)

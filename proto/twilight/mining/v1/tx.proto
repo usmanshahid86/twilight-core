@@ -1,0 +1,68 @@
+syntax = "proto3";
+package twilight.mining.v1;
+
+import "amino/amino.proto";
+import "cosmos/msg/v1/msg.proto";
+
+option go_package = "github.com/twilight-project/twilight-core/x/mining/types";
+
+// The settlement transactions are the only messages x/mining will ever own.
+//
+// There is deliberately no mode, Selection-parameter or settlement-parameter
+// update transaction in this profile: the state model for all three exists and is
+// historically versioned, but the mutation surfaces do not. There is also no
+// message that OPENS a settlement — settlements are materialized by consensus from
+// finalized entitlements, and no caller may create an obligation.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  // SubmitSettlementChunk releases one bounded batch of participant payouts
+  // against an open settlement.
+  rpc SubmitSettlementChunk(MsgSubmitSettlementChunk) returns (MsgSubmitSettlementChunkResponse);
+}
+
+// SettlementChunkPayout is one participant line: a destination and the amount it
+// receives.
+//
+// The amount is a string because monetary amounts are arbitrary precision
+// throughout. There is no uint64 amount field anywhere in this protocol, and one
+// must not be introduced as an optimization — a 64-bit narrowing of a base-denom
+// amount is a silently truncating money bug.
+message SettlementChunkPayout {
+  string recipient = 1;
+  string amount = 2;
+}
+
+// MsgSubmitSettlementChunk submits the next permitted chunk of an open settlement.
+//
+// The signer is the Slot's settlement address as recorded in x/coreslot at the
+// block the message executes in. Note what the message CANNOT express: it carries
+// no payout manifest, no Merkle root, no declared total, no declared chunk count
+// and no pre-commitment, because none of those are required or permitted; and it
+// carries no destination for the operator remainder, which is derived from the
+// entitlement's immutable payout snapshot and can never be named by a caller.
+//
+// chunk_index is supplied rather than inferred. A caller that has lost the
+// response to an earlier submission must be able to state which chunk it believes
+// it is sending, so that a replay is REJECTED rather than silently accepted as the
+// next chunk.
+message MsgSubmitSettlementChunk {
+  option (cosmos.msg.v1.signer) = "settlement_address";
+  option (amino.name) = "twilight/mining/MsgSubmitSettlementChunk";
+
+  string settlement_address = 1;
+  uint64 slot_id = 2;
+  uint64 epoch = 3;
+  uint64 chunk_index = 4;
+  repeated SettlementChunkPayout payouts = 5;
+}
+
+// MsgSubmitSettlementChunkResponse reports the settlement's chunk cursor after the
+// chunk committed.
+//
+// This is a convenience, never an authority: the same value is readable from the
+// settlement itself, and a caller that lost this response resolves its position by
+// querying rather than by assuming.
+message MsgSubmitSettlementChunkResponse {
+  uint64 next_chunk_index = 1;
+}

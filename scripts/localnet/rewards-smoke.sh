@@ -190,4 +190,7 @@ supply="$(jq -r '[.app_state.bank.supply[]? | select(.denom == "utwlt") | .amoun
 echo "rewards localnet epoch/entitlement smoke: PASS"
 echo "  epoch_length=$EPOCH_LENGTH minted=$EXPECTED_EMISSION per_slot=$EXPECTED_PER_SLOT"
 echo "  entitlements=$NODE_COUNT escrow=$EXPECTED_MODULE_AFTER_FINALIZE total_supply=$EXPECTED_SUPPLY_AFTER_FINALIZE"
-echo "  NOTE: no value was released. Release is keeper-only until Settlement."
+echo "  NOTE: no value was released in this run. This smoke closes an epoch and"
+echo "        checks entitlements; it submits no settlement chunk. The transaction"
+echo "        that releases participant value is MsgSubmitSettlementChunk, and the"
+echo "        end-to-end money-movement proof over it is the Settlement acceptance run."

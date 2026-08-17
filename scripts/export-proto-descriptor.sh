@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Export a self-contained protobuf FileDescriptorSet for the Twilight custom modules
-# (coreslot + rewards) plus all transitive Cosmos/gogo/google dependencies, so that
+# (coreslot + rewards + mining) plus all transitive Cosmos/gogo/google dependencies, so that
 # downstream clients/indexers (e.g. twilight-core-explorer) can decode raw txs and the
 # custom Msg Any-payloads OFFLINE — without importing the chain's Go types.
 #
@@ -86,6 +86,7 @@ TWILIGHT_PROTOS=(
   proto/twilight/rewards/v1/tx.proto
   proto/twilight/mining/v1/mining.proto
   proto/twilight/mining/v1/genesis.proto
+  proto/twilight/mining/v1/tx.proto
 )
 # Cosmos SDK tx/auth/base roots for raw transaction decoding (resolved via -I $SDK/proto).
 COSMOS_PROTOS=(
@@ -170,6 +171,9 @@ cat > "$MANIFEST" <<'JSON'
       "/twilight.rewards.v1.MsgUpdateRewardsParams",
       "/twilight.rewards.v1.MsgPauseRewards",
       "/twilight.rewards.v1.MsgResumeRewards"
+    ],
+    "mining": [
+      "/twilight.mining.v1.MsgSubmitSettlementChunk"
     ]
   }
 }

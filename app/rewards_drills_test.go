@@ -53,6 +53,11 @@ type slotSpec struct {
 	operator  string
 	payout    string
 	keyMarker byte // distinct per slot: CoreSlot rejects duplicate consensus keys
+	// settlement is the operational credential that authorizes the Slot's
+	// settlement transactions. It defaults to the payout address, which keeps every
+	// pre-Settlement fixture unchanged; a test about the credential being a
+	// SEPARATE, separately rotatable identity sets it explicitly.
+	settlement string
 }
 
 // initCoreSlotsAndRewards seeds N active CoreSlot slots plus the supplied rewards
@@ -84,9 +89,13 @@ func initCoreSlotsAndRewards(t *testing.T, a *app.App, base sdk.Context, slots [
 	// slot's pointer names.
 	initialHeight := base.BlockHeight()
 	for _, s := range slots {
+		settlement := s.settlement
+		if settlement == "" {
+			settlement = s.payout
+		}
 		csGen.Slots = append(csGen.Slots, &coreslottypes.CoreSlot{
 			SlotId: s.id, OperatorAddress: s.operator, PayoutAddress: s.payout,
-			SettlementAddress: s.payout,
+			SettlementAddress: settlement,
 			ConsensusPubkey:   ed25519Any(t, s.keyMarker),
 			Status:            coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE,
 			ConsensusPower:    1, RewardWeight: coreslottypes.DefaultRewardWeight,

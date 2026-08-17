@@ -37,6 +37,9 @@
       "/twilight.rewards.v1.MsgUpdateRewardsParams",
       "/twilight.rewards.v1.MsgPauseRewards",
       "/twilight.rewards.v1.MsgResumeRewards"
+    ],
+    "mining": [
+      "/twilight.mining.v1.MsgSubmitSettlementChunk"
     ]
   }
 }
