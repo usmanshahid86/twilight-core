@@ -21,14 +21,10 @@ func TestEmissionTreasuryAmount(t *testing.T) {
 func TestTreasuryPaymentAndFailureAtomicity(t *testing.T) {
 	t.Run("exact payment", func(t *testing.T) {
 		k, ctx, bank, _ := setupFinalization(t, true)
-		params, err := k.GetParams(ctx)
-		require.NoError(t, err)
-		params.EmissionTreasuryShareBps = 1_000
-		params.TreasuryAddress = addr(8)
-		require.NoError(t, k.SetParams(ctx, params))
-		cfg, err := keeper.BuildEpochConfigSnapshot(params)
-		require.NoError(t, err)
-		require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
+		// The treasury share and destination are set on the canonical reward
+		// configuration, which is what finalization reads. Setting them on Params
+		// would change nothing: that mirror carries no authority.
+		seedTreasuryRewardConfig(t, k, ctx, 1_000, addr(8))
 
 		// 10% of a 3600 emission.
 		require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
@@ -42,14 +38,7 @@ func TestTreasuryPaymentAndFailureAtomicity(t *testing.T) {
 
 	t.Run("send failure", func(t *testing.T) {
 		k, ctx, bank, _ := setupFinalization(t, true)
-		params, err := k.GetParams(ctx)
-		require.NoError(t, err)
-		params.EmissionTreasuryShareBps = 1_000
-		params.TreasuryAddress = addr(8)
-		require.NoError(t, k.SetParams(ctx, params))
-		cfg, err := keeper.BuildEpochConfigSnapshot(params)
-		require.NoError(t, err)
-		require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
+		seedTreasuryRewardConfig(t, k, ctx, 1_000, addr(8))
 		bank.failSend()
 
 		require.Error(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))

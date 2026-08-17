@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -67,6 +68,20 @@ func GetQueryCmd() *cobra.Command {
 		add("pause-state", cobra.NoArgs, false, func(*cobra.Command, []string) (interface{}, error) {
 			return &types.QueryRewardsPauseStateRequest{}, nil
 		}),
+		add("entitlement [slot-id] [epoch]", cobra.ExactArgs(2), false, func(_ *cobra.Command, a []string) (interface{}, error) {
+			return buildSlotEntitlementRequest(a)
+		}),
+		add("epoch-entitlements [epoch]", cobra.ExactArgs(1), true, func(cmd *cobra.Command, a []string) (interface{}, error) {
+			return buildEpochEntitlementsRequest(a, cmd.Flags())
+		}),
+		add("reward-config-versions", cobra.NoArgs, true, func(cmd *cobra.Command, _ []string) (interface{}, error) {
+			return buildRewardConfigVersionsRequest(cmd.Flags())
+		}),
+		// One selector, positional, so the two identity forms cannot be given
+		// together at the command line either.
+		add("reward-config-version [version|epoch:N]", cobra.ExactArgs(1), false, func(_ *cobra.Command, a []string) (interface{}, error) {
+			return buildRewardConfigVersionRequest(a)
+		}),
 	)
 	return cmd
 }
@@ -86,6 +101,14 @@ func dispatchQuery(ctx context.Context, qc types.QueryClient, req interface{}) (
 		return qc.SlotRewards(ctx, v)
 	case *types.QueryClaimableRewardsRequest:
 		return qc.ClaimableRewards(ctx, v)
+	case *types.QuerySlotEntitlementRequest:
+		return qc.SlotEntitlement(ctx, v)
+	case *types.QuerySlotEntitlementsByEpochRequest:
+		return qc.SlotEntitlementsByEpoch(ctx, v)
+	case *types.QueryRewardConfigVersionsRequest:
+		return qc.RewardConfigVersions(ctx, v)
+	case *types.QueryRewardConfigVersionRequest:
+		return qc.RewardConfigVersion(ctx, v)
 	case *types.QueryCumulativeEmittedRequest:
 		return qc.CumulativeEmitted(ctx, v)
 	case *types.QuerySupplyScheduleRequest:
@@ -140,6 +163,59 @@ func buildCurrentActiveBlocksRequest(fs *pflag.FlagSet) (*types.QueryCurrentEpoc
 		return nil, err
 	}
 	return &types.QueryCurrentEpochActiveBlocksRequest{Pagination: page}, nil
+}
+
+func buildSlotEntitlementRequest(args []string) (*types.QuerySlotEntitlementRequest, error) {
+	slotID, err := strconv.ParseUint(args[0], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid slot id %q: %w", args[0], err)
+	}
+	epoch, err := strconv.ParseUint(args[1], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid epoch %q: %w", args[1], err)
+	}
+	return &types.QuerySlotEntitlementRequest{SlotId: slotID, Epoch: epoch}, nil
+}
+
+func buildEpochEntitlementsRequest(args []string, fs *pflag.FlagSet) (*types.QuerySlotEntitlementsByEpochRequest, error) {
+	epoch, err := strconv.ParseUint(args[0], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid epoch %q: %w", args[0], err)
+	}
+	page, err := client.ReadPageRequest(fs)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QuerySlotEntitlementsByEpochRequest{Epoch: epoch, Pagination: page}, nil
+}
+
+func buildRewardConfigVersionsRequest(fs *pflag.FlagSet) (*types.QueryRewardConfigVersionsRequest, error) {
+	page, err := client.ReadPageRequest(fs)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryRewardConfigVersionsRequest{Pagination: page}, nil
+}
+
+// buildRewardConfigVersionRequest parses the single identity selector.
+//
+// A bare number is a version; the "epoch:" prefix selects by effective epoch. One
+// positional argument rather than two optional flags, because the query admits
+// exactly one selector and an argument shape that cannot express both is a
+// clearer contract than a runtime rejection of the pair.
+func buildRewardConfigVersionRequest(args []string) (*types.QueryRewardConfigVersionRequest, error) {
+	if epoch, ok := strings.CutPrefix(args[0], "epoch:"); ok {
+		effective, err := strconv.ParseUint(epoch, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid effective epoch %q: %w", epoch, err)
+		}
+		return &types.QueryRewardConfigVersionRequest{EffectiveEpoch: effective}, nil
+	}
+	version, err := strconv.ParseUint(args[0], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid reward configuration version %q: %w", args[0], err)
+	}
+	return &types.QueryRewardConfigVersionRequest{Version: version}, nil
 }
 
 func buildEpochConfigVersionsRequest(fs *pflag.FlagSet) (*types.QueryEpochConfigVersionsRequest, error) {

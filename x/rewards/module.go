@@ -82,6 +82,7 @@ func (am AppModule) RegisterInvariants(ir sdk.InvariantRegistry) {
 	ir.RegisterRoute(types.ModuleName, "supply-cap", am.keeper.SupplyCapInvariant())
 	ir.RegisterRoute(types.ModuleName, "cumulative-emitted", am.keeper.CumulativeEmittedInvariant())
 	ir.RegisterRoute(types.ModuleName, "module-balance-coverage", am.keeper.ModuleBalanceCoverageInvariant())
+	ir.RegisterRoute(types.ModuleName, "entitlement-liability", am.keeper.EntitlementLiabilityInvariant())
 	ir.RegisterRoute(types.ModuleName, "denom-correctness", am.keeper.DenomCorrectnessInvariant())
 	ir.RegisterRoute(types.ModuleName, "closed-epoch-immutability", am.keeper.ClosedEpochImmutabilityInvariant())
 }

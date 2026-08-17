@@ -34,7 +34,16 @@ func (k Keeper) claimRewards(ctx context.Context, msg *types.MsgClaimRewards) er
 	if _, err := sdk.AccAddressFromBech32(msg.Signer); err != nil {
 		return types.ErrInvalidState.Wrapf("claim signer: %v", err)
 	}
-	params, err := k.GetParams(ctx)
+	// The legacy claim path moves value, so it reads Params through the same
+	// monetary boundary finalization and the entitlement release paths use.
+	//
+	// It is retained compatibility, not exempt compatibility. Reading the raw
+	// Params here left one surviving way to reach params.NativeDenom without
+	// establishing that it is still the canonical accounting denom — and this
+	// function both compares a balance against it and transfers in it, so a denom
+	// corrupted to another syntactically valid one would have been checked and paid
+	// in a token the chain does not account in.
+	params, err := k.MonetaryParams(ctx)
 	if err != nil {
 		return err
 	}

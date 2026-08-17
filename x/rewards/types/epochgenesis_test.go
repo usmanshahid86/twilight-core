@@ -133,15 +133,19 @@ func TestFreshGenesisInitialHeightAnchoring(t *testing.T) {
 		params := types.DefaultParams()
 		snapshot := types.DefaultEpochConfigSnapshot(params)
 		anchor := types.DefaultEpochConfigVersion(params, height)
+		rewardAnchor := types.DefaultRewardConfigVersion(params)
 		return &types.GenesisState{
 			Params: &params,
 			State: &types.RewardsState{
 				CurrentEpoch: 1, CurrentEpochStartHeight: height,
 				CumulativeEmitted: "0", CarryForwardRemainder: "0",
 			},
-			CurrentEpochConfig:  &snapshot,
-			EpochConfigVersions: []*types.EpochConfigVersion{&anchor},
-			PauseState:          &types.RewardsPauseState{},
+			CurrentEpochConfig:   &snapshot,
+			EpochConfigVersions:  []*types.EpochConfigVersion{&anchor},
+			RewardConfigVersions: []*types.RewardConfigVersion{&rewardAnchor},
+			PauseState:           &types.RewardsPauseState{},
+
+			OutstandingEntitlementLiability: "0",
 		}
 	}
 
@@ -183,15 +187,19 @@ func TestFreshGenesisForbidsAnyPendingPauseTransition(t *testing.T) {
 		params := types.DefaultParams()
 		snapshot := types.DefaultEpochConfigSnapshot(params)
 		anchor := types.DefaultEpochConfigVersion(params, initialHeight)
+		rewardAnchor := types.DefaultRewardConfigVersion(params)
 		return &types.GenesisState{
 			Params: &params,
 			State: &types.RewardsState{
 				CurrentEpoch: 1, CurrentEpochStartHeight: initialHeight,
 				CumulativeEmitted: "0", CarryForwardRemainder: "0",
 			},
-			CurrentEpochConfig:  &snapshot,
-			EpochConfigVersions: []*types.EpochConfigVersion{&anchor},
-			PauseState:          &pause,
+			CurrentEpochConfig:   &snapshot,
+			EpochConfigVersions:  []*types.EpochConfigVersion{&anchor},
+			RewardConfigVersions: []*types.RewardConfigVersion{&rewardAnchor},
+			PauseState:           &pause,
+
+			OutstandingEntitlementLiability: "0",
 		}
 	}
 

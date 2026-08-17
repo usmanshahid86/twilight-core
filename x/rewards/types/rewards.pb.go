@@ -6,6 +6,7 @@ package types
 import (
 	fmt "fmt"
 	proto "github.com/cosmos/gogoproto/proto"
+	types "github.com/twilight-project/twilight-core/x/coreslot/types"
 	io "io"
 	math "math"
 	math_bits "math/bits"
@@ -225,6 +226,177 @@ func (m *ScheduledEpochConfig) GetEpochLengthBlocks() uint64 {
 	return 0
 }
 
+// RewardConfigVersion is one immutable entry in the canonical reward-configuration
+// history, and the sole authority for the economics an epoch's emission is
+// computed under.
+//
+// Version 1 is created at fresh genesis effective at epoch 1 and is never
+// rewritten. Every later version is created when a scheduled configuration is
+// promoted, which happens in the closing epoch's EndBlock and only after that
+// epoch's monetary finalization has succeeded.
+//
+// A target epoch N binds the version effective at N-2, so an update accepted
+// during epoch E first affects target E+3. Fresh-genesis targets 1 and 2 have no
+// N-2 boundary inside chain history and resolve the genesis version directly.
+//
+// Deliberately absent: effective_start_height. Unlike EpochConfigVersion this
+// record fixes no geometry, so there is no start-height recurrence and no
+// continuity equation between adjacent versions — only strictly increasing
+// version and effective epoch.
+type RewardConfigVersion struct {
+	Version                  uint64 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	EffectiveEpoch           uint64 `protobuf:"varint,2,opt,name=effective_epoch,json=effectiveEpoch,proto3" json:"effective_epoch,omitempty"`
+	InitialBlockSubsidy      string `protobuf:"bytes,3,opt,name=initial_block_subsidy,json=initialBlockSubsidy,proto3" json:"initial_block_subsidy,omitempty"`
+	EmissionTreasuryShareBps uint64 `protobuf:"varint,4,opt,name=emission_treasury_share_bps,json=emissionTreasuryShareBps,proto3" json:"emission_treasury_share_bps,omitempty"`
+	TreasuryAddress          string `protobuf:"bytes,5,opt,name=treasury_address,json=treasuryAddress,proto3" json:"treasury_address,omitempty"`
+}
+
+func (m *RewardConfigVersion) Reset()         { *m = RewardConfigVersion{} }
+func (m *RewardConfigVersion) String() string { return proto.CompactTextString(m) }
+func (*RewardConfigVersion) ProtoMessage()    {}
+func (*RewardConfigVersion) Descriptor() ([]byte, []int) {
+	return fileDescriptor_b052d0ecac0c43ef, []int{3}
+}
+func (m *RewardConfigVersion) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *RewardConfigVersion) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_RewardConfigVersion.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *RewardConfigVersion) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_RewardConfigVersion.Merge(m, src)
+}
+func (m *RewardConfigVersion) XXX_Size() int {
+	return m.Size()
+}
+func (m *RewardConfigVersion) XXX_DiscardUnknown() {
+	xxx_messageInfo_RewardConfigVersion.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_RewardConfigVersion proto.InternalMessageInfo
+
+func (m *RewardConfigVersion) GetVersion() uint64 {
+	if m != nil {
+		return m.Version
+	}
+	return 0
+}
+
+func (m *RewardConfigVersion) GetEffectiveEpoch() uint64 {
+	if m != nil {
+		return m.EffectiveEpoch
+	}
+	return 0
+}
+
+func (m *RewardConfigVersion) GetInitialBlockSubsidy() string {
+	if m != nil {
+		return m.InitialBlockSubsidy
+	}
+	return ""
+}
+
+func (m *RewardConfigVersion) GetEmissionTreasuryShareBps() uint64 {
+	if m != nil {
+		return m.EmissionTreasuryShareBps
+	}
+	return 0
+}
+
+func (m *RewardConfigVersion) GetTreasuryAddress() string {
+	if m != nil {
+		return m.TreasuryAddress
+	}
+	return ""
+}
+
+// ScheduledRewardConfig is the single pending reward-configuration change, keyed
+// by the epoch it becomes effective at.
+//
+// At most one entry exists, and its key is exactly current_epoch + 1: an update
+// accepted during epoch E is staged for E+1 and is promoted at the end of E. A
+// second, unrelated future entry is invalid state rather than a queue.
+//
+// It carries no version number. The version is assigned at promotion time from
+// the history it extends, so a scheduled entry cannot pre-commit an identity that
+// a replacement would then have to reuse.
+type ScheduledRewardConfig struct {
+	EffectiveEpoch           uint64 `protobuf:"varint,1,opt,name=effective_epoch,json=effectiveEpoch,proto3" json:"effective_epoch,omitempty"`
+	InitialBlockSubsidy      string `protobuf:"bytes,2,opt,name=initial_block_subsidy,json=initialBlockSubsidy,proto3" json:"initial_block_subsidy,omitempty"`
+	EmissionTreasuryShareBps uint64 `protobuf:"varint,3,opt,name=emission_treasury_share_bps,json=emissionTreasuryShareBps,proto3" json:"emission_treasury_share_bps,omitempty"`
+	TreasuryAddress          string `protobuf:"bytes,4,opt,name=treasury_address,json=treasuryAddress,proto3" json:"treasury_address,omitempty"`
+}
+
+func (m *ScheduledRewardConfig) Reset()         { *m = ScheduledRewardConfig{} }
+func (m *ScheduledRewardConfig) String() string { return proto.CompactTextString(m) }
+func (*ScheduledRewardConfig) ProtoMessage()    {}
+func (*ScheduledRewardConfig) Descriptor() ([]byte, []int) {
+	return fileDescriptor_b052d0ecac0c43ef, []int{4}
+}
+func (m *ScheduledRewardConfig) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *ScheduledRewardConfig) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_ScheduledRewardConfig.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *ScheduledRewardConfig) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ScheduledRewardConfig.Merge(m, src)
+}
+func (m *ScheduledRewardConfig) XXX_Size() int {
+	return m.Size()
+}
+func (m *ScheduledRewardConfig) XXX_DiscardUnknown() {
+	xxx_messageInfo_ScheduledRewardConfig.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ScheduledRewardConfig proto.InternalMessageInfo
+
+func (m *ScheduledRewardConfig) GetEffectiveEpoch() uint64 {
+	if m != nil {
+		return m.EffectiveEpoch
+	}
+	return 0
+}
+
+func (m *ScheduledRewardConfig) GetInitialBlockSubsidy() string {
+	if m != nil {
+		return m.InitialBlockSubsidy
+	}
+	return ""
+}
+
+func (m *ScheduledRewardConfig) GetEmissionTreasuryShareBps() uint64 {
+	if m != nil {
+		return m.EmissionTreasuryShareBps
+	}
+	return 0
+}
+
+func (m *ScheduledRewardConfig) GetTreasuryAddress() string {
+	if m != nil {
+		return m.TreasuryAddress
+	}
+	return ""
+}
+
 // RewardsPauseState is the single canonical rewards-pause state.
 //
 // It replaces the three independent pause booleans on Params. A pause or resume
@@ -244,7 +416,7 @@ func (m *RewardsPauseState) Reset()         { *m = RewardsPauseState{} }
 func (m *RewardsPauseState) String() string { return proto.CompactTextString(m) }
 func (*RewardsPauseState) ProtoMessage()    {}
 func (*RewardsPauseState) Descriptor() ([]byte, []int) {
-	return fileDescriptor_b052d0ecac0c43ef, []int{3}
+	return fileDescriptor_b052d0ecac0c43ef, []int{5}
 }
 func (m *RewardsPauseState) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -310,7 +482,7 @@ func (m *SlotActiveBlocks) Reset()         { *m = SlotActiveBlocks{} }
 func (m *SlotActiveBlocks) String() string { return proto.CompactTextString(m) }
 func (*SlotActiveBlocks) ProtoMessage()    {}
 func (*SlotActiveBlocks) Descriptor() ([]byte, []int) {
-	return fileDescriptor_b052d0ecac0c43ef, []int{4}
+	return fileDescriptor_b052d0ecac0c43ef, []int{6}
 }
 func (m *SlotActiveBlocks) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -384,7 +556,7 @@ func (m *EpochReward) Reset()         { *m = EpochReward{} }
 func (m *EpochReward) String() string { return proto.CompactTextString(m) }
 func (*EpochReward) ProtoMessage()    {}
 func (*EpochReward) Descriptor() ([]byte, []int) {
-	return fileDescriptor_b052d0ecac0c43ef, []int{5}
+	return fileDescriptor_b052d0ecac0c43ef, []int{7}
 }
 func (m *EpochReward) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -542,7 +714,7 @@ func (m *EligibleSlotReward) Reset()         { *m = EligibleSlotReward{} }
 func (m *EligibleSlotReward) String() string { return proto.CompactTextString(m) }
 func (*EligibleSlotReward) ProtoMessage()    {}
 func (*EligibleSlotReward) Descriptor() ([]byte, []int) {
-	return fileDescriptor_b052d0ecac0c43ef, []int{6}
+	return fileDescriptor_b052d0ecac0c43ef, []int{8}
 }
 func (m *EligibleSlotReward) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -641,6 +813,146 @@ func (m *EligibleSlotReward) GetEpochNumber() uint64 {
 	return 0
 }
 
+// SlotEntitlement is the canonical immutable economic obligation created for one
+// CoreSlot by one finalized reward epoch.
+//
+// Identity is (slot_id, epoch): exactly one obligation per Slot per epoch,
+// created once and never rewritten. Every field except released_amount is
+// immutable after creation, and released_amount is monotonic within
+// 0 <= released_amount <= entitlement_amount.
+//
+// payout_address is the entitlement's ONLY value destination. It is snapshotted
+// from CoreSlot at the end of the closing block, after that block's transactions
+// have executed, and revalidated through the canonical economic-address rule at
+// that moment. It is also the remainder recipient, which is why no caller-facing
+// destination exists anywhere in the release path: an operator address stored
+// beside it would create a second candidate and a question about which one is
+// paid.
+//
+// slot_status_at_epoch_close and activation_sequence_at_epoch_close are audit
+// fields. They record lifecycle context and have no monetary effect: V2.2 has no
+// activation_participation[] and lifecycle generation cannot confiscate or
+// enlarge an entitlement that was already earned.
+//
+// Zero-amount entitlements are never persisted.
+type SlotEntitlement struct {
+	SlotId              uint64 `protobuf:"varint,1,opt,name=slot_id,json=slotId,proto3" json:"slot_id,omitempty"`
+	Epoch               uint64 `protobuf:"varint,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	TotalBlocksActive   uint64 `protobuf:"varint,3,opt,name=total_blocks_active,json=totalBlocksActive,proto3" json:"total_blocks_active,omitempty"`
+	EntitlementAmount   string `protobuf:"bytes,4,opt,name=entitlement_amount,json=entitlementAmount,proto3" json:"entitlement_amount,omitempty"`
+	ReleasedAmount      string `protobuf:"bytes,5,opt,name=released_amount,json=releasedAmount,proto3" json:"released_amount,omitempty"`
+	PayoutAddress       string `protobuf:"bytes,6,opt,name=payout_address,json=payoutAddress,proto3" json:"payout_address,omitempty"`
+	RewardConfigVersion uint64 `protobuf:"varint,7,opt,name=reward_config_version,json=rewardConfigVersion,proto3" json:"reward_config_version,omitempty"`
+	// Audit only.
+	SlotStatusAtEpochClose types.SlotStatus `protobuf:"varint,8,opt,name=slot_status_at_epoch_close,json=slotStatusAtEpochClose,proto3,enum=twilight.coreslot.v1.SlotStatus" json:"slot_status_at_epoch_close,omitempty"`
+	// Audit only.
+	ActivationSequenceAtEpochClose uint64 `protobuf:"varint,9,opt,name=activation_sequence_at_epoch_close,json=activationSequenceAtEpochClose,proto3" json:"activation_sequence_at_epoch_close,omitempty"`
+	CreatedHeight                  uint64 `protobuf:"varint,10,opt,name=created_height,json=createdHeight,proto3" json:"created_height,omitempty"`
+}
+
+func (m *SlotEntitlement) Reset()         { *m = SlotEntitlement{} }
+func (m *SlotEntitlement) String() string { return proto.CompactTextString(m) }
+func (*SlotEntitlement) ProtoMessage()    {}
+func (*SlotEntitlement) Descriptor() ([]byte, []int) {
+	return fileDescriptor_b052d0ecac0c43ef, []int{9}
+}
+func (m *SlotEntitlement) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *SlotEntitlement) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_SlotEntitlement.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *SlotEntitlement) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_SlotEntitlement.Merge(m, src)
+}
+func (m *SlotEntitlement) XXX_Size() int {
+	return m.Size()
+}
+func (m *SlotEntitlement) XXX_DiscardUnknown() {
+	xxx_messageInfo_SlotEntitlement.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_SlotEntitlement proto.InternalMessageInfo
+
+func (m *SlotEntitlement) GetSlotId() uint64 {
+	if m != nil {
+		return m.SlotId
+	}
+	return 0
+}
+
+func (m *SlotEntitlement) GetEpoch() uint64 {
+	if m != nil {
+		return m.Epoch
+	}
+	return 0
+}
+
+func (m *SlotEntitlement) GetTotalBlocksActive() uint64 {
+	if m != nil {
+		return m.TotalBlocksActive
+	}
+	return 0
+}
+
+func (m *SlotEntitlement) GetEntitlementAmount() string {
+	if m != nil {
+		return m.EntitlementAmount
+	}
+	return ""
+}
+
+func (m *SlotEntitlement) GetReleasedAmount() string {
+	if m != nil {
+		return m.ReleasedAmount
+	}
+	return ""
+}
+
+func (m *SlotEntitlement) GetPayoutAddress() string {
+	if m != nil {
+		return m.PayoutAddress
+	}
+	return ""
+}
+
+func (m *SlotEntitlement) GetRewardConfigVersion() uint64 {
+	if m != nil {
+		return m.RewardConfigVersion
+	}
+	return 0
+}
+
+func (m *SlotEntitlement) GetSlotStatusAtEpochClose() types.SlotStatus {
+	if m != nil {
+		return m.SlotStatusAtEpochClose
+	}
+	return types.SlotStatus_SLOT_STATUS_UNSPECIFIED
+}
+
+func (m *SlotEntitlement) GetActivationSequenceAtEpochClose() uint64 {
+	if m != nil {
+		return m.ActivationSequenceAtEpochClose
+	}
+	return 0
+}
+
+func (m *SlotEntitlement) GetCreatedHeight() uint64 {
+	if m != nil {
+		return m.CreatedHeight
+	}
+	return 0
+}
+
 type NextHalvingInfo struct {
 	CurrentTier               uint64 `protobuf:"varint,1,opt,name=current_tier,json=currentTier,proto3" json:"current_tier,omitempty"`
 	CurrentBlockSubsidy       string `protobuf:"bytes,2,opt,name=current_block_subsidy,json=currentBlockSubsidy,proto3" json:"current_block_subsidy,omitempty"`
@@ -655,7 +967,7 @@ func (m *NextHalvingInfo) Reset()         { *m = NextHalvingInfo{} }
 func (m *NextHalvingInfo) String() string { return proto.CompactTextString(m) }
 func (*NextHalvingInfo) ProtoMessage()    {}
 func (*NextHalvingInfo) Descriptor() ([]byte, []int) {
-	return fileDescriptor_b052d0ecac0c43ef, []int{7}
+	return fileDescriptor_b052d0ecac0c43ef, []int{10}
 }
 func (m *NextHalvingInfo) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -737,88 +1049,109 @@ func init() {
 	proto.RegisterType((*RewardsState)(nil), "twilight.rewards.v1.RewardsState")
 	proto.RegisterType((*EpochConfigVersion)(nil), "twilight.rewards.v1.EpochConfigVersion")
 	proto.RegisterType((*ScheduledEpochConfig)(nil), "twilight.rewards.v1.ScheduledEpochConfig")
+	proto.RegisterType((*RewardConfigVersion)(nil), "twilight.rewards.v1.RewardConfigVersion")
+	proto.RegisterType((*ScheduledRewardConfig)(nil), "twilight.rewards.v1.ScheduledRewardConfig")
 	proto.RegisterType((*RewardsPauseState)(nil), "twilight.rewards.v1.RewardsPauseState")
 	proto.RegisterType((*SlotActiveBlocks)(nil), "twilight.rewards.v1.SlotActiveBlocks")
 	proto.RegisterType((*EpochReward)(nil), "twilight.rewards.v1.EpochReward")
 	proto.RegisterType((*EligibleSlotReward)(nil), "twilight.rewards.v1.EligibleSlotReward")
+	proto.RegisterType((*SlotEntitlement)(nil), "twilight.rewards.v1.SlotEntitlement")
 	proto.RegisterType((*NextHalvingInfo)(nil), "twilight.rewards.v1.NextHalvingInfo")
 }
 
 func init() { proto.RegisterFile("twilight/rewards/v1/rewards.proto", fileDescriptor_b052d0ecac0c43ef) }
 
 var fileDescriptor_b052d0ecac0c43ef = []byte{
-	// 1127 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x74, 0x56, 0xdd, 0x8e, 0xdb, 0x44,
-	0x14, 0xae, 0x77, 0xb7, 0xf9, 0x39, 0xc9, 0x26, 0xd9, 0xd9, 0xfe, 0xb8, 0x2d, 0x0d, 0x69, 0x00,
-	0x35, 0x45, 0x6a, 0x56, 0x2d, 0x08, 0x81, 0xb8, 0x80, 0xb4, 0xa4, 0x6a, 0x11, 0xb4, 0x2b, 0xa7,
-	0x14, 0xc4, 0xcd, 0x68, 0x62, 0x4f, 0xe2, 0x01, 0xdb, 0x63, 0x8d, 0xc7, 0xd9, 0xcd, 0x5b, 0xf0,
-	0x08, 0x3c, 0x07, 0x12, 0xf7, 0xbd, 0xec, 0x1d, 0x5c, 0xa2, 0xdd, 0xc7, 0xe0, 0x06, 0xcd, 0x8f,
-	0xf3, 0x43, 0x92, 0x3b, 0xfb, 0xfb, 0xbe, 0x99, 0x39, 0xe7, 0xcc, 0x39, 0x9f, 0x0d, 0xf7, 0xe4,
-	0x19, 0x8b, 0xd8, 0x34, 0x94, 0x27, 0x82, 0x9e, 0x11, 0x11, 0x64, 0x27, 0xb3, 0x47, 0xc5, 0x63,
-	0x3f, 0x15, 0x5c, 0x72, 0x74, 0x5c, 0x48, 0xfa, 0x05, 0x3e, 0x7b, 0x74, 0xbb, 0xb3, 0x6d, 0x5d,
-	0x4a, 0x04, 0x89, 0xed, 0xb2, 0xee, 0x5f, 0x0e, 0xd4, 0x3d, 0xc3, 0x8d, 0x24, 0x91, 0x14, 0x7d,
-	0x00, 0x87, 0x7e, 0x2e, 0x04, 0x4d, 0x24, 0xa6, 0x29, 0xf7, 0x43, 0xd7, 0xe9, 0x38, 0xbd, 0x03,
-	0xaf, 0x6e, 0xc1, 0xa1, 0xc2, 0xd0, 0x97, 0x70, 0x7b, 0x4d, 0x84, 0x33, 0x49, 0x84, 0xc4, 0x21,
-	0x55, 0x67, 0xb9, 0x7b, 0x7a, 0xc5, 0xcd, 0xd5, 0x15, 0x23, 0xc5, 0x3f, 0xd7, 0x34, 0x7a, 0x08,
-	0xc8, 0xcf, 0xe3, 0x3c, 0x22, 0x92, 0xcd, 0x28, 0xa6, 0x31, 0x93, 0x92, 0x06, 0xee, 0x7e, 0xc7,
-	0xe9, 0x55, 0xbd, 0xa3, 0x25, 0x33, 0x34, 0x04, 0xfa, 0x0c, 0x6e, 0xfa, 0x44, 0x88, 0x39, 0x9e,
-	0x70, 0xa1, 0xe2, 0xc4, 0x82, 0xc6, 0x84, 0x25, 0x01, 0x15, 0xee, 0x81, 0x5e, 0x73, 0x5d, 0xd3,
-	0xcf, 0x0c, 0xeb, 0x15, 0x64, 0xf7, 0x4f, 0x07, 0x90, 0x3e, 0xfb, 0x29, 0x4f, 0x26, 0x6c, 0xfa,
-	0x86, 0x8a, 0x8c, 0xf1, 0x04, 0xb9, 0x50, 0x9e, 0x99, 0x47, 0x9b, 0x59, 0xf1, 0x8a, 0xee, 0x43,
-	0x93, 0x4e, 0x26, 0xd4, 0x37, 0x61, 0xe9, 0xdc, 0x4d, 0x26, 0x8d, 0x05, 0x6c, 0xb2, 0xff, 0x14,
-	0x6e, 0x2c, 0x85, 0x6b, 0x99, 0xef, 0x6b, 0xfd, 0xb5, 0x05, 0xbb, 0x9a, 0x76, 0x1f, 0x8e, 0x4d,
-	0xad, 0x22, 0x9a, 0x4c, 0x65, 0x88, 0xc7, 0x11, 0xf7, 0x7f, 0xcd, 0x74, 0x0e, 0x07, 0xde, 0x91,
-	0xa6, 0xbe, 0xd3, 0xcc, 0x13, 0x4d, 0x74, 0x39, 0x5c, 0x1b, 0xf9, 0x21, 0x0d, 0xf2, 0x88, 0x06,
-	0x2b, 0x79, 0x6c, 0x0b, 0xd3, 0xd9, 0x1a, 0xe6, 0x8e, 0x03, 0xf7, 0x76, 0x1d, 0xf8, 0x87, 0x03,
-	0x47, 0xb6, 0x15, 0x4e, 0x49, 0x9e, 0x51, 0xd3, 0x0f, 0x1f, 0x41, 0xa3, 0xb8, 0xea, 0x54, 0xa1,
-	0x81, 0x3e, 0xad, 0xe2, 0x15, 0x5d, 0xa2, 0xa5, 0x01, 0x7a, 0x1f, 0x6a, 0x21, 0xc9, 0x70, 0x4a,
-	0x93, 0x80, 0x25, 0x53, 0x7d, 0x48, 0xc5, 0x83, 0x90, 0x64, 0xa7, 0x06, 0x51, 0x7d, 0x65, 0x49,
-	0x3c, 0x23, 0x51, 0x4e, 0x75, 0xad, 0x2a, 0x5e, 0xdd, 0x82, 0x6f, 0x14, 0x86, 0x3e, 0x07, 0xb7,
-	0x10, 0x2d, 0x73, 0xb4, 0xb5, 0x35, 0x85, 0xba, 0x61, 0xf9, 0x61, 0x41, 0x9b, 0xea, 0x76, 0x4f,
-	0xa1, 0x35, 0x8a, 0xb8, 0x1c, 0x68, 0xcc, 0x24, 0x84, 0x6e, 0x42, 0x39, 0x8b, 0xb8, 0xc4, 0x2c,
-	0xb0, 0x15, 0x2a, 0xa9, 0xd7, 0x17, 0x81, 0x8a, 0xc5, 0x14, 0x03, 0x13, 0xad, 0xb7, 0x35, 0xa9,
-	0x1b, 0xd0, 0xec, 0xd1, 0xfd, 0xbd, 0x04, 0x35, 0x5d, 0x48, 0x53, 0x13, 0x74, 0x0f, 0xea, 0xa6,
-	0x9c, 0x49, 0x1e, 0x8f, 0xa9, 0xb0, 0x5b, 0xd6, 0x34, 0xf6, 0x52, 0x43, 0x4a, 0xb2, 0x65, 0x10,
-	0x6a, 0xd9, 0x4a, 0x17, 0xdc, 0x05, 0xa0, 0x49, 0xb0, 0xde, 0x2f, 0x55, 0x9a, 0x04, 0x96, 0xbe,
-	0x0f, 0xcd, 0x98, 0x25, 0x92, 0x06, 0x6a, 0x2e, 0x32, 0xdd, 0xa5, 0xa6, 0xc9, 0x1b, 0x06, 0x1e,
-	0x5a, 0x14, 0xdd, 0x82, 0x8a, 0x99, 0x0a, 0x96, 0xb8, 0x57, 0xb5, 0xa2, 0xac, 0xdf, 0x5f, 0x24,
-	0x6a, 0xbe, 0x02, 0x96, 0x49, 0xc1, 0xc6, 0xb9, 0x24, 0xe3, 0x88, 0xe2, 0x09, 0xa5, 0x99, 0x5b,
-	0x32, 0xf3, 0xb5, 0xc6, 0x3c, 0xa3, 0x34, 0x53, 0x47, 0x4a, 0x41, 0x49, 0x96, 0x8b, 0x39, 0x26,
-	0x31, 0xcf, 0x13, 0xe9, 0x96, 0xcd, 0x91, 0x05, 0x3c, 0xd0, 0xa8, 0xba, 0x62, 0xe3, 0x22, 0x38,
-	0xe5, 0x3c, 0x72, 0x2b, 0x5a, 0x04, 0x06, 0x3a, 0xe5, 0x3c, 0x42, 0x0f, 0xa0, 0x45, 0xa2, 0x88,
-	0xfb, 0x44, 0xc5, 0x6f, 0xb7, 0xaa, 0x6a, 0x55, 0x73, 0x81, 0xdb, 0xbd, 0xee, 0x40, 0xd5, 0x84,
-	0xcf, 0x73, 0xe9, 0x82, 0xd6, 0x98, 0x7c, 0x5e, 0xe5, 0x12, 0xfd, 0x04, 0xc7, 0x8b, 0x30, 0x19,
-	0x4f, 0x70, 0x4c, 0x65, 0xc8, 0x03, 0xb7, 0xd6, 0x71, 0x7a, 0x8d, 0xc7, 0xf7, 0xfb, 0x5b, 0x8c,
-	0xae, 0xff, 0xcd, 0x8a, 0xfe, 0x7b, 0x2d, 0xf7, 0x50, 0xb0, 0x81, 0xa1, 0x57, 0xd0, 0x5a, 0xb8,
-	0x07, 0x4e, 0x79, 0xc4, 0xfc, 0xb9, 0x5b, 0xd7, 0xdb, 0x7e, 0xb8, 0x75, 0xdb, 0x85, 0x9b, 0x9c,
-	0x6a, 0xad, 0xd7, 0x14, 0xeb, 0x00, 0x1a, 0x40, 0xd9, 0xca, 0xdd, 0xc3, 0xce, 0x7e, 0xaf, 0xb6,
-	0x23, 0xbc, 0x61, 0xc4, 0xa6, 0x6c, 0x1c, 0x51, 0xd5, 0xa2, 0xa6, 0x9d, 0xbc, 0x62, 0x1d, 0x7a,
-	0x0a, 0xed, 0x4d, 0x3b, 0xc4, 0x64, 0x22, 0xa9, 0xb0, 0xe3, 0xdd, 0xd0, 0xf5, 0xb9, 0xb3, 0x61,
-	0x8d, 0x03, 0xa5, 0x31, 0xb3, 0xfe, 0x35, 0x94, 0x7c, 0x6d, 0x0f, 0x6e, 0xb3, 0xe3, 0xf4, 0x6a,
-	0x8f, 0x7b, 0xdb, 0xc3, 0x58, 0xda, 0xc8, 0x28, 0x21, 0x69, 0x16, 0x72, 0xe9, 0xd9, 0x75, 0xe8,
-	0x31, 0x5c, 0xb7, 0xb7, 0x4b, 0x13, 0xd5, 0x1b, 0x41, 0xe1, 0x17, 0x2d, 0xdd, 0xa3, 0xc7, 0x86,
-	0x1c, 0x1a, 0xce, 0x3a, 0xc6, 0xbf, 0x7b, 0x80, 0x36, 0x53, 0xdb, 0x3d, 0x77, 0x0f, 0xa0, 0xc5,
-	0x53, 0x2a, 0x88, 0xe4, 0x02, 0x93, 0x20, 0x10, 0x34, 0x33, 0x76, 0x54, 0xf5, 0x9a, 0x05, 0x3e,
-	0x30, 0xb0, 0xb2, 0x9d, 0x94, 0xcc, 0x79, 0x2e, 0x17, 0x42, 0xf3, 0x81, 0x38, 0x34, 0x68, 0x21,
-	0xdb, 0x98, 0xe4, 0x83, 0xcd, 0x49, 0x56, 0x22, 0x9b, 0xda, 0x99, 0x19, 0x3b, 0x33, 0x30, 0x75,
-	0x03, 0xfe, 0x68, 0x26, 0xef, 0x01, 0xb4, 0x96, 0x96, 0x63, 0x75, 0x66, 0x66, 0x96, 0x76, 0x6b,
-	0xa5, 0x37, 0xa0, 0xb4, 0x36, 0x28, 0xf6, 0x4d, 0x7d, 0x5a, 0xfc, 0x88, 0xb0, 0x98, 0x06, 0x7a,
-	0x38, 0x2a, 0x5e, 0xf1, 0x8a, 0x3e, 0x86, 0x23, 0xfb, 0x88, 0xc9, 0xc2, 0x1d, 0xd4, 0x68, 0xec,
-	0x7b, 0x4d, 0x4b, 0x0c, 0x0a, 0x87, 0xf8, 0xbf, 0xcf, 0xd4, 0x36, 0x7c, 0xe6, 0xdb, 0x83, 0x0a,
-	0xb4, 0x6a, 0xdd, 0xb7, 0x7b, 0xd0, 0x7c, 0x49, 0xcf, 0xe5, 0x73, 0x12, 0xcd, 0x58, 0x32, 0x7d,
-	0x91, 0x4c, 0xb8, 0x5a, 0x5c, 0xb8, 0xb5, 0x64, 0x4b, 0x93, 0xb2, 0xd8, 0x6b, 0x46, 0x85, 0xba,
-	0xe8, 0x42, 0xa2, 0xab, 0x84, 0xb3, 0x7c, 0x9c, 0xb1, 0x60, 0x6e, 0x6f, 0xe2, 0xd8, 0x92, 0xfa,
-	0x8a, 0x47, 0x86, 0x52, 0xb7, 0x91, 0xd0, 0x73, 0x89, 0x65, 0x28, 0x68, 0x16, 0xf2, 0xa8, 0xf8,
-	0x5c, 0x1f, 0x2a, 0xf4, 0x75, 0x01, 0xa2, 0xaf, 0xe0, 0x3d, 0x33, 0x20, 0xca, 0xc0, 0xf3, 0x44,
-	0xb2, 0x08, 0xeb, 0x65, 0xa1, 0x89, 0xd0, 0x5a, 0xd9, 0xad, 0x85, 0xe6, 0x07, 0x25, 0x59, 0x49,
-	0x61, 0xc7, 0xaf, 0xc1, 0xd5, 0x5d, 0xbf, 0x06, 0x77, 0x01, 0x62, 0x72, 0x8e, 0xb3, 0x3c, 0x4d,
-	0xa3, 0xb9, 0xbd, 0xad, 0x6a, 0x4c, 0xce, 0x47, 0x1a, 0x40, 0x3d, 0x68, 0xa9, 0x6f, 0xd2, 0x5a,
-	0x08, 0x65, 0x7d, 0x31, 0x8d, 0x90, 0x64, 0x2b, 0xe7, 0x3e, 0x19, 0xbd, 0xbd, 0x68, 0x3b, 0xef,
-	0x2e, 0xda, 0xce, 0x3f, 0x17, 0x6d, 0xe7, 0xb7, 0xcb, 0xf6, 0x95, 0x77, 0x97, 0xed, 0x2b, 0x7f,
-	0x5f, 0xb6, 0xaf, 0xfc, 0xfc, 0xc5, 0x94, 0xc9, 0x30, 0x1f, 0xf7, 0x7d, 0x1e, 0x9f, 0x14, 0x23,
-	0xf5, 0x30, 0x15, 0xfc, 0x17, 0xea, 0xcb, 0x25, 0xe0, 0x73, 0x41, 0x4f, 0xce, 0x17, 0x3f, 0x59,
-	0x72, 0x9e, 0xd2, 0x6c, 0x5c, 0xd2, 0x7f, 0x58, 0x9f, 0xfc, 0x17, 0x00, 0x00, 0xff, 0xff, 0x33,
-	0xe6, 0xd6, 0x2e, 0xbd, 0x09, 0x00, 0x00,
+	// 1416 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xac, 0x57, 0x5d, 0x6f, 0x1b, 0x45,
+	0x17, 0xee, 0x26, 0x69, 0x3e, 0x8e, 0x13, 0xdb, 0xd9, 0xb4, 0xe9, 0x36, 0x7d, 0xeb, 0x37, 0x75,
+	0xdf, 0x2a, 0xe9, 0x2b, 0xd5, 0x51, 0x03, 0x42, 0x20, 0x84, 0x20, 0x29, 0xae, 0xda, 0x0a, 0xda,
+	0x68, 0x5d, 0x0a, 0x42, 0x48, 0xab, 0xf1, 0xee, 0xd8, 0x3b, 0xb0, 0xbb, 0xb3, 0xcc, 0xcc, 0xba,
+	0xf1, 0xbf, 0xe0, 0x27, 0xf0, 0x3b, 0x90, 0xb8, 0xef, 0x65, 0xef, 0xe0, 0x0a, 0xa1, 0xf6, 0x2f,
+	0x20, 0x6e, 0xb8, 0x41, 0xf3, 0xb5, 0x6b, 0xd7, 0xb6, 0x84, 0x2a, 0xee, 0xbc, 0xcf, 0x79, 0x66,
+	0xe6, 0x9c, 0x33, 0xe7, 0x3c, 0x67, 0x0c, 0x37, 0xc4, 0x73, 0x92, 0x90, 0x61, 0x2c, 0x8e, 0x18,
+	0x7e, 0x8e, 0x58, 0xc4, 0x8f, 0x46, 0x77, 0xed, 0xcf, 0x4e, 0xce, 0xa8, 0xa0, 0xee, 0x8e, 0xa5,
+	0x74, 0x2c, 0x3e, 0xba, 0xbb, 0x77, 0xb3, 0x5c, 0x17, 0x52, 0x86, 0x79, 0x42, 0x85, 0x5c, 0x68,
+	0x7f, 0xeb, 0x95, 0x7b, 0xfb, 0xf3, 0x36, 0xcf, 0x11, 0x43, 0xa9, 0xd9, 0xbb, 0xfd, 0x8b, 0x03,
+	0x9b, 0xbe, 0xb6, 0xf5, 0x04, 0x12, 0xd8, 0xbd, 0x09, 0x5b, 0x61, 0xc1, 0x18, 0xce, 0x44, 0x80,
+	0x73, 0x1a, 0xc6, 0x9e, 0xb3, 0xef, 0x1c, 0xae, 0xf8, 0x9b, 0x06, 0xec, 0x4a, 0xcc, 0xfd, 0x10,
+	0xf6, 0xa6, 0x48, 0x01, 0x17, 0x88, 0x89, 0x20, 0xc6, 0xf2, 0x2c, 0x6f, 0x49, 0xad, 0xb8, 0x32,
+	0xb9, 0xa2, 0x27, 0xed, 0x0f, 0x94, 0xd9, 0xbd, 0x03, 0x6e, 0x58, 0xa4, 0x45, 0x82, 0x04, 0x19,
+	0xe1, 0x00, 0xa7, 0x44, 0x08, 0x1c, 0x79, 0xcb, 0xfb, 0xce, 0xe1, 0x86, 0xbf, 0x5d, 0x59, 0xba,
+	0xda, 0xe0, 0xbe, 0x07, 0x57, 0x42, 0xc4, 0xd8, 0x38, 0x18, 0x50, 0x26, 0xfd, 0x0c, 0x18, 0x4e,
+	0x11, 0xc9, 0x22, 0xcc, 0xbc, 0x15, 0xb5, 0xe6, 0xb2, 0x32, 0xdf, 0xd7, 0x56, 0xdf, 0x1a, 0xdb,
+	0x3f, 0x3b, 0xe0, 0xaa, 0xb3, 0xef, 0xd1, 0x6c, 0x40, 0x86, 0xcf, 0x30, 0xe3, 0x84, 0x66, 0xae,
+	0x07, 0x6b, 0x23, 0xfd, 0xd3, 0x44, 0x66, 0x3f, 0xdd, 0x03, 0x68, 0xe0, 0xc1, 0x00, 0x87, 0xda,
+	0x2d, 0x15, 0xbb, 0x8e, 0xa4, 0x5e, 0xc2, 0x3a, 0xfa, 0x77, 0x61, 0xb7, 0x22, 0x4e, 0x45, 0xbe,
+	0xac, 0xf8, 0x97, 0x4a, 0xeb, 0x64, 0xd8, 0x1d, 0xd8, 0xd1, 0xb9, 0x4a, 0x70, 0x36, 0x14, 0x71,
+	0xd0, 0x4f, 0x68, 0xf8, 0x1d, 0x57, 0x31, 0xac, 0xf8, 0xdb, 0xca, 0xf4, 0x99, 0xb2, 0x9c, 0x2a,
+	0x43, 0x9b, 0xc2, 0xa5, 0x5e, 0x18, 0xe3, 0xa8, 0x48, 0x70, 0x34, 0x11, 0xc7, 0x3c, 0x37, 0x9d,
+	0xb9, 0x6e, 0x2e, 0x38, 0x70, 0x69, 0xd1, 0x81, 0x7f, 0x3a, 0xb0, 0xa3, 0x4b, 0xe1, 0x5f, 0xcf,
+	0xd8, 0x31, 0x5c, 0x26, 0x19, 0x11, 0x04, 0x25, 0xda, 0x8b, 0x80, 0x17, 0x7d, 0x4e, 0xa2, 0xb1,
+	0xb9, 0xf5, 0x1d, 0x63, 0x54, 0x8e, 0xf4, 0xb4, 0xc9, 0xfd, 0x08, 0xae, 0xe1, 0x94, 0x70, 0x79,
+	0x50, 0x20, 0x18, 0x46, 0xbc, 0x60, 0xe3, 0x80, 0xc7, 0x88, 0xe1, 0xa0, 0x9f, 0xdb, 0xbc, 0x79,
+	0x96, 0xf2, 0xd4, 0x30, 0x7a, 0x92, 0x70, 0x9a, 0x73, 0xf7, 0x36, 0x34, 0xcb, 0x55, 0x28, 0x8a,
+	0x18, 0xe6, 0xdc, 0xbb, 0xa8, 0x4e, 0x6b, 0x58, 0xfc, 0x44, 0xc3, 0xed, 0xdf, 0x1c, 0xb8, 0x5c,
+	0xa6, 0x7a, 0x32, 0x03, 0xff, 0x3c, 0xd7, 0x0b, 0x03, 0x5c, 0x7a, 0xeb, 0x00, 0x97, 0xdf, 0x22,
+	0xc0, 0x95, 0xf9, 0x01, 0xfe, 0xe4, 0xc0, 0xb6, 0x69, 0xf2, 0x33, 0x54, 0x70, 0xac, 0x3b, 0xfd,
+	0x16, 0xd4, 0x6d, 0x13, 0xe7, 0x12, 0x8d, 0x54, 0x6c, 0xeb, 0xbe, 0xed, 0x7f, 0x45, 0x8d, 0xdc,
+	0xff, 0x42, 0x2d, 0x46, 0x3c, 0xc8, 0x71, 0x16, 0x91, 0x6c, 0xa8, 0x02, 0x5a, 0xf7, 0x21, 0x46,
+	0xfc, 0x4c, 0x23, 0x52, 0x31, 0x8c, 0x31, 0x18, 0xa1, 0xa4, 0xc0, 0xca, 0xf3, 0x75, 0x7f, 0xd3,
+	0x80, 0xcf, 0x24, 0xe6, 0xbe, 0x0f, 0x9e, 0x25, 0x55, 0x19, 0x35, 0x5d, 0xa3, 0xaf, 0x72, 0xd7,
+	0xd8, 0xbb, 0xd6, 0xac, 0xfb, 0xa6, 0x7d, 0x06, 0xcd, 0x5e, 0x42, 0xc5, 0x89, 0xc2, 0x74, 0xa9,
+	0xba, 0x57, 0x60, 0x4d, 0xaa, 0x5c, 0x40, 0x22, 0x73, 0x1f, 0xab, 0xf2, 0xf3, 0x61, 0x24, 0x7d,
+	0xd1, 0x65, 0x1e, 0x20, 0xc5, 0x37, 0xf5, 0xb8, 0xa9, 0x41, 0xbd, 0x47, 0xfb, 0xc7, 0x55, 0xa8,
+	0xa9, 0x6b, 0xd3, 0x39, 0x71, 0x6f, 0xc0, 0xa6, 0x6e, 0x94, 0xac, 0x48, 0xfb, 0x98, 0x99, 0x2d,
+	0x6b, 0x0a, 0x7b, 0xac, 0x20, 0x49, 0x99, 0x23, 0x71, 0x35, 0x3e, 0xd1, 0xdf, 0xd7, 0x01, 0x70,
+	0x16, 0x4d, 0x2b, 0xc1, 0x06, 0xce, 0x22, 0x63, 0x3e, 0x80, 0x46, 0x4a, 0x32, 0x81, 0xa3, 0xc0,
+	0xde, 0xa8, 0xb9, 0xad, 0xba, 0x86, 0xbb, 0x06, 0x75, 0xaf, 0xc2, 0xba, 0xd6, 0x3b, 0x92, 0x99,
+	0x82, 0x5d, 0x53, 0xdf, 0x0f, 0x33, 0xa9, 0x9c, 0x11, 0xe1, 0x82, 0x91, 0x7e, 0x21, 0x50, 0x3f,
+	0xc1, 0xc1, 0x00, 0x63, 0xee, 0xad, 0x6a, 0xe5, 0x9c, 0xb2, 0xdc, 0xc7, 0x98, 0xcb, 0x23, 0xab,
+	0x0a, 0x49, 0x69, 0x91, 0x09, 0x6f, 0x4d, 0x1f, 0x59, 0x16, 0x88, 0x42, 0xe5, 0x15, 0xeb, 0xf9,
+	0x10, 0xe4, 0x94, 0x26, 0xde, 0xba, 0x22, 0x81, 0x86, 0xce, 0x28, 0x4d, 0x64, 0xad, 0xa1, 0x24,
+	0xa1, 0x21, 0x92, 0xfe, 0x9b, 0xad, 0x36, 0x74, 0xad, 0x95, 0xb8, 0xd9, 0xeb, 0x1a, 0x6c, 0x68,
+	0xf7, 0x69, 0x21, 0x3c, 0x50, 0x1c, 0x1d, 0xcf, 0x93, 0x42, 0xb8, 0x5f, 0xc1, 0x4e, 0xe9, 0xa6,
+	0x2c, 0xfb, 0x14, 0x8b, 0x98, 0x46, 0x5e, 0x6d, 0xdf, 0x39, 0xac, 0x1f, 0x1f, 0x74, 0xe6, 0xcc,
+	0xb9, 0xce, 0xa7, 0x13, 0xfc, 0xcf, 0x15, 0xdd, 0x77, 0xa3, 0x19, 0xcc, 0x7d, 0x02, 0xcd, 0x72,
+	0x2e, 0x04, 0x39, 0x4d, 0x48, 0x38, 0xf6, 0x36, 0xd5, 0xb6, 0xff, 0x9b, 0xbb, 0x6d, 0x39, 0x27,
+	0xce, 0x14, 0xd7, 0x6f, 0xb0, 0x69, 0xc0, 0x3d, 0x81, 0x35, 0x43, 0xf7, 0xb6, 0xf6, 0x97, 0x0f,
+	0x6b, 0x0b, 0xdc, 0xeb, 0x26, 0x64, 0x48, 0xfa, 0x09, 0x96, 0x25, 0xaa, 0xcb, 0xc9, 0xb7, 0xeb,
+	0xdc, 0x7b, 0xd0, 0x9a, 0x1d, 0x74, 0x01, 0x1a, 0x08, 0xcc, 0x8c, 0x98, 0xd4, 0x55, 0x7e, 0xae,
+	0xcd, 0x0c, 0xbd, 0x13, 0xc9, 0xd1, 0xca, 0xf2, 0x09, 0xac, 0x86, 0x4a, 0x8c, 0xbc, 0xc6, 0xbe,
+	0x73, 0x58, 0x3b, 0x3e, 0x9c, 0xef, 0x46, 0x35, 0x20, 0x7a, 0x19, 0xca, 0x79, 0x4c, 0x85, 0x6f,
+	0xd6, 0x49, 0x6d, 0x32, 0xb7, 0x8b, 0x33, 0x59, 0x1b, 0x91, 0x9d, 0x04, 0x4d, 0x55, 0xa3, 0x3b,
+	0xda, 0xd8, 0xd5, 0x36, 0x33, 0x0b, 0xfe, 0x5a, 0x02, 0x77, 0x36, 0xb4, 0xc5, 0x7d, 0x77, 0x1b,
+	0x9a, 0x34, 0xc7, 0x0c, 0x09, 0xca, 0x4a, 0x31, 0xd2, 0xd2, 0xd7, 0xb0, 0xb8, 0x11, 0x23, 0x29,
+	0x3b, 0x39, 0x1a, 0xd3, 0x42, 0x94, 0x44, 0x3d, 0x04, 0xb6, 0x34, 0x6a, 0x69, 0x33, 0x9d, 0xbc,
+	0x32, 0xdb, 0xc9, 0x92, 0x64, 0x42, 0x7b, 0xae, 0xdb, 0x4e, 0x37, 0xcc, 0xa6, 0x06, 0xbf, 0xd4,
+	0x9d, 0x77, 0x1b, 0x9a, 0x95, 0xe4, 0x18, 0x9e, 0xee, 0x99, 0x4a, 0xdc, 0x0d, 0x75, 0x17, 0x56,
+	0xa7, 0x1a, 0xc5, 0x7c, 0xc9, 0x11, 0x18, 0x26, 0x88, 0xa4, 0x38, 0x52, 0xcd, 0xb1, 0xee, 0xdb,
+	0x4f, 0xf7, 0xff, 0xb0, 0x6d, 0x7e, 0x06, 0xa8, 0x54, 0x07, 0xd9, 0x1a, 0xcb, 0x7e, 0xc3, 0x18,
+	0x4e, 0xac, 0x42, 0xbc, 0xa9, 0x33, 0xb5, 0x19, 0x9d, 0x79, 0xb4, 0xb2, 0x0e, 0xcd, 0x5a, 0xfb,
+	0x8f, 0x65, 0x68, 0xc8, 0xac, 0x77, 0x33, 0x41, 0x44, 0x82, 0x53, 0x9c, 0x89, 0xc5, 0xa9, 0xbf,
+	0x04, 0x17, 0x27, 0x47, 0xaf, 0xfe, 0x90, 0xc3, 0x5f, 0x50, 0x61, 0xc7, 0x51, 0x99, 0x44, 0x2d,
+	0x4b, 0xdb, 0xca, 0x74, 0x3a, 0x99, 0xc9, 0x3b, 0xe0, 0xe2, 0xea, 0x34, 0xdb, 0xe3, 0x5a, 0xa1,
+	0xb6, 0x27, 0x2c, 0xa6, 0xcb, 0x0f, 0xa0, 0xc1, 0x70, 0x82, 0x11, 0xaf, 0xf4, 0x40, 0xa7, 0xbe,
+	0x6e, 0x61, 0x43, 0x9c, 0xbd, 0xed, 0xd5, 0x79, 0xb7, 0x5d, 0xd5, 0xa8, 0x2e, 0xda, 0xc0, 0xbe,
+	0x38, 0xd6, 0x26, 0x6b, 0x74, 0xfa, 0x5d, 0xf2, 0x0d, 0xec, 0xa9, 0x8c, 0x70, 0x81, 0x44, 0xc1,
+	0x65, 0xfa, 0x75, 0x76, 0xc3, 0x84, 0x72, 0xac, 0xee, 0xa9, 0x7e, 0xbc, 0x5f, 0x75, 0x4b, 0xf9,
+	0x34, 0x1e, 0xdd, 0xed, 0xc8, 0xe4, 0xf6, 0xd4, 0x32, 0x7f, 0x97, 0x97, 0xbf, 0x4f, 0xf4, 0x5b,
+	0xf5, 0x9e, 0x5c, 0xef, 0x3e, 0x82, 0xb6, 0xca, 0x19, 0x52, 0x42, 0xc5, 0xf1, 0xf7, 0x05, 0xce,
+	0x42, 0xfc, 0xe6, 0x29, 0x1b, 0xca, 0xbd, 0x56, 0xc5, 0xec, 0x19, 0xe2, 0xd4, 0x5e, 0x72, 0xd2,
+	0x32, 0xac, 0xc4, 0xd3, 0x54, 0x08, 0xa8, 0x75, 0x5b, 0x06, 0x35, 0x93, 0xee, 0xc5, 0x12, 0x34,
+	0x1e, 0xe3, 0x73, 0xf1, 0x00, 0x25, 0x23, 0x92, 0x0d, 0x1f, 0x66, 0x03, 0x2a, 0x6b, 0xc6, 0x0e,
+	0x69, 0x41, 0xaa, 0xd9, 0x64, 0xb0, 0xa7, 0x04, 0x33, 0x99, 0x3b, 0x4b, 0x99, 0xfb, 0xf6, 0x30,
+	0xc6, 0xa9, 0xb7, 0xc7, 0x2d, 0xa8, 0x67, 0xf8, 0x5c, 0x04, 0x22, 0x66, 0x98, 0xc7, 0x34, 0xb1,
+	0xef, 0xef, 0x2d, 0x89, 0x3e, 0xb5, 0xa0, 0xfb, 0x31, 0xfc, 0x47, 0xeb, 0xa2, 0x9c, 0xdb, 0x45,
+	0x26, 0x48, 0x12, 0xa8, 0x65, 0xb1, 0xf6, 0xd0, 0xd4, 0xc7, 0xd5, 0x92, 0xf3, 0x85, 0xa4, 0x4c,
+	0x84, 0xb0, 0xe0, 0xad, 0x7f, 0x71, 0xd1, 0x5b, 0xff, 0x3a, 0x40, 0x8a, 0xce, 0x03, 0x5e, 0xe4,
+	0x79, 0x32, 0x36, 0x95, 0xb2, 0x91, 0xa2, 0xf3, 0x9e, 0x02, 0xdc, 0x43, 0x68, 0xca, 0xa7, 0xc8,
+	0x94, 0x0b, 0x6b, 0xaa, 0x1f, 0xeb, 0x31, 0xe2, 0x13, 0xe7, 0x9e, 0xf6, 0x5e, 0xbc, 0x6a, 0x39,
+	0x2f, 0x5f, 0xb5, 0x9c, 0xdf, 0x5f, 0xb5, 0x9c, 0x1f, 0x5e, 0xb7, 0x2e, 0xbc, 0x7c, 0xdd, 0xba,
+	0xf0, 0xeb, 0xeb, 0xd6, 0x85, 0xaf, 0x3f, 0x18, 0x12, 0x11, 0x17, 0xfd, 0x4e, 0x48, 0xd3, 0x23,
+	0x5b, 0x1b, 0x77, 0x72, 0x46, 0xbf, 0xc5, 0xa1, 0xa8, 0x00, 0x59, 0x2c, 0x47, 0xe7, 0xe5, 0xbf,
+	0x26, 0x31, 0xce, 0x31, 0xef, 0xaf, 0xaa, 0xbf, 0x4c, 0xef, 0xfc, 0x1d, 0x00, 0x00, 0xff, 0xff,
+	0x02, 0xfc, 0xff, 0x5e, 0xb3, 0x0d, 0x00, 0x00,
 }
 
 func (m *RewardsState) Marshal() (dAtA []byte, err error) {
@@ -935,6 +1268,105 @@ func (m *ScheduledEpochConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintRewards(dAtA, i, uint64(m.EpochLengthBlocks))
 		i--
 		dAtA[i] = 0x10
+	}
+	if m.EffectiveEpoch != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.EffectiveEpoch))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *RewardConfigVersion) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *RewardConfigVersion) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *RewardConfigVersion) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.TreasuryAddress) > 0 {
+		i -= len(m.TreasuryAddress)
+		copy(dAtA[i:], m.TreasuryAddress)
+		i = encodeVarintRewards(dAtA, i, uint64(len(m.TreasuryAddress)))
+		i--
+		dAtA[i] = 0x2a
+	}
+	if m.EmissionTreasuryShareBps != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.EmissionTreasuryShareBps))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.InitialBlockSubsidy) > 0 {
+		i -= len(m.InitialBlockSubsidy)
+		copy(dAtA[i:], m.InitialBlockSubsidy)
+		i = encodeVarintRewards(dAtA, i, uint64(len(m.InitialBlockSubsidy)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if m.EffectiveEpoch != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.EffectiveEpoch))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.Version != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.Version))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ScheduledRewardConfig) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ScheduledRewardConfig) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ScheduledRewardConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.TreasuryAddress) > 0 {
+		i -= len(m.TreasuryAddress)
+		copy(dAtA[i:], m.TreasuryAddress)
+		i = encodeVarintRewards(dAtA, i, uint64(len(m.TreasuryAddress)))
+		i--
+		dAtA[i] = 0x22
+	}
+	if m.EmissionTreasuryShareBps != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.EmissionTreasuryShareBps))
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.InitialBlockSubsidy) > 0 {
+		i -= len(m.InitialBlockSubsidy)
+		copy(dAtA[i:], m.InitialBlockSubsidy)
+		i = encodeVarintRewards(dAtA, i, uint64(len(m.InitialBlockSubsidy)))
+		i--
+		dAtA[i] = 0x12
 	}
 	if m.EffectiveEpoch != 0 {
 		i = encodeVarintRewards(dAtA, i, uint64(m.EffectiveEpoch))
@@ -1260,6 +1692,85 @@ func (m *EligibleSlotReward) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *SlotEntitlement) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *SlotEntitlement) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *SlotEntitlement) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.CreatedHeight != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.CreatedHeight))
+		i--
+		dAtA[i] = 0x50
+	}
+	if m.ActivationSequenceAtEpochClose != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.ActivationSequenceAtEpochClose))
+		i--
+		dAtA[i] = 0x48
+	}
+	if m.SlotStatusAtEpochClose != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.SlotStatusAtEpochClose))
+		i--
+		dAtA[i] = 0x40
+	}
+	if m.RewardConfigVersion != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.RewardConfigVersion))
+		i--
+		dAtA[i] = 0x38
+	}
+	if len(m.PayoutAddress) > 0 {
+		i -= len(m.PayoutAddress)
+		copy(dAtA[i:], m.PayoutAddress)
+		i = encodeVarintRewards(dAtA, i, uint64(len(m.PayoutAddress)))
+		i--
+		dAtA[i] = 0x32
+	}
+	if len(m.ReleasedAmount) > 0 {
+		i -= len(m.ReleasedAmount)
+		copy(dAtA[i:], m.ReleasedAmount)
+		i = encodeVarintRewards(dAtA, i, uint64(len(m.ReleasedAmount)))
+		i--
+		dAtA[i] = 0x2a
+	}
+	if len(m.EntitlementAmount) > 0 {
+		i -= len(m.EntitlementAmount)
+		copy(dAtA[i:], m.EntitlementAmount)
+		i = encodeVarintRewards(dAtA, i, uint64(len(m.EntitlementAmount)))
+		i--
+		dAtA[i] = 0x22
+	}
+	if m.TotalBlocksActive != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.TotalBlocksActive))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.Epoch != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.Epoch))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.SlotId != 0 {
+		i = encodeVarintRewards(dAtA, i, uint64(m.SlotId))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
 func (m *NextHalvingInfo) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -1399,6 +1910,55 @@ func (m *ScheduledEpochConfig) Size() (n int) {
 	}
 	if m.EpochLengthBlocks != 0 {
 		n += 1 + sovRewards(uint64(m.EpochLengthBlocks))
+	}
+	return n
+}
+
+func (m *RewardConfigVersion) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Version != 0 {
+		n += 1 + sovRewards(uint64(m.Version))
+	}
+	if m.EffectiveEpoch != 0 {
+		n += 1 + sovRewards(uint64(m.EffectiveEpoch))
+	}
+	l = len(m.InitialBlockSubsidy)
+	if l > 0 {
+		n += 1 + l + sovRewards(uint64(l))
+	}
+	if m.EmissionTreasuryShareBps != 0 {
+		n += 1 + sovRewards(uint64(m.EmissionTreasuryShareBps))
+	}
+	l = len(m.TreasuryAddress)
+	if l > 0 {
+		n += 1 + l + sovRewards(uint64(l))
+	}
+	return n
+}
+
+func (m *ScheduledRewardConfig) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.EffectiveEpoch != 0 {
+		n += 1 + sovRewards(uint64(m.EffectiveEpoch))
+	}
+	l = len(m.InitialBlockSubsidy)
+	if l > 0 {
+		n += 1 + l + sovRewards(uint64(l))
+	}
+	if m.EmissionTreasuryShareBps != 0 {
+		n += 1 + sovRewards(uint64(m.EmissionTreasuryShareBps))
+	}
+	l = len(m.TreasuryAddress)
+	if l > 0 {
+		n += 1 + l + sovRewards(uint64(l))
 	}
 	return n
 }
@@ -1548,6 +2108,48 @@ func (m *EligibleSlotReward) Size() (n int) {
 	}
 	if m.EpochNumber != 0 {
 		n += 1 + sovRewards(uint64(m.EpochNumber))
+	}
+	return n
+}
+
+func (m *SlotEntitlement) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.SlotId != 0 {
+		n += 1 + sovRewards(uint64(m.SlotId))
+	}
+	if m.Epoch != 0 {
+		n += 1 + sovRewards(uint64(m.Epoch))
+	}
+	if m.TotalBlocksActive != 0 {
+		n += 1 + sovRewards(uint64(m.TotalBlocksActive))
+	}
+	l = len(m.EntitlementAmount)
+	if l > 0 {
+		n += 1 + l + sovRewards(uint64(l))
+	}
+	l = len(m.ReleasedAmount)
+	if l > 0 {
+		n += 1 + l + sovRewards(uint64(l))
+	}
+	l = len(m.PayoutAddress)
+	if l > 0 {
+		n += 1 + l + sovRewards(uint64(l))
+	}
+	if m.RewardConfigVersion != 0 {
+		n += 1 + sovRewards(uint64(m.RewardConfigVersion))
+	}
+	if m.SlotStatusAtEpochClose != 0 {
+		n += 1 + sovRewards(uint64(m.SlotStatusAtEpochClose))
+	}
+	if m.ActivationSequenceAtEpochClose != 0 {
+		n += 1 + sovRewards(uint64(m.ActivationSequenceAtEpochClose))
+	}
+	if m.CreatedHeight != 0 {
+		n += 1 + sovRewards(uint64(m.CreatedHeight))
 	}
 	return n
 }
@@ -1938,6 +2540,329 @@ func (m *ScheduledEpochConfig) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRewards(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *RewardConfigVersion) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRewards
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RewardConfigVersion: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RewardConfigVersion: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Version", wireType)
+			}
+			m.Version = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Version |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EffectiveEpoch", wireType)
+			}
+			m.EffectiveEpoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EffectiveEpoch |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field InitialBlockSubsidy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRewards
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.InitialBlockSubsidy = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EmissionTreasuryShareBps", wireType)
+			}
+			m.EmissionTreasuryShareBps = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EmissionTreasuryShareBps |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TreasuryAddress", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRewards
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.TreasuryAddress = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRewards(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ScheduledRewardConfig) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRewards
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ScheduledRewardConfig: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ScheduledRewardConfig: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EffectiveEpoch", wireType)
+			}
+			m.EffectiveEpoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EffectiveEpoch |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field InitialBlockSubsidy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRewards
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.InitialBlockSubsidy = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EmissionTreasuryShareBps", wireType)
+			}
+			m.EmissionTreasuryShareBps = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EmissionTreasuryShareBps |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TreasuryAddress", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRewards
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.TreasuryAddress = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRewards(dAtA[iNdEx:])
@@ -2947,6 +3872,285 @@ func (m *EligibleSlotReward) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EpochNumber |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRewards(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *SlotEntitlement) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRewards
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: SlotEntitlement: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: SlotEntitlement: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SlotId", wireType)
+			}
+			m.SlotId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.SlotId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Epoch", wireType)
+			}
+			m.Epoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Epoch |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TotalBlocksActive", wireType)
+			}
+			m.TotalBlocksActive = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TotalBlocksActive |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EntitlementAmount", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRewards
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EntitlementAmount = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ReleasedAmount", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRewards
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ReleasedAmount = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PayoutAddress", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRewards
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRewards
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.PayoutAddress = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RewardConfigVersion", wireType)
+			}
+			m.RewardConfigVersion = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.RewardConfigVersion |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 8:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SlotStatusAtEpochClose", wireType)
+			}
+			m.SlotStatusAtEpochClose = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.SlotStatusAtEpochClose |= types.SlotStatus(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 9:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ActivationSequenceAtEpochClose", wireType)
+			}
+			m.ActivationSequenceAtEpochClose = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.ActivationSequenceAtEpochClose |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CreatedHeight", wireType)
+			}
+			m.CreatedHeight = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRewards
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CreatedHeight |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}

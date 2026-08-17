@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -17,6 +18,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil/integration"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	"github.com/twilight-project/twilight-core/x/rewards/keeper"
 	"github.com/twilight-project/twilight-core/x/rewards/types"
@@ -44,12 +46,33 @@ type bankSend struct {
 	amounts   sdk.Coins
 }
 
-func (m *bankKeeperMock) MintCoins(_ context.Context, _ string, amounts sdk.Coins) error {
+// The double models escrow, not just calls.
+//
+// It used to record mints and sends without moving any balance, which made
+// GetBalance report zero however much had been minted. That was harmless while
+// nothing read the module balance back; it stopped being harmless once
+// finalization began asserting
+//
+//	escrow == outstanding liability + carry
+//
+// against it, because a double that never credits escrow reports every correct
+// chain as insolvent. Mint credits the module account and a send debits it, which
+// is what a real bank keeper does and what the assertion is written against.
+//
+// The call counters remain, and remain the right tool for the B2 and
+// zero-remainder cases: those are about whether a keeper method was INVOKED,
+// which a balance comparison cannot distinguish from a zero-value transfer.
+//
+// Note the counters are not transactional. The double is a plain Go object, so a
+// call made inside a cache that is later discarded still increments them. Tests
+// that need rollback evidence assert on state, not on counters.
+func (m *bankKeeperMock) MintCoins(_ context.Context, moduleName string, amounts sdk.Coins) error {
 	m.mintCalls++
 	if m.mintErr != nil {
 		return m.mintErr
 	}
 	m.minted = m.minted.Add(amounts...)
+	m.credit(moduleAccountAddress(), amounts)
 	return nil
 }
 
@@ -59,6 +82,8 @@ func (m *bankKeeperMock) SendCoinsFromModuleToAccount(_ context.Context, _ strin
 		return m.sendErr
 	}
 	m.sends = append(m.sends, bankSend{recipient: recipient, amounts: amounts})
+	m.debit(moduleAccountAddress(), amounts)
+	m.credit(recipient, amounts)
 	return nil
 }
 
@@ -74,6 +99,50 @@ func (m *bankKeeperMock) GetBalance(_ context.Context, address sdk.AccAddress, d
 		return coin
 	}
 	return sdk.NewInt64Coin(denom, 0)
+}
+
+func (m *bankKeeperMock) credit(address sdk.AccAddress, amounts sdk.Coins) {
+	m.move(address, amounts, false)
+}
+
+func (m *bankKeeperMock) debit(address sdk.AccAddress, amounts sdk.Coins) {
+	m.move(address, amounts, true)
+}
+
+// move applies a signed balance change.
+//
+// The arithmetic is done on math.Int rather than through sdk.Coin, which panics
+// on a negative result. That difference is deliberate and is the one thing this
+// double does NOT model: a real bank keeper refuses a transfer that would
+// overdraw, and here the balance is simply allowed to go negative.
+//
+// Modeling insufficiency would make every unit test of a single keeper method
+// have to fund escrow first, which is noise for tests about address rules or
+// call counts. Insufficient-funds behavior belongs to the bank module and is
+// exercised against the real one in the app-level proof; what this double is
+// here to support is the solvency assertion, which only needs escrow to track
+// mints and sends faithfully.
+func (m *bankKeeperMock) move(address sdk.AccAddress, amounts sdk.Coins, negate bool) {
+	if m.balances == nil {
+		m.balances = make(map[string]sdk.Coin)
+	}
+	for _, amount := range amounts {
+		current, ok := m.balances[address.String()]
+		if !ok {
+			current = sdk.NewInt64Coin(amount.Denom, 0)
+		}
+		delta := amount.Amount
+		if negate {
+			delta = delta.Neg()
+		}
+		m.balances[address.String()] = sdk.Coin{Denom: amount.Denom, Amount: current.Amount.Add(delta)}
+	}
+}
+
+// moduleAccountAddress mirrors accountKeeperMock: the rewards escrow address the
+// double credits and debits.
+func moduleAccountAddress() sdk.AccAddress {
+	return sdk.AccAddress(make([]byte, 20))
 }
 
 type coreSlotKeeperMock struct {
@@ -122,11 +191,12 @@ func setupKeeper(t *testing.T, coreSlotKeeper keeper.CoreSlotKeeper) (keeper.Kee
 	ctx := sdk.NewContext(cms, cmtproto.Header{Height: 1}, false, log.NewNopLogger())
 	bank := &bankKeeperMock{}
 	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(keys[types.StoreKey]), accountKeeperMock{}, bank, coreSlotKeeper, testEconomicAddresses(t))
-	// The canonical pause state and the open counter have no defaults: after
-	// genesis an absent one is corruption, so every fixture must establish them
-	// exactly as InitGenesis would.
+	// The canonical pause state, the open counter and the outstanding liability
+	// have no defaults: after genesis an absent one is corruption, so every fixture
+	// must establish them exactly as InitGenesis would.
 	require.NoError(t, k.SetPauseState(ctx, types.RewardsPauseState{}))
 	require.NoError(t, k.SetOpenRewardEnabledBlocks(ctx, 0))
+	require.NoError(t, k.SetOutstandingEntitlementLiability(ctx, sdkmath.ZeroInt()))
 	return k, ctx, bank
 }
 
@@ -145,6 +215,20 @@ func seedEpochTimeline(
 		EffectiveStartHeight: state.CurrentEpochStartHeight,
 		EpochLengthBlocks:    params.EpochLengthBlocks,
 	}))
+}
+
+// seedRewardConfigTimeline writes the canonical reward-configuration anchor.
+//
+// Always version 1 at effective epoch 1, whatever epoch the fixture opens at.
+// That differs from seedEpochTimeline, which anchors geometry at the fixture's
+// own epoch: the reward anchor is the permanent bootstrap version targets 1 and 2
+// resolve to, so a fixture that anchored it elsewhere would be testing against a
+// history no chain can have.
+func seedRewardConfigTimeline(t *testing.T, k keeper.Keeper, ctx sdk.Context, params types.Params) {
+	t.Helper()
+	anchor := types.DefaultRewardConfigVersion(params)
+	require.NoError(t, k.RewardConfigVersions.Set(ctx, anchor.EffectiveEpoch, anchor))
+	require.NoError(t, k.RewardConfigVersionIndex.Set(ctx, anchor.Version, anchor.EffectiveEpoch))
 }
 
 func (m *bankKeeperMock) failMint() {
@@ -190,4 +274,9 @@ func validClaim(slotID, epoch uint64) types.EligibleSlotReward {
 func TestKeeperSchemaConstructs(t *testing.T) {
 	k, _, _ := setupKeeper(t, &coreSlotKeeperMock{})
 	require.NotNil(t, k.Schema)
+}
+
+// coins builds a native-denom amount for funding the bank double.
+func coins(amount int64) sdk.Coins {
+	return sdk.NewCoins(sdk.NewInt64Coin(appparams.NativeBaseDenom, amount))
 }

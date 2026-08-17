@@ -1,6 +1,7 @@
 syntax = "proto3";
 package twilight.rewards.v1;
 
+import "twilight/coreslot/v1/coreslot.proto";
 import "twilight/rewards/v1/params.proto";
 
 option go_package = "github.com/twilight-project/twilight-core/x/rewards/types";
@@ -37,6 +38,48 @@ message EpochConfigVersion {
 message ScheduledEpochConfig {
   uint64 effective_epoch = 1;
   uint64 epoch_length_blocks = 2;
+}
+
+// RewardConfigVersion is one immutable entry in the canonical reward-configuration
+// history, and the sole authority for the economics an epoch's emission is
+// computed under.
+//
+// Version 1 is created at fresh genesis effective at epoch 1 and is never
+// rewritten. Every later version is created when a scheduled configuration is
+// promoted, which happens in the closing epoch's EndBlock and only after that
+// epoch's monetary finalization has succeeded.
+//
+// A target epoch N binds the version effective at N-2, so an update accepted
+// during epoch E first affects target E+3. Fresh-genesis targets 1 and 2 have no
+// N-2 boundary inside chain history and resolve the genesis version directly.
+//
+// Deliberately absent: effective_start_height. Unlike EpochConfigVersion this
+// record fixes no geometry, so there is no start-height recurrence and no
+// continuity equation between adjacent versions — only strictly increasing
+// version and effective epoch.
+message RewardConfigVersion {
+  uint64 version = 1;
+  uint64 effective_epoch = 2;
+  string initial_block_subsidy = 3;
+  uint64 emission_treasury_share_bps = 4;
+  string treasury_address = 5;
+}
+
+// ScheduledRewardConfig is the single pending reward-configuration change, keyed
+// by the epoch it becomes effective at.
+//
+// At most one entry exists, and its key is exactly current_epoch + 1: an update
+// accepted during epoch E is staged for E+1 and is promoted at the end of E. A
+// second, unrelated future entry is invalid state rather than a queue.
+//
+// It carries no version number. The version is assigned at promotion time from
+// the history it extends, so a scheduled entry cannot pre-commit an identity that
+// a replacement would then have to reuse.
+message ScheduledRewardConfig {
+  uint64 effective_epoch = 1;
+  string initial_block_subsidy = 2;
+  uint64 emission_treasury_share_bps = 3;
+  string treasury_address = 4;
 }
 
 // RewardsPauseState is the single canonical rewards-pause state.
@@ -100,6 +143,43 @@ message EligibleSlotReward {
   // hashes are indexer data and must never be stored in consensus state.
   reserved 10;
   uint64 epoch_number = 11;
+}
+
+// SlotEntitlement is the canonical immutable economic obligation created for one
+// CoreSlot by one finalized reward epoch.
+//
+// Identity is (slot_id, epoch): exactly one obligation per Slot per epoch,
+// created once and never rewritten. Every field except released_amount is
+// immutable after creation, and released_amount is monotonic within
+// 0 <= released_amount <= entitlement_amount.
+//
+// payout_address is the entitlement's ONLY value destination. It is snapshotted
+// from CoreSlot at the end of the closing block, after that block's transactions
+// have executed, and revalidated through the canonical economic-address rule at
+// that moment. It is also the remainder recipient, which is why no caller-facing
+// destination exists anywhere in the release path: an operator address stored
+// beside it would create a second candidate and a question about which one is
+// paid.
+//
+// slot_status_at_epoch_close and activation_sequence_at_epoch_close are audit
+// fields. They record lifecycle context and have no monetary effect: V2.2 has no
+// activation_participation[] and lifecycle generation cannot confiscate or
+// enlarge an entitlement that was already earned.
+//
+// Zero-amount entitlements are never persisted.
+message SlotEntitlement {
+  uint64 slot_id = 1;
+  uint64 epoch = 2;
+  uint64 total_blocks_active = 3;
+  string entitlement_amount = 4;
+  string released_amount = 5;
+  string payout_address = 6;
+  uint64 reward_config_version = 7;
+  // Audit only.
+  twilight.coreslot.v1.SlotStatus slot_status_at_epoch_close = 8;
+  // Audit only.
+  uint64 activation_sequence_at_epoch_close = 9;
+  uint64 created_height = 10;
 }
 
 message NextHalvingInfo {

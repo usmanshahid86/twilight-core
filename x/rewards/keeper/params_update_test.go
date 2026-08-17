@@ -14,14 +14,18 @@ func TestMsgUpdateRewardsParamsQueuesAuthorityUpdate(t *testing.T) {
 	k, ctx, _ := setupAccountingKeeper(t, core, 1, types.DefaultParams())
 	server := keeper.NewMsgServer(k)
 	next := types.DefaultParams()
-	next.InitialBlockSubsidy = "123"
+	// A still-mutable operational field. The reward economics this test used to
+	// move now belong to the canonical reward-configuration history and are
+	// refused through this path; see
+	// TestMsgUpdateRewardsParamsRejectsImmutableAndUnsupportedChanges.
+	next.TargetBlockTimeSeconds = types.DefaultTargetBlockTimeSeconds + 1
 
 	_, err := server.UpdateRewardsParams(ctx, &types.MsgUpdateRewardsParams{Authority: core.authority, Params: &next})
 	require.NoError(t, err)
 	pending, found, err := k.GetPendingParams(ctx)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "123", pending.InitialBlockSubsidy)
+	require.Equal(t, types.DefaultTargetBlockTimeSeconds+1, pending.TargetBlockTimeSeconds)
 	cfg, err := k.GetCurrentEpochConfig(ctx)
 	require.NoError(t, err)
 	require.Equal(t, types.DefaultEpochLengthBlocks, cfg.EpochLengthBlocks)
@@ -35,22 +39,61 @@ func TestMsgUpdateRewardsParamsRejectsImmutableAndUnsupportedChanges(t *testing.
 	k, ctx, _ := setupAccountingKeeper(t, core, 1, types.DefaultParams())
 	server := keeper.NewMsgServer(k)
 
-	for _, mutate := range []func(*types.Params){
-		func(p *types.Params) { p.NativeDenom = "other" },
-		func(p *types.Params) { p.MaxSupply = "22" },
-		func(p *types.Params) { p.FeeCollectionEnabled = true },
-		func(p *types.Params) { p.FeeDistributionEnabled = true },
-		func(p *types.Params) { p.WeightedRewardsEnabled = true },
-		func(p *types.Params) { p.EmissionTreasuryShareBps = 10_001 },
-		func(p *types.Params) { p.EmissionsEnabled = false },
-		// Epoch geometry belongs to the canonical history; the generic params
-		// path must not be a second, unversioned way to move it.
-		func(p *types.Params) { p.EpochLengthBlocks = 99 },
+	for _, tc := range []struct {
+		name   string
+		mutate func(*types.Params)
+	}{
+		{"native denom", func(p *types.Params) { p.NativeDenom = "other" }},
+		{"max supply", func(p *types.Params) { p.MaxSupply = "22" }},
+		{"fee collection", func(p *types.Params) { p.FeeCollectionEnabled = true }},
+		{"fee distribution", func(p *types.Params) { p.FeeDistributionEnabled = true }},
+		{"weighted rewards", func(p *types.Params) { p.WeightedRewardsEnabled = true }},
+		{"emissions flag", func(p *types.Params) { p.EmissionsEnabled = false }},
+		// Epoch geometry belongs to the canonical epoch-configuration history; the
+		// generic params path must not be a second, unversioned way to move it.
+		{"epoch length", func(p *types.Params) { p.EpochLengthBlocks = 99 }},
+
+		// The economics below belong to the canonical reward-configuration history,
+		// which binds a target two epochs ahead. A change reaching money through
+		// this path instead would take effect at the very next epoch and leave no
+		// version behind to audit.
+		//
+		// Every proposed value here is one the params document would otherwise
+		// accept, which is what makes these cases about OWNERSHIP rather than about
+		// validity: the request is refused because this surface no longer governs
+		// the field, not because the number is bad.
+		{"initial block subsidy", func(p *types.Params) { p.InitialBlockSubsidy = "123" }},
+		{"emission treasury share", func(p *types.Params) { p.EmissionTreasuryShareBps = 100 }},
+		{"treasury address", func(p *types.Params) { p.TreasuryAddress = addr(7) }},
+		{"fee treasury share", func(p *types.Params) { p.FeeTreasuryShareBps = 100 }},
+
+		// Genesis-fixed protocol configuration. Params.Validate already rejects any
+		// other value for these, but "already constant" is a weaker guarantee than
+		// refusing the change, and only the refusal is visible to the authority.
+		{"halving mode", func(p *types.Params) {
+			p.HalvingMode = types.HalvingMode_HALVING_MODE_UNSPECIFIED
+		}},
+		{"remainder policy", func(p *types.Params) {
+			p.RemainderPolicy = types.RemainderPolicy_REMAINDER_POLICY_BURN
+		}},
+		{"distribution method", func(p *types.Params) {
+			p.DistributionMethod = types.DistributionMethod_DISTRIBUTION_METHOD_SNAPSHOT_UNIFORM
+		}},
 	} {
-		next := types.DefaultParams()
-		mutate(&next)
-		_, err := server.UpdateRewardsParams(ctx, &types.MsgUpdateRewardsParams{Authority: core.authority, Params: &next})
-		require.Error(t, err)
+		t.Run(tc.name, func(t *testing.T) {
+			next := types.DefaultParams()
+			tc.mutate(&next)
+			_, err := server.UpdateRewardsParams(ctx,
+				&types.MsgUpdateRewardsParams{Authority: core.authority, Params: &next})
+			require.Error(t, err)
+
+			// Rejected, not accepted-and-ignored: nothing is staged. An authority
+			// that got a success response while the value silently stayed put would
+			// be the exact failure this closure exists to prevent.
+			_, found, stageErr := k.GetPendingParams(ctx)
+			require.NoError(t, stageErr)
+			require.False(t, found, "a refused update must stage nothing")
+		})
 	}
 }
 

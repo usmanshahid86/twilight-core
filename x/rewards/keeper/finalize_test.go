@@ -31,9 +31,20 @@ func TestEndBlockFinalizesAndAllocatesEpoch(t *testing.T) {
 	require.Equal(t, "3600", epoch.AllocatedAmount)
 	require.Equal(t, "0", epoch.CarryOut)
 	require.Equal(t, uint64(360), epoch.RewardEnabledBlocks)
-	require.Len(t, epoch.Rewards, 2)
-	require.Equal(t, []string{"900", "2700"}, []string{epoch.Rewards[0].Amount, epoch.Rewards[1].Amount})
+	// The aggregate no longer embeds per-Slot rows: the canonical record is the
+	// entitlement, and a second immutable copy would be free to drift from the one
+	// that can actually be paid.
+	require.Empty(t, epoch.Rewards)
 	require.True(t, hasEvent(ctx, types.EventTypeEpochFinalized))
+
+	entitlements, err := k.IterateEntitlementsForEpoch(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, entitlements, 2)
+	require.Equal(t, []uint64{1, 2}, []uint64{entitlements[0].SlotId, entitlements[1].SlotId})
+	require.Equal(t, []string{"900", "2700"},
+		[]string{entitlements[0].EntitlementAmount, entitlements[1].EntitlementAmount})
+	// The liability rose by exactly what was allocated, and escrow covers it.
+	requireLiability(t, k, ctx, "3600")
 
 	state, err := k.GetState(ctx)
 	require.NoError(t, err)
@@ -134,18 +145,22 @@ func TestFinalizeActivatesPendingParamsAfterBoundary(t *testing.T) {
 	current, err := k.GetParams(ctx)
 	require.NoError(t, err)
 	pending := current
-	// Epoch length is governed by the canonical history and can no longer travel
-	// through pending params; the subsidy still can.
-	pending.InitialBlockSubsidy = "3"
+	// Neither epoch geometry nor reward economics can travel through pending
+	// params any more: both are governed by canonical histories with their own
+	// effective-epoch rules. What remains mutable is operational metadata, so the
+	// activation mechanism is exercised through that.
+	pending.TargetBlockTimeSeconds = current.TargetBlockTimeSeconds + 1
 	require.NoError(t, k.SetPendingParams(ctx, pending))
 
 	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
 	active, err := k.GetParams(ctx)
 	require.NoError(t, err)
-	require.Equal(t, "3", active.InitialBlockSubsidy)
+	require.Equal(t, current.TargetBlockTimeSeconds+1, active.TargetBlockTimeSeconds)
 	cfg, err := k.GetCurrentEpochConfig(ctx)
 	require.NoError(t, err)
-	require.Equal(t, "3", cfg.InitialBlockSubsidy)
+	// The subsidy mirror is untouched by the activation, because the pending
+	// document could not have carried a different one.
+	require.Equal(t, current.InitialBlockSubsidy, cfg.InitialBlockSubsidy)
 	// The snapshot's epoch-length mirror is repopulated from canonical history,
 	// never from the promoted params, so it keeps the authoritative value.
 	length, err := k.EpochLengthForEpoch(ctx, 1)

@@ -60,7 +60,6 @@ func allocationRows(blocksActive []consensusvectors.U64) ([]types.SlotActiveBloc
 			SlotID:          slotID,
 			OperatorAddress: mustAddress(byte(2 * slotID)),
 			PayoutAddress:   mustAddress(byte(2*slotID + 1)),
-			RewardWeight:    math.LegacyOneDec(),
 		}
 	}
 	return rows, snapshots
@@ -157,15 +156,16 @@ func runAllocationVectors(t *testing.T, pack consensusvectors.RewardPack, ledger
 			pool := mustAmount(t, v.Pool)
 			rows, snapshots := allocationRows(v.BlocksActive)
 
-			rewards, allocated, carryOut, err := keeper.AllocateUniformActiveBlocks(1, pool, rows, snapshots)
-			require.NoError(t, err, "AllocateUniformActiveBlocks")
+			entitlements, allocated, carryOut, _, err := keeper.AllocateSlotEntitlements(
+				1, pool, rows, snapshots, 1, 1)
+			require.NoError(t, err, "AllocateSlotEntitlements")
 
 			// Entitlements are stated per input Slot, including Slots that receive
 			// nothing; the keeper omits zero-amount rows, so the comparison is made
 			// against a per-Slot map rather than against the returned row order.
-			byslot := make(map[uint64]math.Int, len(rewards))
-			for _, reward := range rewards {
-				byslot[reward.SlotId] = mustAmount(t, reward.Amount)
+			byslot := make(map[uint64]math.Int, len(entitlements))
+			for _, entitlement := range entitlements {
+				byslot[entitlement.SlotId] = mustAmount(t, entitlement.EntitlementAmount)
 			}
 			for i, wantDecimal := range v.Entitlements {
 				slotID := uint64(i + 1)
@@ -219,7 +219,7 @@ func runRequiredAssertions(t *testing.T, pack consensusvectors.RewardPack, ledge
 			for _, v := range pack.AllocationVectors {
 				pool := mustAmount(t, v.Pool)
 				rows, snapshots := allocationRows(v.BlocksActive)
-				_, allocated, _, err := keeper.AllocateUniformActiveBlocks(1, pool, rows, snapshots)
+				_, allocated, _, _, err := keeper.AllocateSlotEntitlements(1, pool, rows, snapshots, 1, 1)
 				require.NoError(t, err)
 				require.Truef(t, allocated.LTE(pool), "%s: allocated %s exceeds pool %s", v.Name, allocated, pool)
 			}
@@ -228,7 +228,7 @@ func runRequiredAssertions(t *testing.T, pack consensusvectors.RewardPack, ledge
 			for _, v := range pack.AllocationVectors {
 				pool := mustAmount(t, v.Pool)
 				rows, snapshots := allocationRows(v.BlocksActive)
-				_, allocated, carryOut, err := keeper.AllocateUniformActiveBlocks(1, pool, rows, snapshots)
+				_, allocated, carryOut, _, err := keeper.AllocateSlotEntitlements(1, pool, rows, snapshots, 1, 1)
 				require.NoError(t, err)
 				require.Equalf(t, pool.Sub(allocated).String(), carryOut.String(), "%s", v.Name)
 			}
@@ -237,7 +237,7 @@ func runRequiredAssertions(t *testing.T, pack consensusvectors.RewardPack, ledge
 			for _, v := range pack.AllocationVectors {
 				pool := mustAmount(t, v.Pool)
 				rows, snapshots := allocationRows(v.BlocksActive)
-				_, _, carryOut, err := keeper.AllocateUniformActiveBlocks(1, pool, rows, snapshots)
+				_, _, carryOut, _, err := keeper.AllocateSlotEntitlements(1, pool, rows, snapshots, 1, 1)
 				require.NoError(t, err)
 				require.Falsef(t, carryOut.IsNegative(), "%s: carry %s is negative", v.Name, carryOut)
 			}
@@ -251,7 +251,7 @@ func runRequiredAssertions(t *testing.T, pack consensusvectors.RewardPack, ledge
 				}
 				pool := mustAmount(t, v.Pool)
 				rows, snapshots := allocationRows(v.BlocksActive)
-				_, _, carryOut, err := keeper.AllocateUniformActiveBlocks(1, pool, rows, snapshots)
+				_, _, carryOut, _, err := keeper.AllocateSlotEntitlements(1, pool, rows, snapshots, 1, 1)
 				require.NoError(t, err)
 				require.Truef(t, carryOut.LTE(math.NewInt(int64(v.NPos.Value()-1))),
 					"%s: carry %s exceeds n_pos-1 = %d", v.Name, carryOut, v.NPos.Value()-1)
@@ -287,7 +287,7 @@ func runRequiredAssertions(t *testing.T, pack consensusvectors.RewardPack, ledge
 				"the two vectors must describe the same epoch pool")
 
 			rows, snapshots := allocationRows(allocVector.BlocksActive)
-			_, _, carryOut, err := keeper.AllocateUniformActiveBlocks(1, poolE, rows, snapshots)
+			_, _, carryOut, _, err := keeper.AllocateSlotEntitlements(1, poolE, rows, snapshots, 1, 1)
 			require.NoError(t, err)
 			require.Equal(t, mustAmount(t, allocVector.CarryOut).String(), carryOut.String())
 
@@ -324,15 +324,16 @@ func runNegativeDiscriminators(t *testing.T, pack consensusvectors.RewardPack, l
 		t.Run(v.Name, func(t *testing.T) {
 			pool := mustAmount(t, v.Pool)
 			rows, snapshots := allocationRows(v.BlocksActive)
-			rewards, allocated, _, err := keeper.AllocateUniformActiveBlocks(1, pool, rows, snapshots)
+			entitlements, allocated, _, _, err := keeper.AllocateSlotEntitlements(
+				1, pool, rows, snapshots, 1, 1)
 			require.NoError(t, err)
 
 			produced := make([]math.Int, len(v.BlocksActive))
 			for i := range produced {
 				produced[i] = math.ZeroInt()
 			}
-			for _, reward := range rewards {
-				produced[reward.SlotId-1] = mustAmount(t, reward.Amount)
+			for _, entitlement := range entitlements {
+				produced[entitlement.SlotId-1] = mustAmount(t, entitlement.EntitlementAmount)
 			}
 
 			switch v.Name {
