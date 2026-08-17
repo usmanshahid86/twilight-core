@@ -3,8 +3,12 @@ name: CI
 on:
   push:
     branches: [main, develop]
+  # Deliberately unfiltered by base branch. A base filter of [main, develop] gates
+  # only the bottom PR of a stack: every PR that targets another feature branch —
+  # which is how a large change is split into reviewable gates — would get no CI at
+  # all, and would get it silently. Running on every pull request costs extra runs
+  # and closes that gap. docs.yml already triggers this way.
   pull_request:
-    branches: [main, develop]
 
 permissions:
   contents: read
