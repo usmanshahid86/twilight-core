@@ -221,3 +221,89 @@ func TestFreshGenesisPinsTheDeprecatedEconomicMirrors(t *testing.T) {
 		require.NoError(t, genesis.Validate())
 	})
 }
+
+// TestRewardConfigSubsidyAdmitsOneSpellingOnly closes the alternate-representation
+// hazard on the value that scales every block's mint.
+//
+// The general amount parser infers the radix, so "010" decodes as 8 and "0x10" as
+// 16. A genesis document or scheduled configuration written with either would
+// therefore emit an amount its own text does not state, silently and forever —
+// the subsidy is immutable protocol economics, not a value anyone re-reads.
+//
+// Every rejected spelling below is one the general parser ACCEPTS. That is what
+// makes the table load-bearing: swap ParseCanonicalAmount back for
+// ParseAmountString in validateRewardEconomics and each of these starts passing
+// validation with the wrong number behind it.
+func TestRewardConfigSubsidyAdmitsOneSpellingOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		subsidy string
+		accept  bool
+	}{
+		{name: "canonical decimal", subsidy: "10", accept: true},
+		{name: "canonical large decimal", subsidy: "1000000000000000000000", accept: true},
+		{name: "octal by leading zero", subsidy: "010"},
+		{name: "hexadecimal", subsidy: "0x10"},
+		{name: "binary", subsidy: "0b101"},
+		{name: "explicit octal", subsidy: "0o17"},
+		{name: "digit separator", subsidy: "1_0"},
+		{name: "leading plus", subsidy: "+10"},
+		{name: "leading minus", subsidy: "-10"},
+		{name: "leading whitespace", subsidy: " 10"},
+		{name: "trailing whitespace", subsidy: "10 "},
+		{name: "internal whitespace", subsidy: "1 0"},
+		{name: "decimal point", subsidy: "10.0"},
+		{name: "exponent", subsidy: "1e1"},
+		{name: "empty", subsidy: ""},
+		{name: "zero is canonical but not positive", subsidy: "0"},
+		{name: "padded zero", subsidy: "00"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			version := rewardVersion(0)
+			version.InitialBlockSubsidy = tc.subsidy
+			scheduled := types.ScheduledRewardConfig{
+				EffectiveEpoch:      2,
+				InitialBlockSubsidy: tc.subsidy,
+			}
+			if tc.accept {
+				require.NoError(t, version.Validate())
+				require.NoError(t, scheduled.Validate())
+				return
+			}
+			// Both records are held to the identical rule: a schedule entry becomes a
+			// history version unchanged, so a spelling refused in one and admitted in
+			// the other would be admitted in practice.
+			require.ErrorIs(t, version.Validate(), types.ErrInvalidState)
+			require.ErrorIs(t, scheduled.Validate(), types.ErrInvalidState)
+		})
+	}
+}
+
+// TestCanonicalAmountRejectsWhatTheGeneralParserAccepts states the difference
+// between the two parsers as an explicit fact rather than leaving it implied.
+//
+// It also documents the values: these are not merely "unusual spellings of 10",
+// they are different numbers.
+func TestCanonicalAmountRejectsWhatTheGeneralParserAccepts(t *testing.T) {
+	for _, tc := range []struct {
+		value   string
+		general string // what the general parser decodes it to
+	}{
+		{value: "010", general: "8"},
+		{value: "0x10", general: "16"},
+		{value: "0b101", general: "5"},
+		{value: "0o17", general: "15"},
+		{value: "1_0", general: "10"},
+		{value: "+10", general: "10"},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			lenient, err := types.ParseAmountString("subsidy", tc.value)
+			require.NoError(t, err, "the general parser is expected to accept this")
+			require.Equal(t, tc.general, lenient.String(),
+				"the general parser infers the radix, so this is a different number")
+
+			_, err = types.ParseCanonicalAmount("subsidy", tc.value)
+			require.ErrorIs(t, err, types.ErrInvalidState)
+		})
+	}
+}

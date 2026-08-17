@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"cosmossdk.io/collections"
 
@@ -56,6 +57,51 @@ func validateRewardConfigRecord(key uint64, version types.RewardConfigVersion) e
 			key, version.EffectiveEpoch)
 	}
 	return version.Validate()
+}
+
+// validateResolvedRewardConfig is the COMPLETE canonical rule, applied wherever a
+// stored configuration is resolved for use rather than merely enumerated.
+//
+// It adds the treasury destination to the record's own shape. That check used to
+// run only where a version was WRITTEN — at append and at genesis import — which
+// left the read side one property short of the write side, and the missing
+// property was the one that decides where value goes: a version carrying a
+// positive emission share and an inadmissible destination passed resolution,
+// scaled the mint, and was refused later at the transfer.
+//
+// Refused later still rolls back, because finalization runs in a cache. It is
+// nonetheless the wrong ordering. The mint is the operation that creates the value
+// the transfer then fails to move, so a configuration that cannot direct its own
+// treasury share must be rejected BEFORE the first monetary step, not after it.
+//
+// This is configuration validation, not transfer-time validation, and it does not
+// disturb §33.2: a computed treasury amount of zero still performs no send and
+// still triggers no revalidation of the destination. What is checked here is that
+// the configuration a positive share is read from names a destination at all.
+func (k Keeper) validateResolvedRewardConfig(key uint64, version types.RewardConfigVersion) error {
+	if err := validateRewardConfigRecord(key, version); err != nil {
+		return err
+	}
+	return k.validateRewardConfigTreasury(
+		fmt.Sprintf("reward configuration version %d at effective epoch %d",
+			version.Version, version.EffectiveEpoch), version)
+}
+
+// requireRewardConfigAnchor refuses a history that has lost its permanent anchor.
+//
+// Version 1 effective at epoch 1 is protocol identity, not the earliest row that
+// happens to be present: fresh genesis writes exactly it, and nothing removes it.
+// The predecessor seek below cannot notice its absence on its own — it asks for
+// the greatest effective epoch at or before a bound, and a later version answers
+// that question perfectly well. A history whose anchor has gone is therefore not a
+// shorter history, it is a history this module did not create, and resolving a
+// target against its remains would compute money from it.
+//
+// One point read at a fixed key, so the check does not make resolution cost track
+// chain age. Targets 1 and 2 do not need it: they read the anchor itself.
+func (k Keeper) requireRewardConfigAnchor(ctx context.Context) error {
+	_, err := k.GenesisRewardConfigVersion(ctx)
+	return err
 }
 
 // rewardConfigPredecessor returns the history row immediately before the given
@@ -126,6 +172,11 @@ func (k Keeper) rewardConfigVersionFor(ctx context.Context, epoch uint64) (types
 	if epoch == 0 {
 		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrap("epoch numbers start at 1")
 	}
+	// The permanent anchor, before the seek that would otherwise resolve happily
+	// without it.
+	if err := k.requireRewardConfigAnchor(ctx); err != nil {
+		return types.RewardConfigVersion{}, err
+	}
 
 	rng := new(collections.Range[uint64]).EndInclusive(epoch).Descending()
 	iter, err := k.RewardConfigVersions.Iterate(ctx, rng)
@@ -149,7 +200,7 @@ func (k Keeper) rewardConfigVersionFor(ctx context.Context, epoch uint64) (types
 		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
 			"reward configuration version at effective epoch %d could not be read: %v", key, err)
 	}
-	if err := validateRewardConfigRecord(key, version); err != nil {
+	if err := k.validateResolvedRewardConfig(key, version); err != nil {
 		return types.RewardConfigVersion{}, err
 	}
 	if err := k.validateAdjacentRewardConfigEdge(ctx, version); err != nil {
@@ -174,7 +225,7 @@ func (k Keeper) GenesisRewardConfigVersion(ctx context.Context) (types.RewardCon
 		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
 			"the initial reward configuration version could not be read: %v", err)
 	}
-	if err := validateRewardConfigRecord(1, version); err != nil {
+	if err := k.validateResolvedRewardConfig(1, version); err != nil {
 		return types.RewardConfigVersion{}, err
 	}
 	if version.Version != 1 {
@@ -249,7 +300,7 @@ func (k Keeper) latestRewardConfigVersion(ctx context.Context) (types.RewardConf
 		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
 			"latest reward configuration version could not be read: %v", err)
 	}
-	if err := validateRewardConfigRecord(key, version); err != nil {
+	if err := k.validateResolvedRewardConfig(key, version); err != nil {
 		return types.RewardConfigVersion{}, err
 	}
 	if err := k.validateAdjacentRewardConfigEdge(ctx, version); err != nil {

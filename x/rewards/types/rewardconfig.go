@@ -22,15 +22,22 @@ import (
 // validateRewardEconomics checks the fields the history record and the schedule
 // record have in common.
 //
-// The subsidy is required POSITIVE rather than merely parseable. A zero subsidy
-// would make every later block emit nothing regardless of supply or halving tier,
-// which is a permanent halt of emission expressed as a configuration value; the
-// canonical way to stop emission is REWARDS_PAUSED, which is reversible and is
-// recorded as pause state rather than buried in a reward version.
+// The subsidy is parsed under the CANONICAL encoding rather than the general
+// amount parser. The general parser infers the radix, so "010" decodes as 8 and
+// "0x10" as 16 — a configuration that scales every block's mint would then emit a
+// different amount than the one its own document appears to state, and would do so
+// silently. One spelling per value is what makes the stored record and the genesis
+// text that produced it the same number. See ParseCanonicalAmount.
+//
+// The subsidy is also required POSITIVE rather than merely parseable. A zero
+// subsidy would make every later block emit nothing regardless of supply or
+// halving tier, which is a permanent halt of emission expressed as a configuration
+// value; the canonical way to stop emission is REWARDS_PAUSED, which is reversible
+// and is recorded as pause state rather than buried in a reward version.
 func validateRewardEconomics(label string, subsidy string, shareBps uint64) error {
-	amount, err := ParseAmountString(label+" initial block subsidy", subsidy)
+	amount, err := ParseCanonicalAmount(label+" initial block subsidy", subsidy)
 	if err != nil {
-		return ErrInvalidState.Wrap(err.Error())
+		return err
 	}
 	if !amount.IsPositive() {
 		return ErrInvalidState.Wrapf("%s initial block subsidy must be positive", label)

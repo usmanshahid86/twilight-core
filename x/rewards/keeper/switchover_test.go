@@ -267,13 +267,40 @@ func TestFinalizationZeroOperationsMakeNoKeeperCall(t *testing.T) {
 		require.Zero(t, bank.sendCalls)
 	})
 
-	t.Run("a positive treasury revalidates immediately before transfer", func(t *testing.T) {
+	t.Run("a positive treasury is refused before the mint, not at the transfer", func(t *testing.T) {
+		// This case used to assert the destination was refused AT the transfer, which
+		// it was — after the mint had already run. Resolving a configuration whose
+		// positive share names no usable destination is now refused outright, so the
+		// same inadmissible destination is caught one step earlier and the mint never
+		// happens. The assertion moved with the behavior rather than the other way
+		// round: mintCalls is the part that is new.
 		k, ctx, bank, _ := setupFinalization(t, false)
 		seedTreasuryRewardConfigUnchecked(t, k, ctx, 1_000, testModuleAddress(testModuleAccountName))
 
 		require.ErrorIs(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)), types.ErrInvalidAddress)
+		require.Zero(t, bank.mintCalls, "a configuration that cannot pay its treasury must not mint")
 		require.Zero(t, bank.sendCalls)
 		requireNothingFinalized(t, k, ctx)
+	})
+
+	t.Run("transfer-time revalidation is still live", func(t *testing.T) {
+		// §33.2's transfer-time rule survives the pre-mint check above and is not
+		// made redundant by it. The two answer different questions: resolution asks
+		// whether the CONFIGURATION names a destination, and this asks whether the
+		// destination is still usable at the moment value would actually move. Only
+		// the second can catch a destination that was admissible when the
+		// configuration was accepted and has since stopped being one.
+		k, ctx, bank := setupKeeper(t, &coreSlotKeeperMock{})
+
+		require.ErrorIs(t,
+			k.PayTreasury(ctx, testModuleAddress(testModuleAccountName), sdkmath.NewInt(10), "utwlt"),
+			types.ErrInvalidAddress)
+		require.Zero(t, bank.sendCalls, "the send is not attempted")
+
+		// And the zero-amount half: no transfer, so nothing to revalidate for.
+		require.NoError(t,
+			k.PayTreasury(ctx, testModuleAddress(testModuleAccountName), sdkmath.ZeroInt(), "utwlt"))
+		require.Zero(t, bank.sendCalls)
 	})
 }
 
