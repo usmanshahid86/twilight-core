@@ -273,9 +273,17 @@ func (q queryServer) CurrentEpochActiveBlocks(ctx context.Context, req *types.Qu
 }
 
 func (q queryServer) ModuleBalances(ctx context.Context, _ *types.QueryModuleBalancesRequest) (*types.QueryModuleBalancesResponse, error) {
-	params, err := q.GetParams(ctx)
+	// Read through the monetary boundary, not the raw Params.
+	//
+	// This response exists to be believed: it publishes the escrow balance beside
+	// the two quantities it must equal. Selecting the denom from an unvalidated
+	// Params would let a chain whose monetary configuration execution REFUSES to act
+	// on publish a confident-looking, perfectly balanced tuple denominated in a
+	// token the protocol does not account in. The query and the block path have to
+	// agree on what a usable monetary configuration is, so they use one seam.
+	params, err := q.MonetaryParams(ctx)
 	if err != nil {
-		return nil, err
+		return nil, canonicalStateQueryError("monetary params", err)
 	}
 	denom := params.NativeDenom
 	rewardsAddr := q.accountKeeper.GetModuleAddress(types.ModuleName)
