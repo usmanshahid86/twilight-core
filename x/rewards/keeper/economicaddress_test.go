@@ -236,14 +236,11 @@ func TestRewardRecordOperatorIsAnIdentityNotADestination(t *testing.T) {
 		require.Equal(t, testAccount(10), snapshots[0].PayoutAddress.String())
 	})
 
-	t.Run("genesis with a blocked operator is accepted", func(t *testing.T) {
-		k, ctx, _ := setupKeeperWithBlocked(t, &coreSlotKeeperMock{}, blocked)
-		genesis := genesisWith(t, func(g *types.GenesisState) {
-			record := reward(1, 1, blocked, testAccount(10))
-			g.ClaimRecords = []*types.EligibleSlotReward{&record}
-		})
-		require.NoError(t, k.InitGenesis(ctx, genesis))
-	})
+	// A genesis-level case for the same split used to sit here, carrying a claim
+	// record with a blocked operator. Fresh genesis now refuses closed-epoch state
+	// of either representation, so no genesis document reaches the rule — and the
+	// rule itself is unchanged, exercised above at the setter and below at the
+	// snapshot, which are the two boundaries a conforming chain actually crosses.
 }
 
 // TestAllZeroTreasuryAddressRejected exercises §25's non-zero requirement
@@ -394,20 +391,21 @@ func TestPayTreasuryAcceptsOrdinaryRecipient(t *testing.T) {
 
 // --- genesis ------------------------------------------------------------------
 
-// genesisWith builds a STRUCTURALLY VALID genesis and then applies one mutation.
+// genesisWith builds a STRUCTURALLY VALID fresh genesis and then applies one
+// mutation.
 //
 // Structural validity matters here: types.ValidateGenesis runs first, so a
 // fixture that is malformed for some unrelated reason would be rejected before
-// the economic preflight and the test would pass for the wrong reason. Every
-// case below is therefore well-formed apart from the one address under test —
-// a claim record has its finalized epoch, and every finalized epoch has its
-// config.
+// the economic preflight and the test would pass for the wrong reason. The
+// fixture is therefore the canonical fresh document, well-formed apart from the
+// one address under test.
+//
+// It used to seed a finalized epoch. Fresh genesis now refuses closed-epoch
+// state, so the seed would itself be the reason for rejection and every case
+// built on it would prove nothing about addresses.
 func genesisWith(t *testing.T, mutate func(*types.GenesisState)) types.GenesisState {
 	t.Helper()
 	genesis := *types.DefaultGenesis()
-	config := types.DefaultEpochConfigSnapshot(types.DefaultParams())
-	epoch := finalizedEpoch(1, &config)
-	genesis.FinalizedEpochs = []*types.EpochReward{&epoch}
 	mutate(&genesis)
 	return genesis
 }
@@ -448,27 +446,15 @@ func TestInitGenesisRejectsInadmissibleEconomicAddresses(t *testing.T) {
 		{"reward configuration treasury", func(g *types.GenesisState) {
 			withTreasuryEverywhere(g, blocked, 250)
 		}},
-		// A scheduled reward configuration is deliberately absent from this table.
-		// Fresh genesis rejects a non-empty schedule outright as a content rule, so
-		// no genesis document can reach the destination check for one. The rule that
-		// a scheduled record's destination must be admissible is exercised where it
-		// is actually reachable — at promotion — in
-		// TestScheduledRewardConfigPromotionHoldsTheDestinationRule.
-		{"claim record payout", func(g *types.GenesisState) {
-			record := reward(1, 1, testAccount(9), blocked)
-			g.ClaimRecords = []*types.EligibleSlotReward{&record}
-		}},
-		{"finalized epoch reward payout", func(g *types.GenesisState) {
-			bad := reward(1, 1, testAccount(9), moduleAccount)
-			config := types.DefaultEpochConfigSnapshot(types.DefaultParams())
-			epoch := finalizedEpoch(1, &config, &bad)
-			g.FinalizedEpochs = []*types.EpochReward{&epoch}
-		}},
-		{"finalized epoch config treasury", func(g *types.GenesisState) {
-			config := types.DefaultEpochConfigSnapshot(paramsWithTreasury(blocked, 100, 0))
-			epoch := finalizedEpoch(1, &config)
-			g.FinalizedEpochs = []*types.EpochReward{&epoch}
-		}},
+		// Three collections are deliberately absent from this table, all for the
+		// same reason: fresh genesis rejects a non-empty schedule, a non-empty
+		// finalized-epoch archive and a non-empty claim collection outright, as
+		// content rules, so no genesis document can reach the destination check for
+		// any of them. Each rule is exercised where it IS reachable — the schedule at
+		// promotion, in TestScheduledRewardConfigPromotionHoldsTheDestinationRule,
+		// and the two closed-epoch representations at their setters, in
+		// TestSetClaimRecordRejectsInadmissibleAddresses and
+		// TestSetFinalizedEpochRejectsInadmissibleEmbeddedAddresses.
 	}
 
 	for _, tc := range cases {
@@ -491,25 +477,35 @@ func TestInitGenesisAcceptsDefaultAndOrdinaryState(t *testing.T) {
 	require.Empty(t, stored.TreasuryAddress)
 }
 
-// TestInitGenesisRejectsBeforeAnyWrite is the preflight property: an invalid
-// address in the LAST record must leave no params and no earlier record behind.
+// TestInitGenesisRejectsBeforeAnyWrite is the preflight property: rejection is
+// TOTAL, leaving no partially initialized module behind.
+//
+// The address under test is on the reward configuration, which the preflight
+// reaches after params. Params is written first by the import, so a preflight that
+// merely validated each record as it wrote would leave params persisted and the
+// module half-initialized behind a returned error.
+//
+// This used to make the point with two claim records, an earlier valid one and a
+// later invalid one. Fresh genesis now carries no repeated address-bearing
+// collection at all — the reward history holds exactly one anchor and every
+// closed-epoch collection is empty — so the multi-record form is no longer
+// expressible, and the property it existed to prove is stated directly instead.
 func TestInitGenesisRejectsBeforeAnyWrite(t *testing.T) {
-	k, ctx, _ := setupKeeper(t, &coreSlotKeeperMock{})
+	k, ctx, _ := setupKeeperWithBlocked(t, &coreSlotKeeperMock{}, testAccount(77))
 
 	genesis := genesisWith(t, func(g *types.GenesisState) {
-		first := reward(1, 1, testAccount(9), testAccount(10))
-		last := reward(2, 1, testAccount(9), testModuleAddress(testModuleAccountName))
-		g.ClaimRecords = []*types.EligibleSlotReward{&first, &last}
+		withTreasuryEverywhere(g, testAccount(77), 100)
 	})
 
 	err := k.InitGenesis(ctx, genesis)
 	require.ErrorIs(t, err, types.ErrInvalidAddress)
 
-	// Neither params nor the earlier, valid claim record was persisted.
 	_, err = k.GetParams(ctx)
 	require.Error(t, err, "params must not survive a rejected genesis")
 
-	_, found, err := k.GetClaimRecord(ctx, 1, 1)
-	require.NoError(t, err)
-	require.False(t, found, "an earlier valid claim record must not survive a rejected genesis")
+	_, err = k.GetState(ctx)
+	require.Error(t, err, "rewards state must not survive a rejected genesis")
+
+	_, err = k.GenesisRewardConfigVersion(ctx)
+	require.Error(t, err, "no reward configuration version may survive a rejected genesis")
 }

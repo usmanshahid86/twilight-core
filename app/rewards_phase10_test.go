@@ -26,17 +26,21 @@ import (
 // what a fresh V2 genesis requires. It exists only so a rewards-focused
 // export/import test can run; it is test scaffolding and encodes no claim about
 // how a real continuation import should behave.
-// renormalizeRewardsGenesis rewrites an exported rewards genesis into the
-// fresh-genesis shape this chain now requires: the original-genesis epoch anchor
-// at the importing chain's initial height, the open epoch back at 1, an empty
-// schedule, a clean pause state and a zero open counter.
+// renormalizeRewardsGenesis rewrites an exported rewards genesis's TIMELINE into
+// the fresh-genesis shape: the original-genesis epoch anchor at the importing
+// chain's initial height, the open epoch back at 1, an empty schedule, a clean
+// pause state and a zero open counter.
 //
-// Like its CoreSlot counterpart this is test scaffolding, not a continuation
-// claim. Rewards genesis import is deliberately fresh-only — the epoch anchor is
-// the permanent origin of every later boundary, so a live cursor cannot simply be
-// re-imported — and deciding what a real continuation import means is separate,
-// later work. The monetary state the surrounding test asserts (cumulative
-// emission, finalized epochs, claim records, balances) is preserved untouched.
+// It deliberately does NOT touch the closed-epoch ledger the export carries — the
+// finalized-epoch archive, the outstanding entitlements, the escrow balance behind
+// them. That is the whole point of the test below: a live chain's ledger is not
+// fresh-genesis state, and no amount of scaffolding makes it so. Reshaping it
+// until a fresh importer accepted it would mean deciding, here in a test helper,
+// what an outstanding obligation means across a restart — which is continuation
+// work, deferred by design.
+//
+// Like its CoreSlot counterpart this is test scaffolding and encodes no claim
+// about how a real continuation import should behave.
 func renormalizeRewardsGenesis(t *testing.T, appState []byte, initialHeight int64) []byte {
 	t.Helper()
 	var state map[string]json.RawMessage
@@ -57,15 +61,6 @@ func renormalizeRewardsGenesis(t *testing.T, appState []byte, initialHeight int6
 	rewardAnchor := rewardstypes.DefaultRewardConfigVersion(*rGen.Params)
 	rGen.RewardConfigVersions = []*rewardstypes.RewardConfigVersion{&rewardAnchor}
 	rGen.ScheduledRewardConfigs = nil
-	// Outstanding obligations are DROPPED, not carried.
-	//
-	// Fresh genesis owes nothing, and this renormalizer produces a fresh-genesis
-	// shaped document. Preserving entitlements would require continuation import,
-	// which decides what an outstanding obligation means across a restart and is
-	// deliberately out of scope. Dropping them here is the honest normalization;
-	// the assertions below are scoped to what actually survives it.
-	rGen.SlotEntitlements = nil
-	rGen.OutstandingEntitlementLiability = "0"
 
 	state[rewardstypes.ModuleName] = cdc.MustMarshalJSON(&rGen)
 	out, err := json.Marshal(state)
@@ -98,7 +93,30 @@ func renormalizeCoreSlotGenesis(t *testing.T, appState []byte, initialHeight int
 	return out
 }
 
-func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
+// TestRewardsLiveExportIsCompleteAndIsNotFreshGenesis replaces the export/import
+// round trip this file used to run.
+//
+// The old test exported a chain that had closed an epoch, renormalized the
+// document until a fresh importer accepted it, and then asserted what survived.
+// Getting it accepted meant dropping the outstanding entitlements and zeroing the
+// liability — while leaving the escrow that backed them, and the finalized-epoch
+// archive that recorded them, in place. That is not a fresh genesis and it is not
+// a continuation either; it is a third thing the architecture does not define, and
+// the reconciled fresh-genesis contract now refuses it.
+//
+// What is actually true, and what this asserts:
+//
+//   - the export is COMPLETE. Every monetary fact of the closed epoch is in it:
+//     the archive, the entitlements, the liability, the supply, the escrow.
+//   - a fresh-genesis importer REFUSES it, naming the closed-epoch state as the
+//     reason. Continuation import is deferred work, and until it exists the
+//     refusal is the correct answer rather than a silent partial acceptance.
+//
+// The coverage the old test claimed on the import side — a chain booting and
+// running a complete epoch boundary — is provided by
+// TestFreshGenesisRunsItsFirstEpochBoundary against a genuinely conforming
+// document.
+func TestRewardsLiveExportIsCompleteAndIsNotFreshGenesis(t *testing.T) {
 	a := bootApp(t)
 	params := rewardstypes.DefaultParams()
 	// The shortest admissible epoch length; toy values no longer boot a chain.
@@ -124,71 +142,78 @@ func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
 	require.Equal(t, epochLen+1, exported.Height)
 	require.NotEmpty(t, exported.Validators)
 
-	// x/coreslot genesis import is FRESH-genesis only: §80 requires an ACTIVE slot
-	// to be normalized against the chain's initial height, and height-preserving
-	// continuation for CoreSlot is a separate, deferred piece of work (H7). The
-	// exported slots carry the heights of the chain they came from, so they are
-	// renormalized to this chain's initial height before import.
-	//
-	// This test is about REWARDS continuity across an export/import, which the
-	// assertions below check and which renormalizing CoreSlot lifecycle heights
-	// does not affect. It is deliberately NOT a claim that CoreSlot continuation
-	// works; when H7 lands it will decide what a continuation import means, and
-	// this scaffolding should be revisited then rather than treated as precedent.
+	// --- the export is complete ------------------------------------------------
+
+	epochEmission := strconv.FormatInt(epochLen*416190, 10)
+	ctxA := a.NewUncachedContext(false, cmtproto.Header{Height: exported.Height})
+
+	stateA, err := a.RewardsKeeper.GetState(ctxA)
+	require.NoError(t, err)
+	require.Equal(t, epochEmission, stateA.CumulativeEmitted)
+
+	closed, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctxA, 1)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, epochEmission, closed.MintedEmission)
+
+	entitlement, found, err := a.RewardsKeeper.GetSlotEntitlement(ctxA, 1, 1)
+	require.NoError(t, err)
+	require.True(t, found, "the closed epoch created an obligation")
+	liabilityA, err := a.RewardsKeeper.GetOutstandingEntitlementLiability(ctxA)
+	require.NoError(t, err)
+	require.Equal(t, entitlement.EntitlementAmount, liabilityA.String())
+
+	rewardsAddrA := a.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName)
+	require.Equal(t, epochEmission, a.BankKeeper.GetSupply(ctxA, app.BaseDenom).Amount.String())
+	require.Equal(t, epochEmission, a.BankKeeper.GetBalance(ctxA, rewardsAddrA, app.BaseDenom).Amount.String())
+
+	var exportedRewards rewardstypes.GenesisState
+	var appStateMap map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(exported.AppState, &appStateMap))
+	require.NoError(t, genesisCodec().UnmarshalJSON(appStateMap[rewardstypes.ModuleName], &exportedRewards))
+	require.Len(t, exportedRewards.FinalizedEpochs, 1, "the archive is in the export")
+	require.Len(t, exportedRewards.SlotEntitlements, 1, "the obligation is in the export")
+	require.Equal(t, liabilityA.String(), exportedRewards.OutstandingEntitlementLiability)
+
+	// --- and it is not a fresh genesis -----------------------------------------
+
+	// CoreSlot lifecycle heights are renormalized first so the refusal below is
+	// unambiguously about the rewards ledger and not about a slot activated at the
+	// wrong height.
 	appState := renormalizeCoreSlotGenesis(t, exported.AppState, exported.Height)
 	appState = renormalizeRewardsGenesis(t, appState, exported.Height)
 
 	b := app.New(log.NewNopLogger(), dbm.NewMemDB(), nil, true, sims.EmptyAppOptions{})
-	_, err = b.InitChain(&abci.RequestInitChain{
+	failure := captureInitChainFailure(t, b, &abci.RequestInitChain{
 		ChainId:         "",
 		InitialHeight:   exported.Height,
 		ConsensusParams: &exported.ConsensusParams,
 		AppStateBytes:   appState,
 	})
-	require.NoError(t, err)
+	require.ErrorIs(t, failure, rewardstypes.ErrInvalidGenesis,
+		"a live chain's closed-epoch ledger is not fresh-genesis state, and importing it "+
+			"is continuation work that does not exist yet")
+	require.Contains(t, failure.Error(), "fresh genesis carries 1 finalized epochs")
+}
 
-	_, err = b.FinalizeBlock(&abci.RequestFinalizeBlock{Height: exported.Height, Time: blockTime.Add(3 * time.Second)})
+// captureInitChainFailure runs InitChain and returns the failure it reports.
+//
+// The SDK surfaces a module InitGenesis error by panicking out of InitChain, so a
+// test that wants to assert on the refusal has to catch it. Returning the error
+// rather than matching a formatted string keeps the assertion on the sentinel,
+// which is what the contract is written in terms of.
+func captureInitChainFailure(t *testing.T, a *app.App, req *abci.RequestInitChain) (failure error) {
+	t.Helper()
+	defer func() {
+		recovered := recover()
+		require.NotNil(t, recovered, "InitChain was expected to refuse this genesis")
+		err, ok := recovered.(error)
+		require.Truef(t, ok, "InitChain panicked with a non-error value: %v", recovered)
+		failure = err
+	}()
+	_, err := a.InitChain(req)
 	require.NoError(t, err)
-	_, err = b.Commit()
-	require.NoError(t, err)
-
-	ctx := b.NewUncachedContext(false, cmtproto.Header{Height: exported.Height})
-	state, err := b.RewardsKeeper.GetState(ctx)
-	require.NoError(t, err)
-	// The imported chain re-anchors at epoch 1: rewards genesis import is
-	// fresh-only, so an exported mid-life epoch cursor is renormalized rather
-	// than continued. The monetary facts below are what this test actually
-	// protects, and they survive intact.
-	require.Equal(t, uint64(1), state.CurrentEpoch)
-	epochEmission := strconv.FormatInt(epochLen*416190, 10)
-	require.Equal(t, epochEmission, state.CumulativeEmitted)
-	importedParams, err := b.RewardsKeeper.GetParams(ctx)
-	require.NoError(t, err)
-	require.Equal(t, uint64(epochLen), importedParams.EpochLengthBlocks)
-	importedConfig, err := b.RewardsKeeper.GetCurrentEpochConfig(ctx)
-	require.NoError(t, err)
-	require.Equal(t, uint64(epochLen), importedConfig.EpochLengthBlocks)
-	epoch, found, err := b.RewardsKeeper.GetFinalizedEpoch(ctx, 1)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, epochEmission, epoch.MintedEmission)
-	// Obligations are deliberately absent: the renormalized document is
-	// fresh-genesis shaped and a fresh chain owes nothing. What continuity this
-	// test demonstrates is of the epoch timeline and the emission accounting, not
-	// of outstanding obligations -- that is continuation work.
-	_, found, err = b.RewardsKeeper.GetSlotEntitlement(ctx, 1, 1)
-	require.NoError(t, err)
-	require.False(t, found)
-	liability, err := b.RewardsKeeper.GetOutstandingEntitlementLiability(ctx)
-	require.NoError(t, err)
-	require.True(t, liability.IsZero())
-
-	require.Equal(t, epochEmission, b.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String())
-	rewardsAddr := b.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName)
-	require.Equal(t, epochEmission, b.BankKeeper.GetBalance(ctx, rewardsAddr, app.BaseDenom).Amount.String())
-	active, err := b.RewardsKeeper.GetActiveBlocks(ctx, 1, 1)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), active, "imported app must continue coherent active-block accounting")
+	return nil
 }
 
 func TestRewardsRuntimeFinalizeBlockFailClosed(t *testing.T) {

@@ -78,6 +78,48 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 			return err
 		}
 	}
+	return k.assertGenesisEscrowMatchesCarry(ctx, *genState.Params, *genState.State)
+}
+
+// assertGenesisEscrowMatchesCarry proves the chain starts solvent.
+//
+// The document-level rules already establish that a fresh chain owes nothing:
+// no entitlements, no claim records, and a canonical zero liability. What the
+// document cannot see is the bank, and the bank is where the other half of the
+// equation lives — a genesis that funds the rewards escrow beyond its declared
+// carry starts life holding value no obligation and no carry accounts for, and a
+// genesis that underfunds it starts unable to pay the carry it declares.
+//
+// Either way the discrepancy is invisible until the first epoch closes, where
+// finalization asserts
+//
+//	escrow == outstanding liability + carry
+//
+// and halts the block. That is the right behavior and the wrong moment: the defect
+// is in the genesis document, and refusing it at InitChain means the chain never
+// produces a block rather than producing epoch_length of them and then stopping.
+//
+// Reading the bank here is well-defined because the app initializes bank before
+// rewards. The relation asserted is the same one finalization asserts, with the
+// liability term known to be zero.
+func (k Keeper) assertGenesisEscrowMatchesCarry(
+	ctx context.Context, params types.Params, state types.RewardsState,
+) error {
+	carry, err := types.ParseAmountString("carry forward remainder", state.CarryForwardRemainder)
+	if err != nil {
+		return types.ErrInvalidGenesis.Wrap(err.Error())
+	}
+	address := k.accountKeeper.GetModuleAddress(types.ModuleName)
+	if address == nil {
+		return types.ErrInvalidGenesis.Wrap("rewards module account is missing")
+	}
+	balance := k.bankKeeper.GetBalance(ctx, address, params.NativeDenom).Amount
+	if !balance.Equal(carry) {
+		return types.ErrInvalidGenesis.Wrapf(
+			"genesis funds the rewards escrow with %s%s but declares a carry-forward remainder of %s; "+
+				"a fresh chain owes nothing else, so the two must be equal",
+			balance, params.NativeDenom, carry)
+	}
 	return nil
 }
 

@@ -66,7 +66,7 @@ func (g GenesisState) Validate() error {
 	if err := g.validateRewardConfigTimeline(); err != nil {
 		return err
 	}
-	if err := g.validateEntitlementState(); err != nil {
+	if err := g.validateFreshLedgerState(); err != nil {
 		return err
 	}
 	if g.HasPendingParams {
@@ -80,6 +80,12 @@ func (g GenesisState) Validate() error {
 		return ErrInvalidGenesis.Wrap("pending params require explicit presence flag")
 	}
 
+	// The two loops below are reached only by a document that carries closed-epoch
+	// state, which validateFreshLedgerState above now refuses. They are kept rather
+	// than deleted: they are the RECORD-level rules for these types, and a
+	// continuation importer — which is deferred, not cancelled — needs exactly them.
+	// Removing the shape rules for a collection because the current importer will
+	// not see one would be retiring the legacy surface, which belongs elsewhere.
 	epochs := make(map[uint64]struct{}, len(g.FinalizedEpochs))
 	for _, epoch := range g.FinalizedEpochs {
 		if err := validateEpochReward(epoch); err != nil {
@@ -252,32 +258,57 @@ func (g GenesisState) validateRewardConfigTimeline() error {
 	return g.validateRewardConfigMirrors(*anchor)
 }
 
-// validateEntitlementState checks the fresh-genesis shape of the canonical
-// entitlement state and its liability accumulator.
+// validateFreshLedgerState checks the fresh-genesis shape of everything a closed
+// epoch leaves behind: the finalized-epoch archive, the legacy claim collection,
+// canonical entitlements, and the liability accumulator.
 //
-// A fresh chain has finalized no epoch, so it owes nothing and has recorded
-// nothing. Both rules are canonical CONTENT rules — about which entries may exist
-// at all, not about how a malformed collection is treated — so they are
-// enforceable without settling the open duplicate/ordering question.
+// A fresh chain has finalized no epoch. It therefore has no archive, no
+// obligations in either representation, and owes nothing — and this is a single
+// rule rather than four, because they are four consequences of the same fact.
 //
-// The liability is required to be the explicit string "0" rather than merely to
-// parse as zero. It is written, not defaulted: after initialization an absent
-// value is corruption, and accepting an empty document here would create exactly
-// the absent state the runtime refuses to interpret.
-func (g GenesisState) validateEntitlementState() error {
+// Each is a canonical CONTENT rule, about which entries may exist at all rather
+// than about how a malformed collection is treated, so all four are enforceable
+// without settling the open duplicate/ordering question.
+//
+// # Legacy claim records
+//
+// Refusing them here is not the legacy retirement work package. ClaimRewards, its
+// query surface and its CLI all remain, and continue to serve state seeded
+// directly for explicitly legacy regression coverage. What this closes is the one
+// path by which a conforming POC1 chain could ever hold a claim record at all:
+// V2 finalization creates entitlements and nothing else, so genesis was the only
+// remaining source. With it closed, a payable claim record and a payable
+// entitlement can no longer coexist over one escrow on a conforming chain.
+//
+// # Why the liability must be the exact string
+//
+// It is required to be the literal "0" rather than merely to parse as zero. The
+// value is written, not defaulted, and it is written back out on export; accepting
+// "+0" or "00" here would put a spelling into canonical state that the chain never
+// produces, and every later comparison against it would be comparing something the
+// module cannot itself write.
+func (g GenesisState) validateFreshLedgerState() error {
+	if len(g.FinalizedEpochs) != 0 {
+		return ErrInvalidGenesis.Wrapf(
+			"fresh genesis carries %d finalized epochs; a fresh chain has closed none",
+			len(g.FinalizedEpochs))
+	}
+	if len(g.ClaimRecords) != 0 {
+		return ErrInvalidGenesis.Wrapf(
+			"fresh genesis carries %d legacy claim records; canonical obligations are slot entitlements, "+
+				"created only by finalization",
+			len(g.ClaimRecords))
+	}
 	if len(g.SlotEntitlements) != 0 {
 		return ErrInvalidGenesis.Wrapf(
 			"fresh genesis carries %d slot entitlements; a fresh chain has finalized no epoch",
 			len(g.SlotEntitlements))
 	}
-	liability, err := ParseAmountString("outstanding entitlement liability", g.OutstandingEntitlementLiability)
-	if err != nil {
-		return ErrInvalidGenesis.Wrap(err.Error())
-	}
-	if !liability.IsZero() {
+	if g.OutstandingEntitlementLiability != "0" {
 		return ErrInvalidGenesis.Wrapf(
-			"fresh genesis carries an outstanding entitlement liability of %s; a fresh chain owes nothing",
-			liability)
+			"fresh genesis outstanding entitlement liability is %q; a fresh chain owes nothing, "+
+				"written canonically as \"0\"",
+			g.OutstandingEntitlementLiability)
 	}
 	return nil
 }

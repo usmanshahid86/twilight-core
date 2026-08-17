@@ -20,6 +20,14 @@ func TestDefaultGenesisInitExportRoundTripWithoutBankCalls(t *testing.T) {
 	require.Zero(t, bank.sendCalls)
 }
 
+// TestPopulatedGenesisInitExportRoundTrip round-trips everything a fresh genesis
+// is allowed to carry beyond the defaults.
+//
+// It used to seed a finalized epoch and a claim record. Fresh genesis now refuses
+// closed-epoch state in either representation, so what remains variable is the
+// pending-params pair and an explicitly paused start — which is the whole of the
+// optional fresh-genesis surface, and still enough to catch an import that drops
+// a field or an export that invents one.
 func TestPopulatedGenesisInitExportRoundTrip(t *testing.T) {
 	k, ctx, bank := setupKeeper(t, &coreSlotKeeperMock{})
 	genesis := types.DefaultGenesis()
@@ -27,10 +35,7 @@ func TestPopulatedGenesisInitExportRoundTrip(t *testing.T) {
 	pending.MaxClaimEpochsPerTx++
 	genesis.HasPendingParams = true
 	genesis.PendingParams = &pending
-	epoch := validEpoch(1, *genesis.Params)
-	claim := validClaim(1, 1)
-	genesis.FinalizedEpochs = []*types.EpochReward{&epoch}
-	genesis.ClaimRecords = []*types.EligibleSlotReward{&claim}
+	genesis.PauseState = &types.RewardsPauseState{CurrentPaused: true}
 
 	require.NoError(t, k.InitGenesis(ctx, *genesis))
 	exported, err := k.ExportGenesis(ctx)

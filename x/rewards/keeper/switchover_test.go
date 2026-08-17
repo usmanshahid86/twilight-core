@@ -419,34 +419,35 @@ func slotWithID(slot coreslottypes.CoreSlot, slotID uint64) coreslottypes.CoreSl
 	return slot
 }
 
-// TestLegacyClaimStateAndSolvencyDoNotMix pins a real, deliberate consequence of
-// the switchover rather than leaving it to be discovered.
+// TestLegacyClaimStateAndSolvencyDoNotMix is an EXPLICITLY LEGACY-ONLY fixture.
+//
+// The state it builds is unreachable on a conforming POC1 chain, and the test
+// exists to keep it that way by showing what it would cost.
 //
 // The solvency assertion states that escrow holds exactly what the module
 // believes it owes: outstanding entitlement liability plus carry. A legacy claim
-// record is an obligation the liability accumulator does not count, so escrow
-// funded for one — or drained by paying one — no longer matches, and the next
-// finalization halts the block rather than committing an accounting it cannot
-// justify.
+// record is an obligation the accumulator does not count, so escrow drained by
+// paying one no longer matches, and the chain reports itself insolvent.
 //
-// # Why this is acceptable, and where the fix lives
+// # Why a conforming chain cannot reach this
 //
-// After the switchover nothing creates a claim record, so the only way a chain
-// can hold one is a genesis document that carries it. This tranche deliberately
-// leaves legacy claim genesis handling untouched — retiring it belongs to the
-// later claims-retirement work package, which is also where fresh genesis starts
-// rejecting a non-empty claim collection outright.
+// Two sources, both now closed. V2 finalization creates entitlements and nothing
+// else, so no running chain produces a claim record. And fresh genesis refuses a
+// non-empty claim collection outright, so no chain can start holding one. The only
+// remaining way in is the direct keeper write below, which is what makes this
+// fixture legacy-only rather than a scenario an operator could encounter.
 //
-// Until then the behavior is fail-closed and legible: the chain stops with a
-// message naming the exact discrepancy, rather than paying out against an
-// accounting that no longer adds up. This test exists so that is a known property
-// with a stated owner, not a surprise for whoever meets it first.
+// This is deliberately NOT the legacy retirement work package. ClaimRewards, its
+// queries and its CLI all remain reachable, and this test is part of why they can
+// remain reachable safely: the mixed state they would need is unconstructible
+// through any admitted path, and fail-closed if it somehow arose.
 func TestLegacyClaimStateAndSolvencyDoNotMix(t *testing.T) {
 	k, ctx, bank, _ := setupFinalization(t, false)
 	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
 
-	// A legacy obligation the accumulator does not know about, paid out of the
-	// escrow the entitlements are relying on.
+	// A legacy obligation the accumulator does not know about, written straight to
+	// the store because no admitted path produces one, and paid out of the escrow
+	// the entitlements are relying on.
 	params, err := k.GetParams(ctx)
 	require.NoError(t, err)
 	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 1)))

@@ -10,11 +10,15 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 
+	sdkmath "cosmossdk.io/math"
+
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/std"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 
 	"github.com/twilight-project/twilight-core/app"
 	appparams "github.com/twilight-project/twilight-core/app/params"
@@ -41,8 +45,24 @@ func initChainWithRewards(t *testing.T, a *app.App, rewardsGen *rewardstypes.Gen
 	cdc := genesisCodec()
 
 	operator, payout = acc(2), acc(12)
+	csGen := defaultCoreSlotGenesis(t, operator, payout)
+
+	_, err := a.InitChain(&abci.RequestInitChain{
+		ChainId:         "", // matches the app's default (unset) chain id
+		ConsensusParams: sims.DefaultConsensusParams,
+		AppStateBytes:   rewardsAppState(t, a, cdc, csGen, rewardsGen),
+	})
+	require.NoError(t, err)
+	return operator, payout
+}
+
+// defaultCoreSlotGenesis is the one-ACTIVE-slot CoreSlot genesis every rewards
+// app fixture boots with. It supplies the chain's only CometBFT validator, so a
+// document without it cannot start at all.
+func defaultCoreSlotGenesis(t *testing.T, operator, payout string) *coreslottypes.GenesisState {
+	t.Helper()
 	csParams := coreslottypes.DefaultParams(app.AuthorityAddress(), app.EmergencyAuthorityAddress())
-	csGen := &coreslottypes.GenesisState{
+	return &coreslottypes.GenesisState{
 		Params: &csParams,
 		Slots: []*coreslottypes.CoreSlot{{
 			SlotId: 1, OperatorAddress: operator, PayoutAddress: payout,
@@ -61,20 +81,43 @@ func initChainWithRewards(t *testing.T, a *app.App, rewardsGen *rewardstypes.Gen
 		RewardWeights: []*coreslottypes.OperatorRewardWeight{{SlotId: 1, FinalWeight: coreslottypes.DefaultRewardWeight}},
 		NextSlotId:    2,
 	}
+}
 
+// rewardsAppState assembles the app genesis document, funding the rewards escrow
+// to exactly the carry the rewards genesis declares.
+//
+// The funding is not test convenience. A fresh chain owes nothing but its carry
+// bucket, so the escrow balance and the declared carry are the same number, and
+// rewards genesis now refuses a document where they are not. Writing the bank side
+// here means every fixture states its carry once and cannot drift from it.
+func rewardsAppState(
+	t *testing.T,
+	a *app.App,
+	cdc *codec.ProtoCodec,
+	csGen *coreslottypes.GenesisState,
+	rewardsGen *rewardstypes.GenesisState,
+) []byte {
+	t.Helper()
 	genMap := a.DefaultGenesis()
 	genMap[coreslottypes.ModuleName] = cdc.MustMarshalJSON(csGen)
 	genMap[rewardstypes.ModuleName] = cdc.MustMarshalJSON(rewardsGen)
+
+	carry, ok := sdkmath.NewIntFromString(rewardsGen.State.CarryForwardRemainder)
+	if ok && carry.IsPositive() {
+		var bankGen banktypes.GenesisState
+		require.NoError(t, cdc.UnmarshalJSON(genMap[banktypes.ModuleName], &bankGen))
+		funds := sdk.NewCoins(sdk.NewCoin(appparams.NativeBaseDenom, carry))
+		bankGen.Balances = append(bankGen.Balances, banktypes.Balance{
+			Address: authtypes.NewModuleAddress(rewardstypes.ModuleName).String(),
+			Coins:   funds,
+		})
+		bankGen.Supply = bankGen.Supply.Add(funds...)
+		genMap[banktypes.ModuleName] = cdc.MustMarshalJSON(&bankGen)
+	}
+
 	appState, err := json.Marshal(genMap)
 	require.NoError(t, err)
-
-	_, err = a.InitChain(&abci.RequestInitChain{
-		ChainId:         "", // matches the app's default (unset) chain id
-		ConsensusParams: sims.DefaultConsensusParams,
-		AppStateBytes:   appState,
-	})
-	require.NoError(t, err)
-	return operator, payout
+	return appState
 }
 
 // TestRewardsRuntimeDispatchFinalizeBlock is the runtime-dispatch proof: it drives
