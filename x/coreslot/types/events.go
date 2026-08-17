@@ -17,7 +17,7 @@ const (
 	EventTypeSelectionPolicyUpdated = "coreslot_selection_policy_updated"
 	EventTypeParamsUpdated          = "coreslot_params_updated"
 	EventTypeValidatorUpdateEmitted = "coreslot_validator_update_emitted"
-	EventTypeRotationCancelled      = "coreslot_rotation_cancelled"
+	EventTypeRotationCanceled       = "coreslot_rotation_canceled"
 )
 
 // Event attribute keys.
@@ -37,7 +37,7 @@ const (
 	AttributeKeyAuthority           = "authority"
 )
 
-// Reason values used on coreslot_rotation_cancelled.
+// Reason values used on coreslot_rotation_canceled.
 const (
 	RotationCancelReasonLifecycle = "lifecycle_change"
 	RotationCancelReasonStale     = "stale_rotation"

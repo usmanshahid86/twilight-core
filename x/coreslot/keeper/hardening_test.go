@@ -48,7 +48,7 @@ func twoActiveGenesis(t *testing.T, k keeper.Keeper, ctx sdk.Context, authority,
 
 // --- F1: cancel pending rotation on lifecycle change ---
 
-func TestPendingRotationCancelledOnInactivate(t *testing.T) {
+func TestPendingRotationCanceledOnInactivate(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	twoActiveGenesis(t, k, ctx, authority, emergency)
 	msgs := keeper.NewMsgServer(k)
@@ -65,7 +65,7 @@ func TestPendingRotationCancelledOnInactivate(t *testing.T) {
 
 	pending, err := k.Rotations.Has(ctx, 1)
 	require.NoError(t, err)
-	require.False(t, pending, "pending rotation must be cancelled")
+	require.False(t, pending, "pending rotation must be canceled")
 	staged, err = k.ByConsensus.Has(ctx, consAddrHex(t, newPK))
 	require.NoError(t, err)
 	require.False(t, staged, "staged new key must be released")
@@ -73,10 +73,10 @@ func TestPendingRotationCancelledOnInactivate(t *testing.T) {
 	slot1, err := k.Slots.Get(ctx, 1)
 	require.NoError(t, err)
 	require.Equal(t, consAddrHex(t, pubkey(t, 1)), consAddrHex(t, slot1.ConsensusPubkey), "slot must keep its original key")
-	require.True(t, hasEvent(ctx, types.EventTypeRotationCancelled))
+	require.True(t, hasEvent(ctx, types.EventTypeRotationCanceled))
 }
 
-func TestPendingRotationCancelledOnSuspend(t *testing.T) {
+func TestPendingRotationCanceledOnSuspend(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	twoActiveGenesis(t, k, ctx, authority, emergency)
 	msgs := keeper.NewMsgServer(k)
@@ -96,7 +96,7 @@ func TestPendingRotationCancelledOnSuspend(t *testing.T) {
 	require.False(t, staged)
 }
 
-func TestPendingRotationCancelledOnRemove(t *testing.T) {
+func TestPendingRotationCanceledOnRemove(t *testing.T) {
 	k, ctx, authority, emergency := setup(t)
 	params := types.DefaultParams(authority, emergency)
 	op := sdk.AccAddress(append([]byte{2}, make([]byte, 19)...)).String()
@@ -260,7 +260,7 @@ func TestRotationCancelEventEmitted(t *testing.T) {
 	require.NoError(t, err)
 	_, err = msgs.InactivateCoreSlot(ctx, &types.MsgInactivateCoreSlot{AuthorityOrOperator: authority, SlotId: 1, Reason: "m"})
 	require.NoError(t, err)
-	require.True(t, hasEvent(ctx, types.EventTypeRotationCancelled))
+	require.True(t, hasEvent(ctx, types.EventTypeRotationCanceled))
 }
 
 // --- F4: collapse same-key power change ---

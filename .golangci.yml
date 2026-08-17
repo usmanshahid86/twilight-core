@@ -12,6 +12,15 @@ linters:
   settings:
     misspell:
       locale: US
+    staticcheck:
+      checks:
+        - all
+        # QF1008 asks for embedded fields to be dropped from selectors, turning
+        # blk.Block.Header.AppHash into blk.Block.AppHash. That reads as though
+        # Block carries the field directly, which is exactly what the explicit
+        # path is there to deny. A style preference, and this codebase's
+        # preference is the explicit one.
+        - -QF1008
   exclusions:
     generated: lax
     presets:
@@ -23,6 +32,21 @@ linters:
       - linters:
           - errcheck
         path: _test\.go
+      # Cosmos SDK deprecations that are answered by an SDK upgrade, not by a
+      # local edit.
+      #
+      # The invariant types are deprecated pending the removal of x/crisis, which
+      # this chain does not run — the invariants here are callable backstops, and
+      # there is no non-deprecated SDK type for them until that removal lands.
+      # module.AppModule / module.HasInvariants belong to the same migration.
+      #
+      # Excluded rather than worked around so the code keeps saying what it means.
+      # Revisit as part of the cosmos-sdk / cometbft upgrade, where the
+      # replacements arrive together; do NOT widen this to all of SA1019, which
+      # would hide deprecations that a local edit could fix.
+      - linters:
+          - staticcheck
+        text: "SA1019: (sdk\\.(Invariant|FormatInvariant|InvariantRegistry)|module\\.(AppModule|HasInvariants)) is deprecated"
     paths:
       - .*\.pb\.go$
       - .*\.pb\.gw\.go$
