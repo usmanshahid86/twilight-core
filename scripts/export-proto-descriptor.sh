@@ -84,6 +84,8 @@ TWILIGHT_PROTOS=(
   proto/twilight/rewards/v1/query.proto
   proto/twilight/rewards/v1/rewards.proto
   proto/twilight/rewards/v1/tx.proto
+  proto/twilight/mining/v1/mining.proto
+  proto/twilight/mining/v1/genesis.proto
 )
 # Cosmos SDK tx/auth/base roots for raw transaction decoding (resolved via -I $SDK/proto).
 COSMOS_PROTOS=(

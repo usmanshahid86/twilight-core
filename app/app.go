@@ -40,6 +40,9 @@ import (
 	"github.com/twilight-project/twilight-core/x/coreslot"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
+	"github.com/twilight-project/twilight-core/x/mining"
+	miningkeeper "github.com/twilight-project/twilight-core/x/mining/keeper"
+	miningtypes "github.com/twilight-project/twilight-core/x/mining/types"
 	"github.com/twilight-project/twilight-core/x/rewards"
 	rewardskeeper "github.com/twilight-project/twilight-core/x/rewards/keeper"
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
@@ -71,6 +74,7 @@ type App struct {
 	*runtime.App
 	CoreSlotKeeper coreslotkeeper.Keeper
 	RewardsKeeper  rewardskeeper.Keeper
+	MiningKeeper   miningkeeper.Keeper
 	AccountKeeper  authkeeper.AccountKeeper
 	BankKeeper     bankkeeper.BaseKeeper
 	appCodec       codec.Codec
@@ -150,10 +154,23 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ 
 	)
 	rewardsModule := rewards.NewAppModule(rewardsKeeper)
 
-	if err := runtimeApp.RegisterStores(coreSlotKey, rewardsKey); err != nil {
+	// The mining keeper is constructed last: it reads both custom modules and is
+	// read by neither. It takes no bank or account keeper, which is what makes
+	// "x/mining never moves value itself" a structural property rather than a rule.
+	miningKey := storetypes.NewKVStoreKey(miningtypes.StoreKey)
+	miningKeeper := miningkeeper.NewKeeper(
+		cdc,
+		runtime.NewKVStoreService(miningKey),
+		coreSlotKeeper,
+		rewardsKeeper,
+		economicAddresses,
+	)
+	miningModule := mining.NewAppModule(miningKeeper)
+
+	if err := runtimeApp.RegisterStores(coreSlotKey, rewardsKey, miningKey); err != nil {
 		panic(err)
 	}
-	if err := runtimeApp.RegisterModules(coreSlotModule, rewardsModule); err != nil {
+	if err := runtimeApp.RegisterModules(coreSlotModule, rewardsModule, miningModule); err != nil {
 		panic(err)
 	}
 	if err := runtimeApp.Load(loadLatest); err != nil {
@@ -163,6 +180,7 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ 
 		App:            runtimeApp,
 		CoreSlotKeeper: coreSlotKeeper,
 		RewardsKeeper:  rewardsKeeper,
+		MiningKeeper:   miningKeeper,
 		AccountKeeper:  accountKeeper,
 		BankKeeper:     bankKeeper,
 		appCodec:       cdc,

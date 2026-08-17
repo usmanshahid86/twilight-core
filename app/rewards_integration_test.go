@@ -72,8 +72,14 @@ func TestRewardsModuleWiringAndOrdering(t *testing.T) {
 	// Resolved runtime ordering (Addendum 2 §A, option 1): this is the
 	// post-resolution execution order the runtime will actually use, covering the
 	// legacy(coreslot)/modern(rewards) mix — stronger than config-array reading.
-	require.Equal(t, []string{"coreslot", "rewards"}, a.ModuleManager.OrderEndBlockers)
+	require.Equal(t, []string{"coreslot", "rewards", "mining"}, a.ModuleManager.OrderEndBlockers)
 	require.Equal(t, []string{"rewards"}, a.ModuleManager.OrderBeginBlockers)
+	// mining materializes settlements for whatever epoch rewards just closed, so
+	// it must initialize and end-block after rewards. Its genesis additionally
+	// cross-checks already-imported CoreSlot policies, which is why it is last.
+	require.Equal(t,
+		[]string{"auth", "bank", "consensus", "coreslot", "rewards", "mining"},
+		a.ModuleManager.OrderInitGenesis)
 
 	rewModule := a.ModuleManager.Modules[rewardstypes.ModuleName]
 	// Rewards uses the modern, error-only lifecycle interfaces...

@@ -1,0 +1,45 @@
+syntax = "proto3";
+package twilight.mining.v1;
+
+import "twilight/mining/v1/mining.proto";
+
+option go_package = "github.com/twilight-project/twilight-core/x/mining/types";
+
+// GenesisState is the x/mining genesis document.
+//
+// # What a fresh POC 1 genesis may carry
+//
+// Three histories, each beginning with exactly one version effective at epoch 1;
+// nothing else. The clock and the processed-epoch cursor must be zero, and the
+// settlement collections must be empty. Those are validation rules rather than
+// defaults: a document that states a running chain's settlement state is not a
+// fresh genesis, and normalizing it into one would be inventing continuation
+// semantics that do not exist yet.
+//
+// # What is deliberately absent
+//
+// The derived OPEN-settlement index is not a genesis field. It is rebuilt from
+// the canonical settlement rows during import, so a document cannot ship an index
+// that disagrees with its own settlements — there is no second value to disagree
+// with.
+message GenesisState {
+  repeated MiningDistributionModeVersion distribution_mode_versions = 1;
+  repeated ScheduledMiningDistributionMode scheduled_distribution_modes = 2;
+
+  repeated SelectionParamsVersion selection_params_versions = 3;
+  repeated ScheduledSelectionParams scheduled_selection_params = 4;
+
+  repeated SettlementParamsVersion settlement_params_versions = 5;
+  repeated ScheduledSettlementParams scheduled_settlement_params = 6;
+
+  // settlement_clock counts settlement-enabled blocks and is NOT a block height.
+  // Fresh genesis requires 0.
+  uint64 settlement_clock = 7;
+  // last_processed_reward_epoch is the materialization cursor. Fresh genesis
+  // requires 0.
+  uint64 last_processed_reward_epoch = 8;
+
+  // Both collections must be empty at fresh genesis.
+  repeated SettlementEpochAnchor settlement_epoch_anchors = 9;
+  repeated Settlement settlements = 10;
+}
