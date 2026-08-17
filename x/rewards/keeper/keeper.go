@@ -70,6 +70,25 @@ type Keeper struct {
 	// version. Fresh genesis carries none.
 	ScheduledEpochConfigs collections.Map[uint64, types.ScheduledEpochConfig]
 
+	// RewardConfigVersions is the immutable reward-configuration history keyed by
+	// effective epoch, and the sole authority for the economics an epoch's
+	// emission is computed under.
+	//
+	// Resolution is the same predecessor seek EpochConfigVersions uses, but bounded
+	// by the TARGET's N-2 binding epoch rather than by the epoch itself: a target
+	// binds the configuration that was already effective two epochs earlier, so
+	// nothing accepted after that boundary can change what the target pays.
+	RewardConfigVersions collections.Map[uint64, types.RewardConfigVersion]
+
+	// ScheduledRewardConfigs holds the single pending reward-configuration change,
+	// keyed by the epoch it becomes effective at.
+	//
+	// Unlike ScheduledEpochConfigs this is not a queue: at most one entry exists
+	// and its key is exactly current_epoch + 1. It is consumed in the closing
+	// epoch's EndBlock, after that epoch's monetary finalization has succeeded —
+	// NOT at BeginBlock, which is where the epoch-geometry schedule is consumed.
+	ScheduledRewardConfigs collections.Map[uint64, types.ScheduledRewardConfig]
+
 	// PauseState is the single canonical rewards-pause state.
 	PauseState collections.Item[types.RewardsPauseState]
 
@@ -106,6 +125,10 @@ func NewKeeper(
 			collections.Uint64Key, codec.CollValue[types.EpochConfigVersion](cdc)),
 		ScheduledEpochConfigs: collections.NewMap(sb, types.ScheduledEpochConfigsPrefix, "scheduled_epoch_configs",
 			collections.Uint64Key, codec.CollValue[types.ScheduledEpochConfig](cdc)),
+		RewardConfigVersions: collections.NewMap(sb, types.RewardConfigVersionsPrefix, "reward_config_versions",
+			collections.Uint64Key, codec.CollValue[types.RewardConfigVersion](cdc)),
+		ScheduledRewardConfigs: collections.NewMap(sb, types.ScheduledRewardConfigsPrefix, "scheduled_reward_configs",
+			collections.Uint64Key, codec.CollValue[types.ScheduledRewardConfig](cdc)),
 		PauseState:              collections.NewItem(sb, types.RewardsPauseStateKey, "pause_state", codec.CollValue[types.RewardsPauseState](cdc)),
 		OpenRewardEnabledBlocks: collections.NewItem(sb, types.OpenRewardEnabledBlocksKey, "open_reward_enabled_blocks", collections.Uint64Value),
 	}

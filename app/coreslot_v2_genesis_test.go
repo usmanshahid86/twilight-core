@@ -83,15 +83,17 @@ func bootFreshV2Genesis(t *testing.T, requestedHeight, initialHeight int64) {
 	rParams := rewardstypes.DefaultParams()
 	rSnap := rewardstypes.DefaultEpochConfigSnapshot(rParams)
 	rAnchor := rewardstypes.DefaultEpochConfigVersion(rParams, uint64(initialHeight))
+	rRewardAnchor := rewardstypes.DefaultRewardConfigVersion(rParams)
 	rGen := &rewardstypes.GenesisState{
 		Params: &rParams,
 		State: &rewardstypes.RewardsState{
 			CurrentEpoch: 1, CurrentEpochStartHeight: uint64(initialHeight),
 			CumulativeEmitted: "0", CarryForwardRemainder: "0",
 		},
-		CurrentEpochConfig:  &rSnap,
-		EpochConfigVersions: []*rewardstypes.EpochConfigVersion{&rAnchor},
-		PauseState:          &rewardstypes.RewardsPauseState{},
+		CurrentEpochConfig:   &rSnap,
+		EpochConfigVersions:  []*rewardstypes.EpochConfigVersion{&rAnchor},
+		RewardConfigVersions: []*rewardstypes.RewardConfigVersion{&rRewardAnchor},
+		PauseState:           &rewardstypes.RewardsPauseState{},
 	}
 
 	genMap := a.DefaultGenesis()

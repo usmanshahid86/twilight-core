@@ -19,4 +19,14 @@ var (
 	// Every other failure to resolve a boundary is state that exists and cannot
 	// be trusted, and is reported as ErrInvalidState.
 	ErrEpochConfigNotFound = errorsmod.Register(ModuleName, 8, "epoch configuration not found")
+	// ErrRewardConfigNotFound is the ordinary absence in reward-configuration
+	// resolution: no version is effective at or before the requested binding
+	// epoch, or the genesis anchor is missing. It is separate from
+	// ErrEpochConfigNotFound because the two histories fail for different reasons
+	// and a caller resolving a target must be able to tell which one it lost.
+	//
+	// After genesis this is not a recoverable condition on the block path: the
+	// anchor at epoch 1 governs every target the chain can finalize, so an absent
+	// version means the history is not the history genesis wrote.
+	ErrRewardConfigNotFound = errorsmod.Register(ModuleName, 9, "reward configuration not found")
 )

@@ -224,10 +224,10 @@ func TestRewardsAuthorityMsgRoutedThroughApp(t *testing.T) {
 
 	// --- MsgUpdateRewardsParams routed through the app MsgServiceRouter. ---
 	queued := rewardstypes.DefaultParams()
-	// A mutable economic change. Epoch length is deliberately NOT usable here:
-	// geometry belongs to the canonical epoch-configuration history, so the
-	// generic params path refuses it.
-	queued.InitialBlockSubsidy = "3"
+	// A still-mutable operational change. Neither epoch geometry nor reward
+	// economics can travel this way: both belong to canonical histories with their
+	// own effective-epoch rules, and the generic params path refuses them.
+	queued.TargetBlockTimeSeconds = rewardstypes.DefaultTargetBlockTimeSeconds + 1
 	updateMsg := &rewardstypes.MsgUpdateRewardsParams{Authority: app.AuthorityAddress(), Params: &queued}
 	handler := a.MsgServiceRouter().Handler(updateMsg)
 	require.NotNil(t, handler, "rewards MsgUpdateRewardsParams must be registered on the app router")
@@ -238,7 +238,7 @@ func TestRewardsAuthorityMsgRoutedThroughApp(t *testing.T) {
 	pending, found, err := a.RewardsKeeper.GetPendingParams(ctx)
 	require.NoError(t, err)
 	require.True(t, found, "update must queue PendingParams")
-	require.Equal(t, "3", pending.InitialBlockSubsidy)
+	require.Equal(t, rewardstypes.DefaultTargetBlockTimeSeconds+1, pending.TargetBlockTimeSeconds)
 	// Current epoch config is NOT mutated immediately.
 	cfg, err := a.RewardsKeeper.GetCurrentEpochConfig(ctx)
 	require.NoError(t, err)
@@ -301,9 +301,9 @@ func TestRewardsAppGenesisExportImportRoundTrip(t *testing.T) {
 
 	params := rewardstypes.DefaultParams()
 	pending := rewardstypes.DefaultParams()
-	// A queued, mutable economic change. Epoch length is deliberately not used:
-	// geometry is owned by the canonical epoch-configuration history.
-	pending.InitialBlockSubsidy = "9"
+	// A queued, still-mutable change. Neither epoch geometry nor reward economics
+	// is usable here: both are owned by canonical histories.
+	pending.TargetBlockTimeSeconds = rewardstypes.DefaultTargetBlockTimeSeconds + 1
 	snap := rewardstypes.DefaultEpochConfigSnapshot(params)
 	// Rewards genesis import is fresh-only, exactly as CoreSlot's became: the
 	// original-genesis epoch anchor must be version 1 effective at epoch 1, so a
@@ -345,7 +345,7 @@ func TestRewardsAppGenesisExportImportRoundTrip(t *testing.T) {
 	pendingB, found, err := b.RewardsKeeper.GetPendingParams(ctxB)
 	require.NoError(t, err)
 	require.True(t, found, "pending params must survive the app export/import round trip")
-	require.Equal(t, "9", pendingB.InitialBlockSubsidy)
+	require.Equal(t, rewardstypes.DefaultTargetBlockTimeSeconds+1, pendingB.TargetBlockTimeSeconds)
 }
 
 // TestRewardsEndBlockFailClosedNoHalfCommit proves the fail-closed failure mode

@@ -49,6 +49,9 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 	if err := k.initEpochHistoryGenesis(ctx, genState); err != nil {
 		return err
 	}
+	if err := k.initRewardConfigGenesis(ctx, genState); err != nil {
+		return err
+	}
 	if err := k.SetPauseState(ctx, *genState.PauseState); err != nil {
 		return err
 	}
@@ -79,8 +82,9 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 // address the rewards genesis state would persist or later use.
 //
 // The inventory is the complete set of persisted address-bearing fields: the
-// treasury destination of the active params, of any pending params, and of the
-// current epoch configuration; and, for each finalized epoch, the treasury
+// treasury destination of the active params, of any pending params, of the
+// current epoch configuration, and of every canonical reward configuration and
+// scheduled reward configuration; and, for each finalized epoch, the treasury
 // destination inside its embedded configuration together with the operator and
 // payout addresses of every embedded reward — plus the same pair on every
 // standalone claim record.
@@ -97,6 +101,26 @@ func (k Keeper) validateGenesisEconomicAddresses(genState types.GenesisState) er
 	}
 	if genState.CurrentEpochConfig != nil {
 		if err := k.validateSnapshotTreasury("genesis current epoch config", *genState.CurrentEpochConfig); err != nil {
+			return err
+		}
+	}
+	for _, version := range genState.RewardConfigVersions {
+		if version == nil {
+			continue
+		}
+		if err := k.validateRewardConfigTreasury(
+			fmt.Sprintf("genesis reward configuration version %d", version.Version), *version,
+		); err != nil {
+			return err
+		}
+	}
+	for _, scheduled := range genState.ScheduledRewardConfigs {
+		if scheduled == nil {
+			continue
+		}
+		if err := k.validateScheduledRewardConfigTreasury(
+			fmt.Sprintf("genesis scheduled reward configuration at epoch %d", scheduled.EffectiveEpoch), *scheduled,
+		); err != nil {
 			return err
 		}
 	}
@@ -165,6 +189,20 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 	}); err != nil {
 		return nil, err
 	}
+	if err := k.RewardConfigVersions.Walk(ctx, nil, func(_ uint64, version types.RewardConfigVersion) (bool, error) {
+		value := version
+		genesis.RewardConfigVersions = append(genesis.RewardConfigVersions, &value)
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := k.ScheduledRewardConfigs.Walk(ctx, nil, func(_ uint64, scheduled types.ScheduledRewardConfig) (bool, error) {
+		value := scheduled
+		genesis.ScheduledRewardConfigs = append(genesis.ScheduledRewardConfigs, &value)
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
 	if pending, found, err := k.GetPendingParams(ctx); err != nil {
 		return nil, err
 	} else if found {
@@ -186,6 +224,25 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 		return nil, err
 	}
 	return genesis, nil
+}
+
+// initRewardConfigGenesis imports the canonical reward-configuration history and
+// its schedule.
+//
+// Both collections route their duplicate/ordering treatment through
+// importGenesisCollection, the single named seam described there.
+func (k Keeper) initRewardConfigGenesis(ctx context.Context, genState types.GenesisState) error {
+	for _, version := range genState.RewardConfigVersions {
+		if err := importGenesisCollection(ctx, k.RewardConfigVersions, version.EffectiveEpoch, *version); err != nil {
+			return err
+		}
+	}
+	for _, scheduled := range genState.ScheduledRewardConfigs {
+		if err := importGenesisCollection(ctx, k.ScheduledRewardConfigs, scheduled.EffectiveEpoch, *scheduled); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // initEpochHistoryGenesis imports the canonical epoch-configuration history and

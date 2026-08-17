@@ -51,6 +51,24 @@ func DefaultEpochConfigVersion(params Params, initialHeight uint64) EpochConfigV
 	}
 }
 
+// DefaultRewardConfigVersion returns the initial reward-configuration anchor:
+// version 1, effective at epoch 1 (§33.1).
+//
+// It is derived from Params rather than written independently, because fresh
+// genesis requires the deprecated Params/snapshot economic mirrors to agree with
+// this record exactly. Building the anchor from the same source is what makes the
+// default document self-consistent; the agreement is then enforced on every
+// genesis document, not just the default one.
+func DefaultRewardConfigVersion(params Params) RewardConfigVersion {
+	return RewardConfigVersion{
+		Version:                  1,
+		EffectiveEpoch:           1,
+		InitialBlockSubsidy:      params.InitialBlockSubsidy,
+		EmissionTreasuryShareBps: params.EmissionTreasuryShareBps,
+		TreasuryAddress:          params.TreasuryAddress,
+	}
+}
+
 func DefaultEpochConfigSnapshot(params Params) EpochConfigSnapshot {
 	return EpochConfigSnapshot{
 		SnapshotVersion:          DefaultEpochSnapshotVersion,

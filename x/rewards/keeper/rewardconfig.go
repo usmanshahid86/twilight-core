@@ -1,0 +1,409 @@
+package keeper
+
+import (
+	"context"
+	"errors"
+
+	"cosmossdk.io/collections"
+
+	"github.com/twilight-project/twilight-core/internal/checked"
+	"github.com/twilight-project/twilight-core/x/rewards/types"
+)
+
+// Canonical reward-configuration binding.
+//
+// RewardConfigVersion history is the sole authority for the economics an epoch's
+// emission is computed under: the block subsidy that scales the mint, the share
+// of that mint diverted to the treasury, and the destination it is diverted to.
+//
+// The binding rule is NOT "whatever is effective now" (§33):
+//
+//	RewardConfigForTarget(1)      = the genesis version
+//	RewardConfigForTarget(2)      = the genesis version
+//	RewardConfigForTarget(N >= 3) = the version effective at N-2
+//
+// so an update accepted during epoch E is effective at E+1 and first changes what
+// a target pays at E+3. That gap is the whole point: by the time a target opens
+// its preparation boundary, the economics it will settle under are already fixed
+// and no later transaction can move them.
+//
+// # Relation to the epoch-geometry history
+//
+// This file deliberately mirrors epochhistory.go's structure — bounded record
+// validation, a single adjacent-edge check, a predecessor seek — because the
+// storage shape and the failure modes are the same. It does NOT mirror two things:
+//
+//   - there is no continuity equation. EpochConfigVersion carries an
+//     effective_start_height and a length, so adjacent versions must agree about
+//     where an epoch begins. RewardConfigVersion fixes no geometry and carries no
+//     height, so the only relation across an edge is that version and effective
+//     epoch both strictly increase. Inventing a continuity check here would be
+//     checking a relation the record cannot express.
+//   - promotion happens in EndBlock after monetary finalization succeeds, not at
+//     BeginBlock. See promoteScheduledRewardConfig.
+
+// validateRewardConfigRecord checks one history row against the key it was stored
+// under and against the canonical shape every version must have.
+//
+// The economic admission bounds are re-checked on READ, not only on write. A
+// stored subsidy of zero or a treasury share above the ratified ceiling cannot
+// have been admitted by any current code path, so finding one means the row is
+// not the row that was written — and this row is about to scale a mint.
+func validateRewardConfigRecord(key uint64, version types.RewardConfigVersion) error {
+	if version.EffectiveEpoch != key {
+		return types.ErrInvalidState.Wrapf(
+			"reward configuration version stored at effective epoch %d declares effective epoch %d",
+			key, version.EffectiveEpoch)
+	}
+	return version.Validate()
+}
+
+// rewardConfigPredecessor returns the history row immediately before the given
+// effective epoch, reporting whether one exists.
+func (k Keeper) rewardConfigPredecessor(
+	ctx context.Context, effectiveEpoch uint64,
+) (types.RewardConfigVersion, bool, error) {
+	rng := new(collections.Range[uint64]).EndExclusive(effectiveEpoch).Descending()
+	iter, err := k.RewardConfigVersions.Iterate(ctx, rng)
+	if err != nil {
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
+			"reward configuration history could not be read: %v", err)
+	}
+	defer iter.Close()
+	if !iter.Valid() {
+		return types.RewardConfigVersion{}, false, nil
+	}
+	key, err := iter.Key()
+	if err != nil {
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
+			"reward configuration history key could not be read: %v", err)
+	}
+	version, err := iter.Value()
+	if err != nil {
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
+			"reward configuration version at effective epoch %d could not be read: %v", key, err)
+	}
+	if err := validateRewardConfigRecord(key, version); err != nil {
+		return types.RewardConfigVersion{}, false, err
+	}
+	return version, true, nil
+}
+
+// validateAdjacentRewardConfigEdge checks a version against the one immediately
+// before it.
+//
+// One relation, because one is all the record supports: version and effective
+// epoch must both strictly increase. A version number that does not advance with
+// its effective epoch makes "latest" ambiguous, and "latest" is what the next
+// promotion derives its own identity from.
+//
+// Every record establishes this against its predecessor when it is appended, so a
+// history built only through the append path is inductively ordered; checking one
+// edge on read is what detects a row that changed underneath that induction,
+// without making validation cost grow with chain age.
+func (k Keeper) validateAdjacentRewardConfigEdge(ctx context.Context, version types.RewardConfigVersion) error {
+	predecessor, found, err := k.rewardConfigPredecessor(ctx, version.EffectiveEpoch)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if predecessor.Version >= version.Version {
+		return types.ErrInvalidState.Wrapf(
+			"reward configuration version %d at effective epoch %d does not advance past version %d at effective epoch %d",
+			version.Version, version.EffectiveEpoch, predecessor.Version, predecessor.EffectiveEpoch)
+	}
+	return nil
+}
+
+// rewardConfigVersionFor returns the version effective at the given epoch.
+//
+// This resolves an EFFECTIVE epoch, not a target. Callers that want the
+// configuration governing a target must go through RewardConfigForTarget, which
+// applies the N-2 binding and the bootstrap rule first.
+func (k Keeper) rewardConfigVersionFor(ctx context.Context, epoch uint64) (types.RewardConfigVersion, error) {
+	if epoch == 0 {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrap("epoch numbers start at 1")
+	}
+
+	rng := new(collections.Range[uint64]).EndInclusive(epoch).Descending()
+	iter, err := k.RewardConfigVersions.Iterate(ctx, rng)
+	if err != nil {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
+			"reward configuration history could not be read: %v", err)
+	}
+	defer iter.Close()
+
+	if !iter.Valid() {
+		return types.RewardConfigVersion{}, types.ErrRewardConfigNotFound.Wrapf(
+			"no reward configuration version is effective at or before epoch %d", epoch)
+	}
+	key, err := iter.Key()
+	if err != nil {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
+			"reward configuration history key could not be read: %v", err)
+	}
+	version, err := iter.Value()
+	if err != nil {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
+			"reward configuration version at effective epoch %d could not be read: %v", key, err)
+	}
+	if err := validateRewardConfigRecord(key, version); err != nil {
+		return types.RewardConfigVersion{}, err
+	}
+	if err := k.validateAdjacentRewardConfigEdge(ctx, version); err != nil {
+		return types.RewardConfigVersion{}, err
+	}
+	return version, nil
+}
+
+// GenesisRewardConfigVersion returns the initial reward-configuration anchor.
+//
+// It reads the row stored at effective epoch 1 directly, and requires it to be
+// version 1. That is stricter than "the earliest row": the anchor is permanent
+// protocol identity, and a history whose first entry is not version 1 effective
+// at epoch 1 is not a history this module created.
+func (k Keeper) GenesisRewardConfigVersion(ctx context.Context) (types.RewardConfigVersion, error) {
+	version, err := k.RewardConfigVersions.Get(ctx, 1)
+	if errors.Is(err, collections.ErrNotFound) {
+		return types.RewardConfigVersion{}, types.ErrRewardConfigNotFound.Wrap(
+			"the initial reward configuration version effective at epoch 1 is absent")
+	}
+	if err != nil {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
+			"the initial reward configuration version could not be read: %v", err)
+	}
+	if err := validateRewardConfigRecord(1, version); err != nil {
+		return types.RewardConfigVersion{}, err
+	}
+	if version.Version != 1 {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
+			"the initial reward configuration must be version 1 effective at epoch 1, found version %d",
+			version.Version)
+	}
+	return version, nil
+}
+
+// RewardConfigForTarget returns the reward configuration governing target epoch N
+// (§33.1).
+//
+// # Why the bootstrap branch returns before the subtraction
+//
+// Epoch numbers are unsigned. For targets 1 and 2 there is no N-2 boundary inside
+// chain history at all, and the bootstrap decision is made HERE, structurally
+// ahead of any arithmetic, rather than by guarding a subtraction further down.
+// The distinction matters because the two failure modes are not equally visible:
+//
+//   - a clamp of N-2 to epoch 1 returns the right answer for as long as the
+//     history holds one version, then silently keeps returning the genesis version
+//     after it should have stopped. It encodes a pre-genesis epoch that does not
+//     exist.
+//   - an unguarded subtraction underflows to a huge epoch, and a lookup for the
+//     greatest effective_epoch <= 2^64-1 resolves the LATEST version — the exact
+//     opposite of the intended answer, and a different amount of money.
+//
+// Placing the return above the subtraction means neither is reachable by a later
+// edit that reorders a guard.
+func (k Keeper) RewardConfigForTarget(ctx context.Context, target uint64) (types.RewardConfigVersion, error) {
+	if target == 0 {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrap("epoch numbers start at 1")
+	}
+	if target <= 2 {
+		return k.GenesisRewardConfigVersion(ctx)
+	}
+	bindingEpoch, err := checked.SubUint64(target, 2)
+	if err != nil {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
+			"target epoch %d has no representable N-2 binding boundary: %v", target, err)
+	}
+	return k.rewardConfigVersionFor(ctx, bindingEpoch)
+}
+
+// latestRewardConfigVersion returns the newest history entry, which is also the
+// highest version number.
+//
+// The last row is not trusted on the strength of being last: its key is read and
+// checked against the record, the record is validated, and so is the edge behind
+// it. This value is what the next promoted version derives its identity FROM, so
+// building on a malformed latest row would launder the corruption into a record
+// that afterwards looks canonical.
+func (k Keeper) latestRewardConfigVersion(ctx context.Context) (types.RewardConfigVersion, error) {
+	iter, err := k.RewardConfigVersions.Iterate(ctx, new(collections.Range[uint64]).Descending())
+	if err != nil {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
+			"reward configuration history could not be read: %v", err)
+	}
+	defer iter.Close()
+	if !iter.Valid() {
+		return types.RewardConfigVersion{}, types.ErrRewardConfigNotFound.Wrap(
+			"reward configuration history is empty")
+	}
+	key, err := iter.Key()
+	if err != nil {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
+			"latest reward configuration history key could not be read: %v", err)
+	}
+	version, err := iter.Value()
+	if err != nil {
+		return types.RewardConfigVersion{}, types.ErrInvalidState.Wrapf(
+			"latest reward configuration version could not be read: %v", err)
+	}
+	if err := validateRewardConfigRecord(key, version); err != nil {
+		return types.RewardConfigVersion{}, err
+	}
+	if err := k.validateAdjacentRewardConfigEdge(ctx, version); err != nil {
+		return types.RewardConfigVersion{}, err
+	}
+	return version, nil
+}
+
+// appendRewardConfigVersion writes one immutable history entry.
+//
+// Every property the read path later relies on is established here: the record's
+// own shape, its economic admission bounds, the treasury destination when the
+// share can direct value, and the ordering against the history it extends.
+// Strictly increasing effective epoch also subsumes write-once — a version at an
+// effective epoch that already has one would rewrite history rather than extend
+// it, and is refused rather than overwritten.
+func (k Keeper) appendRewardConfigVersion(ctx context.Context, version types.RewardConfigVersion) error {
+	if err := validateRewardConfigRecord(version.EffectiveEpoch, version); err != nil {
+		return err
+	}
+	if err := k.validateRewardConfigTreasury("reward configuration version", version); err != nil {
+		return err
+	}
+	latest, err := k.latestRewardConfigVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if version.EffectiveEpoch <= latest.EffectiveEpoch {
+		return types.ErrInvalidState.Wrapf(
+			"reward configuration version %d would take effect at epoch %d, at or before the latest version %d effective at epoch %d",
+			version.Version, version.EffectiveEpoch, latest.Version, latest.EffectiveEpoch)
+	}
+	if version.Version <= latest.Version {
+		return types.ErrInvalidState.Wrapf(
+			"reward configuration version %d does not advance past the latest version %d",
+			version.Version, latest.Version)
+	}
+	return k.RewardConfigVersions.Set(ctx, version.EffectiveEpoch, version)
+}
+
+// ValidateScheduledRewardConfigRecord checks one schedule row against the key it
+// was stored under and against the canonical shape a schedule entry must have.
+//
+// A scheduled entry becomes an immutable history version unchanged the moment its
+// epoch opens, so it is held to the same admission bounds as history itself: an
+// inadmissible subsidy or treasury share is refused where it is read, not
+// silently promoted at the boundary.
+func ValidateScheduledRewardConfigRecord(key uint64, scheduled types.ScheduledRewardConfig) error {
+	if scheduled.EffectiveEpoch != key {
+		return types.ErrInvalidState.Wrapf(
+			"scheduled reward configuration stored at epoch %d declares effective epoch %d",
+			key, scheduled.EffectiveEpoch)
+	}
+	return scheduled.Validate()
+}
+
+// ScheduledRewardConfigFor returns the pending reward configuration effective at
+// the given epoch, reporting whether one exists.
+//
+// Absence is ordinary: most epochs schedule nothing. Anything else is corruption.
+func (k Keeper) ScheduledRewardConfigFor(
+	ctx context.Context, effectiveEpoch uint64,
+) (types.ScheduledRewardConfig, bool, error) {
+	scheduled, err := k.ScheduledRewardConfigs.Get(ctx, effectiveEpoch)
+	if errors.Is(err, collections.ErrNotFound) {
+		return types.ScheduledRewardConfig{}, false, nil
+	}
+	if err != nil {
+		return types.ScheduledRewardConfig{}, false, types.ErrInvalidState.Wrapf(
+			"scheduled reward configuration at epoch %d could not be read: %v", effectiveEpoch, err)
+	}
+	if err := ValidateScheduledRewardConfigRecord(effectiveEpoch, scheduled); err != nil {
+		return types.ScheduledRewardConfig{}, false, err
+	}
+	return scheduled, true, nil
+}
+
+// promoteScheduledRewardConfig turns a configuration scheduled for the epoch
+// after the closing one into an immutable history version.
+//
+// # Where this runs, and why not BeginBlock
+//
+// The epoch-geometry schedule is consumed at the first BeginBlock of the epoch it
+// becomes effective at, because geometry has to be known before that block is
+// attributed to an epoch. Reward configuration is the opposite: it is bound two
+// epochs ahead of any target it can affect, so nothing needs it early — and
+// promoting it early would be actively wrong. §94 places promotion in the closing
+// epoch's EndBlock, after that epoch's monetary transition has succeeded, so a
+// configuration can never become effective beside a mint that failed.
+//
+// This function is therefore called from EndBlock with the SAME cache the
+// finalization ran in. Ordering gives "only after success"; sharing the cache
+// gives the converse — a promotion failure discards the mint rather than leaving
+// a committed epoch beside an unconsumed schedule.
+//
+// # The single-entry rule
+//
+// §82 admits at most one scheduled reward configuration, keyed exactly at
+// current_epoch + 1. Any other key is invalid state rather than a queue entry, so
+// the whole collection is checked here rather than only the key being consumed.
+// Doing that is bounded work: the collection holds at most one row.
+func (k Keeper) promoteScheduledRewardConfig(ctx context.Context, closingEpoch uint64) error {
+	effectiveEpoch, err := checked.AddUint64(closingEpoch, 1)
+	if err != nil {
+		return types.ErrInvalidState.Wrap("reward configuration scheduling epoch is exhausted")
+	}
+	if err := k.assertSingleScheduledRewardConfig(ctx, effectiveEpoch); err != nil {
+		return err
+	}
+	scheduled, found, err := k.ScheduledRewardConfigFor(ctx, effectiveEpoch)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+
+	latest, err := k.latestRewardConfigVersion(ctx)
+	if err != nil {
+		return err
+	}
+	nextVersion, err := checked.AddUint64(latest.Version, 1)
+	if err != nil {
+		return types.ErrInvalidState.Wrap("reward configuration version space is exhausted")
+	}
+	if err := k.appendRewardConfigVersion(ctx, types.RewardConfigVersion{
+		Version:                  nextVersion,
+		EffectiveEpoch:           effectiveEpoch,
+		InitialBlockSubsidy:      scheduled.InitialBlockSubsidy,
+		EmissionTreasuryShareBps: scheduled.EmissionTreasuryShareBps,
+		TreasuryAddress:          scheduled.TreasuryAddress,
+	}); err != nil {
+		return err
+	}
+	if err := k.ScheduledRewardConfigs.Remove(ctx, effectiveEpoch); err != nil {
+		return types.ErrInvalidState.Wrapf(
+			"scheduled reward configuration at epoch %d could not be consumed: %v", effectiveEpoch, err)
+	}
+	return nil
+}
+
+// assertSingleScheduledRewardConfig refuses a schedule holding anything other
+// than the one admissible entry.
+//
+// Walking the collection is bounded by the rule being enforced: a valid schedule
+// holds zero or one row, and an invalid one halts the block on the first
+// unexpected key rather than being walked to the end.
+func (k Keeper) assertSingleScheduledRewardConfig(ctx context.Context, effectiveEpoch uint64) error {
+	return k.ScheduledRewardConfigs.Walk(ctx, nil, func(key uint64, _ types.ScheduledRewardConfig) (bool, error) {
+		if key != effectiveEpoch {
+			return true, types.ErrInvalidState.Wrapf(
+				"a reward configuration is scheduled at epoch %d, but the only admissible scheduling key is epoch %d",
+				key, effectiveEpoch)
+		}
+		return false, nil
+	})
+}

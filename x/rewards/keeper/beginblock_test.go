@@ -201,6 +201,7 @@ func setupAccountingKeeper(
 	require.NoError(t, err)
 	require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
 	seedEpochTimeline(t, k, ctx, params, state)
+	seedRewardConfigTimeline(t, k, ctx, params)
 	return k, ctx, bank
 }
 

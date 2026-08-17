@@ -25,4 +25,11 @@ message GenesisState {
   RewardsPauseState pause_state = 10;
   // The open epoch's reward-enabled block count. Fresh genesis requires zero.
   uint64 open_reward_enabled_blocks = 11;
+  // Canonical reward-configuration history. Fresh genesis carries exactly one
+  // entry: version 1, effective at epoch 1.
+  repeated RewardConfigVersion reward_config_versions = 12;
+  // The single pending reward-configuration change, keyed by effective epoch.
+  // Fresh genesis requires this to be empty; a populated entry is continuation
+  // state and its key must be exactly current_epoch + 1.
+  repeated ScheduledRewardConfig scheduled_reward_configs = 13;
 }

@@ -27,33 +27,36 @@ func TestProtocolFixedValuesLocked(t *testing.T) {
 	}
 }
 
+// TestValidateEmissionTreasuryShareBps walks the ratified admission boundary.
+//
+// The literals are spelled out rather than derived from the constant. Writing
+// HardMaxEmissionTreasuryShareBps+1 here would make the table track any future
+// edit to the constant and keep passing; the point of this table is that moving
+// the ceiling must break it.
 func TestValidateEmissionTreasuryShareBps(t *testing.T) {
 	cases := []struct {
-		name           string
-		share, hardMax uint64
-		wantErr        bool
+		name    string
+		share   uint64
+		wantErr bool
 	}{
-		{name: "zero share is allowed", share: 0, hardMax: 2_000},
-		// A zero ceiling permanently disables treasury diversion. It is legal,
-		// and a zero share still satisfies it.
-		{name: "zero share under a zero ceiling is allowed", share: 0, hardMax: 0},
-		{name: "positive share under a zero ceiling is rejected", share: 1, hardMax: 0, wantErr: true},
-		{name: "share below hard max", share: 1_999, hardMax: 2_000},
-		{name: "share exactly at hard max", share: 2_000, hardMax: 2_000},
-		{name: "share one past hard max", share: 2_001, hardMax: 2_000, wantErr: true},
-		{name: "hard max just below denominator", share: 0, hardMax: BasisPointsDenominator - 1},
-		{name: "hard max equal to denominator is rejected", share: 0, hardMax: BasisPointsDenominator, wantErr: true},
-		{name: "hard max above denominator is rejected", share: 0, hardMax: BasisPointsDenominator + 1, wantErr: true},
-		{name: "hard max at max uint64 is rejected", share: 0, hardMax: math.MaxUint64, wantErr: true},
+		{name: "zero diverts nothing and is the recommended configuration", share: 0},
+		{name: "one basis point", share: 1},
+		{name: "one below the ceiling", share: 4_999},
+		{name: "at the ceiling", share: 5_000},
+		{name: "one above the ceiling", share: 5_001, wantErr: true},
+		{name: "one below the denominator", share: 9_999, wantErr: true},
+		{name: "the whole emission", share: BasisPointsDenominator, wantErr: true},
+		{name: "above the denominator", share: BasisPointsDenominator + 1, wantErr: true},
+		{name: "max uint64", share: math.MaxUint64, wantErr: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := ValidateEmissionTreasuryShareBps(c.share, c.hardMax)
+			err := ValidateEmissionTreasuryShareBps(c.share)
 			if c.wantErr && err == nil {
-				t.Fatalf("expected error, got nil")
+				t.Fatalf("share %d bps accepted", c.share)
 			}
 			if !c.wantErr && err != nil {
-				t.Fatalf("unexpected error: %v", err)
+				t.Fatalf("share %d bps rejected: %v", c.share, err)
 			}
 		})
 	}
@@ -465,6 +468,26 @@ func TestRatifiedEpochLengthBoundsLocked(t *testing.T) {
 	}
 	if HardMinEpochLengthBlocks > HardMaxEpochLengthBlocks {
 		t.Fatal("the admission interval is inverted")
+	}
+}
+
+// TestRatifiedEmissionTreasuryShareCeilingLocked freezes the ratified ceiling on
+// the same terms as the epoch-length bounds.
+//
+// The strict inequality against the denominator is asserted separately from the
+// literal. The literal catches an edit; the inequality catches the specific edit
+// that would matter most, because a ceiling at or above the denominator would let
+// configuration divert an entire epoch's emission and leave the reward pool with
+// nothing to allocate.
+func TestRatifiedEmissionTreasuryShareCeilingLocked(t *testing.T) {
+	if HardMaxEmissionTreasuryShareBps != 5_000 {
+		t.Errorf("HardMaxEmissionTreasuryShareBps = %d, want 5000", HardMaxEmissionTreasuryShareBps)
+	}
+	if HardMaxEmissionTreasuryShareBps >= BasisPointsDenominator {
+		t.Fatalf(
+			"ceiling %d bps must stay strictly below the denominator %d",
+			HardMaxEmissionTreasuryShareBps, BasisPointsDenominator,
+		)
 	}
 }
 

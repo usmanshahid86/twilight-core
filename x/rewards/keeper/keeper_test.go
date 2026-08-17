@@ -147,6 +147,18 @@ func seedEpochTimeline(
 	}))
 }
 
+// seedRewardConfigTimeline writes the canonical reward-configuration anchor.
+//
+// Always version 1 at effective epoch 1, whatever epoch the fixture opens at.
+// That differs from seedEpochTimeline, which anchors geometry at the fixture's
+// own epoch: the reward anchor is the permanent bootstrap version targets 1 and 2
+// resolve to, so a fixture that anchored it elsewhere would be testing against a
+// history no chain can have.
+func seedRewardConfigTimeline(t *testing.T, k keeper.Keeper, ctx sdk.Context, params types.Params) {
+	t.Helper()
+	require.NoError(t, k.RewardConfigVersions.Set(ctx, 1, types.DefaultRewardConfigVersion(params)))
+}
+
 func (m *bankKeeperMock) failMint() {
 	m.mintErr = errors.New("mint failed")
 }

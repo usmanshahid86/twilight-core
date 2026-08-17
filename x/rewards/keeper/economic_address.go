@@ -61,6 +61,29 @@ func (k Keeper) validateSnapshotTreasury(label string, snapshot types.EpochConfi
 	)
 }
 
+// validateRewardConfigTreasury applies the conditional treasury rule to a
+// canonical reward configuration.
+//
+// Same rule as the Params and snapshot variants, and conditional for the same
+// reason: a configuration that diverts nothing legitimately carries no treasury
+// address. The difference is which share is consulted — a RewardConfigVersion
+// carries only the emission share, because V2.2 excludes fee configuration from
+// the versioned record entirely and fee distribution is disabled.
+func (k Keeper) validateRewardConfigTreasury(label string, version types.RewardConfigVersion) error {
+	return k.validateTreasuryAddress(label, version.TreasuryAddress, version.EmissionTreasuryShareBps, 0)
+}
+
+// validateScheduledRewardConfigTreasury applies the same rule to a scheduled
+// configuration.
+//
+// A schedule entry becomes history unchanged, so it is admitted under the
+// identical rule rather than a weaker one: deferring the destination check to
+// promotion time would move a rejectable configuration into a block that can only
+// respond by halting.
+func (k Keeper) validateScheduledRewardConfigTreasury(label string, scheduled types.ScheduledRewardConfig) error {
+	return k.validateTreasuryAddress(label, scheduled.TreasuryAddress, scheduled.EmissionTreasuryShareBps, 0)
+}
+
 // validateOperatorIdentity requires an operator address to be a valid account
 // address and nothing more.
 //

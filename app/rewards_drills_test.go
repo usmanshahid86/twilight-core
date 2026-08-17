@@ -167,18 +167,27 @@ func genesisState(p rewardstypes.Params, snap rewardstypes.EpochConfigSnapshot) 
 	return *canonicalRewardsTimeline(&gen, 1)
 }
 
-// canonicalRewardsTimeline fills the canonical epoch-timeline fields every fresh
-// rewards genesis now requires: the original-genesis epoch anchor, the single
-// pause state, and the open reward-enabled block counter.
+// canonicalRewardsTimeline fills the canonical timeline fields every fresh
+// rewards genesis now requires: the original-genesis epoch anchor, the initial
+// reward-configuration anchor, the empty reward schedule, the single pause state,
+// and the open reward-enabled block counter.
 //
-// None of the three has a runtime default — after genesis an absent one is
-// corruption rather than a zero value — so a fixture that omitted them would be
-// testing against state no chain is ever in.
+// None of them has a runtime default — after genesis an absent one is corruption
+// rather than a zero value — so a fixture that omitted them would be testing
+// against state no chain is ever in.
 func canonicalRewardsTimeline(gen *rewardstypes.GenesisState, initialHeight uint64) *rewardstypes.GenesisState {
 	anchor := rewardstypes.DefaultEpochConfigVersion(*gen.Params, initialHeight)
 	anchor.EffectiveEpoch = gen.State.CurrentEpoch
 	anchor.EffectiveStartHeight = gen.State.CurrentEpochStartHeight
 	gen.EpochConfigVersions = []*rewardstypes.EpochConfigVersion{&anchor}
+	// The reward-configuration anchor is derived from the same Params the epoch
+	// anchor is, which is what keeps the deprecated economic mirrors pinned to it.
+	// A fixture that set the economics on Params alone would now be rejected at
+	// genesis, and correctly so: the mirrors would name different numbers than the
+	// version that governs every epoch this fixture finalizes.
+	rewardAnchor := rewardstypes.DefaultRewardConfigVersion(*gen.Params)
+	gen.RewardConfigVersions = []*rewardstypes.RewardConfigVersion{&rewardAnchor}
+	gen.ScheduledRewardConfigs = nil
 	gen.PauseState = &rewardstypes.RewardsPauseState{}
 	gen.OpenRewardEnabledBlocks = 0
 	return gen

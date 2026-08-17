@@ -121,6 +121,31 @@ const (
 	// production-genesis freeze.
 	HardMinEpochLengthBlocks uint64 = 360
 	HardMaxEpochLengthBlocks uint64 = 720
+
+	// HardMaxEmissionTreasuryShareBps is the immutable ceiling on the share of an
+	// epoch's minted emission that may be diverted to the treasury:
+	//
+	//	0 <= emission_treasury_share_bps <= HardMaxEmissionTreasuryShareBps
+	//
+	// The architecture requires this ceiling to exist and to sit strictly below
+	// BasisPointsDenominator. Strictness is what guarantees the reward pool can
+	// never be emptied by configuration alone: at the ceiling, half of each
+	// epoch's emission still reaches Slot entitlements.
+	//
+	// It is a ratified consensus bound within a running network, not a
+	// governance-configurable ceiling and not node-local configuration. Governance
+	// chooses a treasury share only inside the interval; moving the endpoint is a
+	// consensus-rule upgrade rather than a parameter change.
+	//
+	// This is NOT the recommended deployment value. The recommended initial
+	// configured share remains 0, and a configured ceiling may sit lower still —
+	// the two layers are enforced separately and must never be collapsed, or a
+	// configuration change could move the immutable bound.
+	//
+	// Ratified for the current V2 pre-production profile. Like the epoch-length
+	// bounds it is not final mainnet calibration: economic recalibration before
+	// the production-genesis freeze remains mandatory.
+	HardMaxEmissionTreasuryShareBps uint64 = 5_000
 )
 
 // ValidateMaxActiveSlots enforces
@@ -147,28 +172,6 @@ func ValidateMaxActiveSlots(configured uint64) error {
 // against as an argument, so the relation can be enforced today without pinning
 // an unratified number.
 // ---------------------------------------------------------------------------
-
-// ValidateEmissionTreasuryShareBps enforces
-//
-//	0 <= shareBps <= hardMaxShareBps < BasisPointsDenominator
-//
-// The strict upper bound is what guarantees the treasury share can never
-// consume the entire emission, leaving the reward pool non-negative.
-func ValidateEmissionTreasuryShareBps(shareBps, hardMaxShareBps uint64) error {
-	if hardMaxShareBps >= BasisPointsDenominator {
-		return fmt.Errorf(
-			"hard max emission treasury share is %d bps, must be below %d",
-			hardMaxShareBps, BasisPointsDenominator,
-		)
-	}
-	if shareBps > hardMaxShareBps {
-		return fmt.Errorf(
-			"emission treasury share is %d bps, exceeds hard max %d bps",
-			shareBps, hardMaxShareBps,
-		)
-	}
-	return nil
-}
 
 // ValidateSelectionRateBps enforces
 //
@@ -373,9 +376,15 @@ type CalibratedBounds struct {
 	MaxRecipientsPerChunk                  uint64
 	MaxChunksPerSettlement                 uint64
 	MinSelectionPolicyUpdateCooldownBlocks uint64
-	MaxEmissionTreasuryShareBps            uint64
-	MaxCoreSlotMetadataBytes               uint64
-	MaxTxMessageBytes                      uint64
+	// MaxEmissionTreasuryShareBps is superseded by the ratified
+	// HardMaxEmissionTreasuryShareBps constant above and is no longer a
+	// calibration input. It is retained on the same terms as the fields above:
+	// this struct keeps naming every bound the architecture enumerates, and the
+	// structural relation below still checks it. Consensus paths read the
+	// constant.
+	MaxEmissionTreasuryShareBps uint64
+	MaxCoreSlotMetadataBytes    uint64
+	MaxTxMessageBytes           uint64
 
 	// MinSettlementPayoutAmount is a base-denom monetary value and is therefore
 	// arbitrary-precision, not fixed-width: a legitimate floor may exceed
@@ -497,6 +506,42 @@ func ValidateEpochLengthBlocks(value uint64) error {
 		return fmt.Errorf(
 			"epoch length is %d blocks, must be in [%d, %d]",
 			value, HardMinEpochLengthBlocks, HardMaxEpochLengthBlocks,
+		)
+	}
+	return nil
+}
+
+// ValidateEmissionTreasuryShareBps enforces the canonical relation
+//
+//	0 <= shareBps <= HardMaxEmissionTreasuryShareBps < BasisPointsDenominator
+//
+// on a configured emission treasury share.
+//
+// The ceiling is read from the ratified constant rather than supplied by the
+// caller, for the same reason the epoch-length bounds are: this value decides how
+// much of an epoch's emission may leave the reward pool, so an injected parameter
+// would be a second production source of truth and a caller could admit a share
+// the protocol forbids simply by passing a different number.
+//
+// The strict inequality against the denominator is asserted here rather than
+// assumed. It is what guarantees the reward pool stays non-negative and non-empty
+// for every admissible share, and asserting it means a future edit to the
+// constant that broke the relation would fail every admission rather than
+// silently permit a total diversion.
+//
+// Zero is admissible and is the recommended initial configuration: it means no
+// emission is diverted at all.
+func ValidateEmissionTreasuryShareBps(shareBps uint64) error {
+	if HardMaxEmissionTreasuryShareBps >= BasisPointsDenominator {
+		return fmt.Errorf(
+			"hard max emission treasury share is %d bps, must be below %d",
+			HardMaxEmissionTreasuryShareBps, BasisPointsDenominator,
+		)
+	}
+	if shareBps > HardMaxEmissionTreasuryShareBps {
+		return fmt.Errorf(
+			"emission treasury share is %d bps, exceeds hard max %d bps",
+			shareBps, HardMaxEmissionTreasuryShareBps,
 		)
 	}
 	return nil

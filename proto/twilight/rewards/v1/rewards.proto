@@ -39,6 +39,48 @@ message ScheduledEpochConfig {
   uint64 epoch_length_blocks = 2;
 }
 
+// RewardConfigVersion is one immutable entry in the canonical reward-configuration
+// history, and the sole authority for the economics an epoch's emission is
+// computed under.
+//
+// Version 1 is created at fresh genesis effective at epoch 1 and is never
+// rewritten. Every later version is created when a scheduled configuration is
+// promoted, which happens in the closing epoch's EndBlock and only after that
+// epoch's monetary finalization has succeeded.
+//
+// A target epoch N binds the version effective at N-2, so an update accepted
+// during epoch E first affects target E+3. Fresh-genesis targets 1 and 2 have no
+// N-2 boundary inside chain history and resolve the genesis version directly.
+//
+// Deliberately absent: effective_start_height. Unlike EpochConfigVersion this
+// record fixes no geometry, so there is no start-height recurrence and no
+// continuity equation between adjacent versions — only strictly increasing
+// version and effective epoch.
+message RewardConfigVersion {
+  uint64 version = 1;
+  uint64 effective_epoch = 2;
+  string initial_block_subsidy = 3;
+  uint64 emission_treasury_share_bps = 4;
+  string treasury_address = 5;
+}
+
+// ScheduledRewardConfig is the single pending reward-configuration change, keyed
+// by the epoch it becomes effective at.
+//
+// At most one entry exists, and its key is exactly current_epoch + 1: an update
+// accepted during epoch E is staged for E+1 and is promoted at the end of E. A
+// second, unrelated future entry is invalid state rather than a queue.
+//
+// It carries no version number. The version is assigned at promotion time from
+// the history it extends, so a scheduled entry cannot pre-commit an identity that
+// a replacement would then have to reuse.
+message ScheduledRewardConfig {
+  uint64 effective_epoch = 1;
+  string initial_block_subsidy = 2;
+  uint64 emission_treasury_share_bps = 3;
+  string treasury_address = 4;
+}
+
 // RewardsPauseState is the single canonical rewards-pause state.
 //
 // It replaces the three independent pause booleans on Params. A pause or resume

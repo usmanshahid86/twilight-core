@@ -83,21 +83,44 @@ func TestSetParamsAcceptsOrdinaryTreasuryWithPositiveShare(t *testing.T) {
 	require.Equal(t, treasury, stored.TreasuryAddress)
 }
 
-func TestSetPendingParamsAppliesTheSameTreasuryPolicy(t *testing.T) {
+// TestSetPendingParamsCannotMoveTheTreasuryAtAll replaces the older test that
+// checked the pending path applied the treasury ADDRESS policy.
+//
+// That premise is gone. The treasury destination and share moved to the canonical
+// reward-configuration history, so the pending-params path can no longer carry
+// either one — well or badly. The stronger statement is what is asserted here: an
+// attempt to move them is refused as immutable, whether the proposed destination
+// would have been admissible or not.
+//
+// The inadmissible-destination rule still exists and is still reachable, through
+// SetParams at genesis, through the epoch-configuration snapshot, and through
+// reward-configuration admission. Those have their own tests.
+func TestSetPendingParamsCannotMoveTheTreasuryAtAll(t *testing.T) {
 	blocked := testAccount(77)
 	k, ctx, _ := setupKeeperWithBlocked(t, &coreSlotKeeperMock{}, blocked)
 	require.NoError(t, k.SetParams(ctx, types.DefaultParams()))
 
-	err := k.SetPendingParams(ctx, paramsWithTreasury(testModuleAddress(testModuleAccountName), 100, 0))
-	require.ErrorIs(t, err, types.ErrInvalidAddress)
+	for _, tc := range []struct {
+		name    string
+		address string
+	}{
+		{"a module account", testModuleAddress(testModuleAccountName)},
+		{"a bank-blocked account", blocked},
+		// The destination here is perfectly admissible. It is still refused, which
+		// is the point: this path is closed by ownership, not by address quality.
+		{"an otherwise valid account", testAccount(31)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := k.SetPendingParams(ctx, paramsWithTreasury(tc.address, 100, 0))
+			require.ErrorIs(t, err, types.ErrImmutableParam)
+		})
+	}
 
-	err = k.SetPendingParams(ctx, paramsWithTreasury(blocked, 100, 0))
-	require.ErrorIs(t, err, types.ErrInvalidAddress)
-
-	// Disabled treasury with no address stays admissible as a pending update.
-	require.NoError(t, k.SetPendingParams(ctx, types.DefaultParams()))
-	// And so does a valid one with a positive share.
-	require.NoError(t, k.SetPendingParams(ctx, paramsWithTreasury(testAccount(31), 100, 0)))
+	// A pending update that leaves the migrated economics alone remains admissible:
+	// the legacy surface is closed to reward economics, not retired.
+	next := types.DefaultParams()
+	next.TargetBlockTimeSeconds = types.DefaultTargetBlockTimeSeconds + 1
+	require.NoError(t, k.SetPendingParams(ctx, next))
 }
 
 // --- epoch config snapshots ---------------------------------------------------
@@ -389,6 +412,21 @@ func genesisWith(t *testing.T, mutate func(*types.GenesisState)) types.GenesisSt
 	return genesis
 }
 
+// withTreasuryEverywhere points the canonical reward configuration and both
+// deprecated mirrors at the same treasury destination and share.
+//
+// Fresh genesis requires the three to agree, so a fixture that wants to exercise
+// the ADDRESS rule has to move them together; moving one produces a mirror
+// mismatch and never reaches the destination check.
+func withTreasuryEverywhere(g *types.GenesisState, address string, shareBps uint64) {
+	params := paramsWithTreasury(address, shareBps, 0)
+	g.Params = &params
+	config := types.DefaultEpochConfigSnapshot(params)
+	g.CurrentEpochConfig = &config
+	rewardAnchor := types.DefaultRewardConfigVersion(params)
+	g.RewardConfigVersions = []*types.RewardConfigVersion{&rewardAnchor}
+}
+
 func TestInitGenesisRejectsInadmissibleEconomicAddresses(t *testing.T) {
 	blocked := testAccount(77)
 	moduleAccount := testModuleAddress(testModuleAccountName)
@@ -397,16 +435,25 @@ func TestInitGenesisRejectsInadmissibleEconomicAddresses(t *testing.T) {
 		name   string
 		mutate func(*types.GenesisState)
 	}{
+		// The economic mirrors are moved together with the canonical reward
+		// configuration. Setting a bad treasury on one alone would now be rejected by
+		// the genesis mirror-pinning rule before the address rule was ever consulted,
+		// which would leave these cases silently proving the wrong thing.
 		{"params treasury", func(g *types.GenesisState) {
-			params := paramsWithTreasury(moduleAccount, 100, 0)
-			g.Params = &params
-			config := types.DefaultEpochConfigSnapshot(params)
-			g.CurrentEpochConfig = &config
+			withTreasuryEverywhere(g, moduleAccount, 100)
 		}},
 		{"current epoch config treasury", func(g *types.GenesisState) {
-			config := types.DefaultEpochConfigSnapshot(paramsWithTreasury(blocked, 100, 0))
-			g.CurrentEpochConfig = &config
+			withTreasuryEverywhere(g, blocked, 100)
 		}},
+		{"reward configuration treasury", func(g *types.GenesisState) {
+			withTreasuryEverywhere(g, blocked, 250)
+		}},
+		// A scheduled reward configuration is deliberately absent from this table.
+		// Fresh genesis rejects a non-empty schedule outright as a content rule, so
+		// no genesis document can reach the destination check for one. The rule that
+		// a scheduled record's destination must be admissible is exercised where it
+		// is actually reachable — at promotion — in
+		// TestScheduledRewardConfigPromotionHoldsTheDestinationRule.
 		{"claim record payout", func(g *types.GenesisState) {
 			record := reward(1, 1, testAccount(9), blocked)
 			g.ClaimRecords = []*types.EligibleSlotReward{&record}

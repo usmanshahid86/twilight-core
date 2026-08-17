@@ -17,11 +17,13 @@ func DefaultGenesis() *GenesisState {
 	params := DefaultParams()
 	snapshot := DefaultEpochConfigSnapshot(params)
 	anchor := DefaultEpochConfigVersion(params, 1)
+	rewardAnchor := DefaultRewardConfigVersion(params)
 	return &GenesisState{
 		Params:                  &params,
 		State:                   &RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig:      &snapshot,
 		EpochConfigVersions:     []*EpochConfigVersion{&anchor},
+		RewardConfigVersions:    []*RewardConfigVersion{&rewardAnchor},
 		PauseState:              &RewardsPauseState{},
 		OpenRewardEnabledBlocks: 0,
 	}
@@ -56,6 +58,9 @@ func (g GenesisState) Validate() error {
 		return err
 	}
 	if err := g.validateEpochTimeline(); err != nil {
+		return err
+	}
+	if err := g.validateRewardConfigTimeline(); err != nil {
 		return err
 	}
 	if g.HasPendingParams {
@@ -193,6 +198,102 @@ func (g GenesisState) validateEpochTimeline() error {
 		return ErrInvalidGenesis.Wrapf(
 			"params mirror epoch length %d but the canonical version is %d",
 			g.Params.EpochLengthBlocks, anchor.EpochLengthBlocks)
+	}
+	return nil
+}
+
+// validateRewardConfigTimeline checks the fresh-genesis shape of the canonical
+// reward-configuration history and its schedule.
+//
+// Three rules, mirroring what validateEpochTimeline does for geometry: exactly
+// one anchor with a fixed identity, an empty schedule, and deprecated mirrors
+// pinned to the anchor.
+func (g GenesisState) validateRewardConfigTimeline() error {
+	// §80 requires an empty schedule at fresh genesis, for the same reason the
+	// pause state carries no pending transition: a scheduled configuration is the
+	// residue of an authority transaction accepted in some block, and fresh genesis
+	// has no pre-genesis block that could have produced one. Genesis selects the
+	// initial economics directly through the anchor, so a scheduled entry is never
+	// the only way to express an intent — it is a second, contradictory answer.
+	//
+	// This is a canonical CONTENT rule about which entries may exist, and is
+	// independent of the open question about how malformed collections are
+	// treated: there is no admissible entry here to have an opinion about.
+	if len(g.ScheduledRewardConfigs) != 0 {
+		return ErrInvalidGenesis.Wrapf(
+			"fresh genesis carries %d scheduled reward configurations; the schedule must be empty",
+			len(g.ScheduledRewardConfigs))
+	}
+
+	if len(g.RewardConfigVersions) != 1 {
+		return ErrInvalidGenesis.Wrapf(
+			"fresh genesis requires exactly one reward configuration version, found %d",
+			len(g.RewardConfigVersions))
+	}
+	anchor := g.RewardConfigVersions[0]
+	if anchor == nil {
+		return ErrInvalidGenesis.Wrap("reward configuration version is nil")
+	}
+	if err := anchor.Validate(); err != nil {
+		return ErrInvalidGenesis.Wrap(err.Error())
+	}
+	if anchor.Version != 1 || anchor.EffectiveEpoch != 1 {
+		return ErrInvalidGenesis.Wrapf(
+			"the initial reward configuration must be version 1 effective at epoch 1, found version %d at epoch %d",
+			anchor.Version, anchor.EffectiveEpoch)
+	}
+
+	return g.validateRewardConfigMirrors(*anchor)
+}
+
+// validateRewardConfigMirrors pins the deprecated economic mirrors to the
+// canonical anchor.
+//
+// The same treatment epoch length already receives, and for the same reason. The
+// three values below moved to RewardConfigVersion, which is now the only thing
+// finalization reads; the copies on Params and on the epoch-configuration
+// snapshot survive as compatibility data and carry no authority.
+//
+// Carrying no authority is exactly why they must not be free to state a different
+// number. Both remain observable — Params through its query, the snapshot through
+// the finalized epoch records it is embedded in — so an unpinned mirror is a
+// second economic figure that looks authoritative to a reader and is permanently
+// archived beside the epochs it did not govern.
+//
+// The treasury address is compared even when the share is zero. A disabled
+// treasury legitimately carries no address, and "" == "" satisfies this; what it
+// refuses is a genesis that names different destinations in two places while
+// disagreeing about whether either can receive anything.
+func (g GenesisState) validateRewardConfigMirrors(anchor RewardConfigVersion) error {
+	for _, mirror := range []struct {
+		label    string
+		subsidy  string
+		shareBps uint64
+		treasury string
+	}{
+		{"params", g.Params.InitialBlockSubsidy, g.Params.EmissionTreasuryShareBps, g.Params.TreasuryAddress},
+		{
+			"current epoch config",
+			g.CurrentEpochConfig.InitialBlockSubsidy,
+			g.CurrentEpochConfig.EmissionTreasuryShareBps,
+			g.CurrentEpochConfig.TreasuryAddress,
+		},
+	} {
+		if mirror.subsidy != anchor.InitialBlockSubsidy {
+			return ErrInvalidGenesis.Wrapf(
+				"%s mirrors initial block subsidy %q but the canonical reward configuration is %q",
+				mirror.label, mirror.subsidy, anchor.InitialBlockSubsidy)
+		}
+		if mirror.shareBps != anchor.EmissionTreasuryShareBps {
+			return ErrInvalidGenesis.Wrapf(
+				"%s mirrors emission treasury share %d bps but the canonical reward configuration is %d bps",
+				mirror.label, mirror.shareBps, anchor.EmissionTreasuryShareBps)
+		}
+		if mirror.treasury != anchor.TreasuryAddress {
+			return ErrInvalidGenesis.Wrapf(
+				"%s mirrors treasury address %q but the canonical reward configuration is %q",
+				mirror.label, mirror.treasury, anchor.TreasuryAddress)
+		}
 	}
 	return nil
 }

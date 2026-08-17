@@ -156,7 +156,64 @@ func ValidateUpdate(current, next Params) error {
 		return ErrImmutableParam.Wrap(
 			"epoch length is governed by the canonical epoch configuration history and cannot be changed through a params update")
 	}
+	if err := validateRewardEconomicsUnchanged(current, next); err != nil {
+		return err
+	}
 	return next.Validate()
+}
+
+// validateRewardEconomicsUnchanged freezes every economic field that stopped
+// being runtime-mutable when the canonical reward-configuration history became
+// the authority.
+//
+// Two groups, frozen for different reasons.
+//
+// The first three moved to RewardConfigVersion. That history binds a target two
+// epochs ahead, so a change reaching money through this path instead would take
+// effect at the very next epoch, leave no version behind, and be invisible to
+// anything auditing which configuration governed a payout.
+//
+// The rest are genesis-fixed protocol configuration (§33): the halving mode and
+// the remainder policy are not versioned at all, and the distribution method is
+// fixed by the V2 allocation rule. They are frozen here because "already
+// constant" is enforced by Params.Validate rejecting other values, which is a
+// weaker and less legible guarantee than refusing the change outright.
+//
+// Rejection is the point. An accepted transaction that silently did nothing would
+// report success to an authority that believed it had changed the economics, and
+// the deprecated mirrors would then disagree with the version that actually
+// governs. There is no runtime RewardConfig update path in this profile, so the
+// correct answer to every such request is a refusal.
+func validateRewardEconomicsUnchanged(current, next Params) error {
+	if current.InitialBlockSubsidy != next.InitialBlockSubsidy {
+		return ErrImmutableParam.Wrap(
+			"the initial block subsidy is governed by the canonical reward configuration history and cannot be changed through a params update")
+	}
+	if current.EmissionTreasuryShareBps != next.EmissionTreasuryShareBps {
+		return ErrImmutableParam.Wrap(
+			"the emission treasury share is governed by the canonical reward configuration history and cannot be changed through a params update")
+	}
+	if current.TreasuryAddress != next.TreasuryAddress {
+		return ErrImmutableParam.Wrap(
+			"the treasury address is governed by the canonical reward configuration history and cannot be changed through a params update")
+	}
+	if current.HalvingMode != next.HalvingMode {
+		return ErrImmutableParam.Wrap("the halving mode is genesis-fixed protocol configuration")
+	}
+	if current.RemainderPolicy != next.RemainderPolicy {
+		return ErrImmutableParam.Wrap("the remainder policy is genesis-fixed protocol configuration")
+	}
+	if current.DistributionMethod != next.DistributionMethod {
+		return ErrImmutableParam.Wrap("the distribution method is genesis-fixed protocol configuration")
+	}
+	// Fee distribution is disabled in V2 and the fee share reaches no computation,
+	// but it is a basis-point economic field on a live authority message. Freezing
+	// it keeps the params document from acquiring a value that a future reader
+	// would have to work out is inert.
+	if current.FeeTreasuryShareBps != next.FeeTreasuryShareBps {
+		return ErrImmutableParam.Wrap("the fee treasury share is genesis-fixed protocol configuration")
+	}
+	return nil
 }
 
 func validateStateAmount(name, value string) error {

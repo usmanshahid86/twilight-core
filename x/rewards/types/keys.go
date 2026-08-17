@@ -38,4 +38,13 @@ var (
 	// count. Genesis writes it explicitly; afterwards an absent or unreadable
 	// counter is corruption and must never be defaulted to zero.
 	OpenRewardEnabledBlocksKey = collections.NewPrefix(0x0B)
+
+	// RewardConfigVersionsPrefix holds the immutable reward-configuration history
+	// keyed by effective epoch. This is the sole authority for the economics an
+	// epoch's emission is computed under.
+	RewardConfigVersionsPrefix = collections.NewPrefix(0x0C)
+	// ScheduledRewardConfigsPrefix holds the single pending reward-configuration
+	// change, keyed by the epoch it becomes effective at. At most one entry
+	// exists and its key is exactly current_epoch + 1.
+	ScheduledRewardConfigsPrefix = collections.NewPrefix(0x0D)
 )
