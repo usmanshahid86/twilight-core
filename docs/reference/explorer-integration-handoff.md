@@ -122,7 +122,7 @@ Verified from `x/{rewards,coreslot}/keeper/events.go` + the `types` constants. E
 **x/coreslot:** (all attributes use `slot_id`, `operator_address`, and status/consensus keys)
 - `coreslot_registered`, `coreslot_activated`, `coreslot_inactivated`, `coreslot_suspended`,
   `coreslot_removed`, `coreslot_key_rotation_requested`, `coreslot_key_rotated`,
-  `coreslot_rotation_cancelled`, `coreslot_payout_updated`, `coreslot_metadata_updated`,
+  `coreslot_rotation_canceled`, `coreslot_payout_updated`, `coreslot_metadata_updated`,
   `coreslot_params_updated`, `coreslot_validator_update_emitted`
 - common attribute keys: `slot_id`, `operator_address`, `consensus_address`,
   `old_status`, `new_status`, `power`, `reason`, `old_consensus_address`,
@@ -131,6 +131,30 @@ Verified from `x/{rewards,coreslot}/keeper/events.go` + the `types` constants. E
 If the indexer's event projections reference any event name NOT in these two lists (e.g.
 `reward_distributed`, `validator_jailed`, staking/gov events), that's a design error —
 those events do not exist.
+
+### V2 breaking change — rotation-cancellation event renamed
+
+The rotation-cancellation event was renamed in V2 to correct a misspelling in the
+emitted type:
+
+| | event type |
+|---|---|
+| legacy / V1 | `coreslot_rotation_cancelled` |
+| **V2** | `coreslot_rotation_canceled` |
+
+This is an intentional breaking integration-surface cleanup. The chain emits the V2
+name **only** — there is no dual emission and no compatibility alias in the node, so
+an indexer matching the legacy string will silently stop seeing cancellations rather
+than fail loudly. Match on the V2 name.
+
+Nothing else about the event changed: the attribute set (`slot_id`,
+`operator_address`, `old_consensus_address`, `new_consensus_address`, `reason`,
+`height`) and the `reason` values (`lifecycle_change`, `stale_rotation`) are
+unchanged.
+
+An indexer that must ingest history from a pre-V2 chain is the one case that needs
+both spellings, and that belongs in the indexer's own decoding layer rather than in
+the node.
 
 ## 7. Rewards economics (so rewards pages match the chain)
 

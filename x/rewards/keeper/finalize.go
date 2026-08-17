@@ -13,7 +13,7 @@ import (
 func (k Keeper) FinalizeEpoch(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	cacheCtx, write := sdkCtx.CacheContext()
-	if err := k.finalizeEpoch(sdk.WrapSDKContext(cacheCtx)); err != nil {
+	if err := k.finalizeEpoch(cacheCtx); err != nil {
 		return err
 	}
 	write()

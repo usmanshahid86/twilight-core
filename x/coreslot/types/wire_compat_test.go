@@ -227,6 +227,12 @@ func TestDeprecatedParamsAreMarkedDeprecated(t *testing.T) {
 // preV2CoreSlot is a CoreSlot as it was encoded before this change: fields 1-13
 // only. It is declared as its own message rather than built from the current
 // type, so the bytes under test cannot silently follow a schema change.
+// Field names mirror the GENERATED type this shadows, initialism warts and all
+// (SlotId, not SlotID). That correspondence is the point: a reader comparing this
+// struct against the real CoreSlot must be able to do it field by field, and a
+// tidied name here would be one more difference to discount.
+//
+//nolint:staticcheck // ST1003: deliberately mirrors generated protobuf field names.
 type preV2CoreSlot struct {
 	SlotId          uint64                  `protobuf:"varint,1,opt,name=slot_id,json=slotId,proto3" json:"slot_id,omitempty"`
 	OperatorAddress string                  `protobuf:"bytes,2,opt,name=operator_address,json=operatorAddress,proto3" json:"operator_address,omitempty"`

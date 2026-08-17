@@ -159,7 +159,7 @@ func TestEndBlockHaltsWhenADueRotationsSlotCannotBeRead(t *testing.T) {
 			staged, err := k.ByConsensus.Has(ctx, newConsKey)
 			require.NoError(t, err)
 			require.True(t, staged, "the staged consensus key must not be released")
-			require.Zero(t, countEvents(ctx, types.EventTypeRotationCancelled),
+			require.Zero(t, countEvents(ctx, types.EventTypeRotationCanceled),
 				"a halted block must not announce a cancellation")
 			require.Empty(t, ctx.EventManager().Events(), "a failed EndBlock emits no events")
 		})
@@ -196,8 +196,8 @@ func TestEndBlockStillDropsARotationForAnIneligibleSlot(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, staged, "the staged key is still released")
 
-	require.Equal(t, 1, countEvents(ctx, types.EventTypeRotationCancelled))
-	ev := firstEvent(t, ctx, types.EventTypeRotationCancelled)
+	require.Equal(t, 1, countEvents(ctx, types.EventTypeRotationCanceled))
+	ev := firstEvent(t, ctx, types.EventTypeRotationCanceled)
 	require.Equal(t, "1", attrValue(t, ev, types.AttributeKeySlotID))
 	require.Equal(t, op, attrValue(t, ev, types.AttributeKeyOperatorAddress))
 	require.Equal(t, types.RotationCancelReasonStale, attrValue(t, ev, types.AttributeKeyReason))

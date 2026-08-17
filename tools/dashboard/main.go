@@ -103,6 +103,16 @@ func cors(h http.Handler) http.Handler {
 	})
 }
 
+// writeJSON encodes a response body, and swallows the encode error deliberately.
+//
+// By the time encoding starts the status line and headers are already on the wire,
+// so there is no status code left to change and nothing useful to say to the client.
+// The error is named and discarded here, once, rather than ignored implicitly at
+// four call sites.
+func writeJSON(w http.ResponseWriter, body any) {
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 func (s *server) handle(fn func(context.Context) (any, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
@@ -111,10 +121,10 @@ func (s *server) handle(fn func(context.Context) (any, error)) http.HandlerFunc 
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			w.WriteHeader(http.StatusBadGateway)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			writeJSON(w, map[string]string{"error": err.Error()})
 			return
 		}
-		json.NewEncoder(w).Encode(out)
+		writeJSON(w, out)
 	}
 }
 
@@ -138,10 +148,10 @@ func (s *server) handleReq(fn func(context.Context, *http.Request) (any, error))
 		w.Header().Set("Content-Type", "application/json")
 		if err != nil {
 			w.WriteHeader(http.StatusBadGateway)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			writeJSON(w, map[string]string{"error": err.Error()})
 			return
 		}
-		json.NewEncoder(w).Encode(out)
+		writeJSON(w, out)
 	}
 }
 

@@ -91,16 +91,16 @@ func EmergencyAuthorityAddress() string {
 // AutoCliOpts returns the AutoCLI options built from the live module manager. It
 // is used by the root command to generate the standard `tx`/`query` command
 // trees for every wired module (bank, auth, consensus, ...).
-func (app *App) AutoCliOpts() autocli.AppOptions {
-	modules := make(map[string]appmodule.AppModule, len(app.ModuleManager.Modules))
-	for name, m := range app.ModuleManager.Modules {
+func (a *App) AutoCliOpts() autocli.AppOptions {
+	modules := make(map[string]appmodule.AppModule, len(a.ModuleManager.Modules))
+	for name, m := range a.ModuleManager.Modules {
 		if am, ok := m.(appmodule.AppModule); ok {
 			modules[name] = am
 		}
 	}
 	return autocli.AppOptions{
 		Modules:               modules,
-		ModuleOptions:         runtimeservices.ExtractAutoCLIOptions(app.ModuleManager.Modules),
+		ModuleOptions:         runtimeservices.ExtractAutoCLIOptions(a.ModuleManager.Modules),
 		AddressCodec:          addresscodec.NewBech32Codec(AccountPrefix),
 		ValidatorAddressCodec: addresscodec.NewBech32Codec(AccountPrefix + "valoper"),
 		ConsensusAddressCodec: addresscodec.NewBech32Codec(AccountPrefix + "valcons"),
