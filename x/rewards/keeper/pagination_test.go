@@ -221,9 +221,8 @@ func setupCountingPrefix(t *testing.T, prefix []byte) (keeper.Keeper, sdk.Contex
 
 	access := &storeAccess{}
 	service := countingKVStoreService{
-		inner:  runtime.NewKVStoreService(keys[types.StoreKey]),
-		prefix: prefix,
-		access: access,
+		inner:   runtime.NewKVStoreService(keys[types.StoreKey]),
+		watched: []watchedPrefix{{prefix: prefix, access: access}},
 	}
 	k := keeper.NewKeeper(codec.NewProtoCodec(registry), service,
 		accountKeeperMock{}, &bankKeeperMock{}, &coreSlotKeeperMock{}, testEconomicAddresses(t))

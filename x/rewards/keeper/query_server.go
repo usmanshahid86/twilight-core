@@ -764,9 +764,15 @@ func (q queryServer) RewardConfigVersions(
 				if err := q.validateAdjacentRewardConfigEdge(ctx, version); err != nil {
 					return nil, err
 				}
-			} else if previous.Version >= version.Version || previous.EffectiveEpoch >= version.EffectiveEpoch {
+			} else if previous.Version+1 != version.Version || previous.EffectiveEpoch >= version.EffectiveEpoch {
+				// Contiguity, not merely increase. A page that presented 1 then 3 as
+				// canonical history would be publishing a sequence in which version 2
+				// is simultaneously in range and absent — which is the state the
+				// version lookup classifies as corruption, so the enumeration must not
+				// serve it as ordinary data.
 				return nil, types.ErrInvalidState.Wrapf(
-					"reward configuration version %d at effective epoch %d does not advance past version %d at effective epoch %d",
+					"reward configuration version %d at effective epoch %d does not immediately follow version %d at effective epoch %d; "+
+						"canonical versions are contiguous",
 					version.Version, version.EffectiveEpoch, previous.Version, previous.EffectiveEpoch)
 			}
 			value := version

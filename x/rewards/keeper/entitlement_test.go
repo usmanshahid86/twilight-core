@@ -151,11 +151,11 @@ func TestEntitlementCreationRequiresAnAdmissibleDestination(t *testing.T) {
 func TestEntitlementCreationRequiresTheGoverningRewardConfigVersion(t *testing.T) {
 	k, ctx, _ := setupEntitlements(t)
 	// A second version that genuinely exists, and does NOT govern epoch 1.
-	seedRewardVersion(t, k, ctx, rewardVersionAt(9, 40, "20"))
+	seedRewardVersion(t, k, ctx, rewardVersionAt(2, 40, "20"))
 
 	t.Run("a version that exists but does not govern this epoch", func(t *testing.T) {
 		entitlement := entitlementFor(1, 1, "500")
-		entitlement.RewardConfigVersion = 9
+		entitlement.RewardConfigVersion = 2
 		require.ErrorIs(t, k.CreateSlotEntitlement(ctx, entitlement), types.ErrInvalidState)
 		requireLiability(t, k, ctx, "0")
 	})
@@ -174,12 +174,12 @@ func TestEntitlementCreationRequiresTheGoverningRewardConfigVersion(t *testing.T
 	})
 
 	t.Run("an epoch whose binding resolves the later version", func(t *testing.T) {
-		// Target 42 binds epoch 40, which version 9 governs.
+		// Target 42 binds epoch 40, which version 2 governs.
 		entitlement := entitlementFor(1, 42, "500")
 		entitlement.RewardConfigVersion = 1
 		require.ErrorIs(t, k.CreateSlotEntitlement(ctx, entitlement), types.ErrInvalidState)
 
-		entitlement.RewardConfigVersion = 9
+		entitlement.RewardConfigVersion = 2
 		require.NoError(t, k.CreateSlotEntitlement(ctx, entitlement))
 	})
 }

@@ -145,14 +145,21 @@ func (k Keeper) rewardConfigPredecessor(
 // validateAdjacentRewardConfigEdge checks a version against the one immediately
 // before it.
 //
-// One relation, because one is all the record supports: version and effective
-// epoch must both strictly increase. A version number that does not advance with
-// its effective epoch makes "latest" ambiguous, and "latest" is what the next
-// promotion derives its own identity from.
+// # The ratified relation
+//
+// version is a CONTIGUOUS protocol sequence number: the genesis anchor is 1 and
+// every later version is exactly its predecessor's plus one. Effective epochs
+// merely increase; version numbers count.
+//
+// Strict increase was the weaker rule this used to enforce, and the weakness was
+// not cosmetic. Under it a history could hold 1, then 3, and a query for version 2
+// had no way to tell "never accepted" from "the record is gone" — both look like
+// a number the history does not contain. Contiguity is what makes those two
+// distinguishable, so it is enforced rather than assumed.
 //
 // Every record establishes this against its predecessor when it is appended, so a
-// history built only through the append path is inductively ordered; checking one
-// edge on read is what detects a row that changed underneath that induction,
+// history built only through the append path is inductively contiguous; checking
+// one edge on read is what detects a row that changed underneath that induction,
 // without making validation cost grow with chain age.
 func (k Keeper) validateAdjacentRewardConfigEdge(ctx context.Context, version types.RewardConfigVersion) error {
 	predecessor, found, err := k.rewardConfigPredecessor(ctx, version.EffectiveEpoch)
@@ -162,9 +169,16 @@ func (k Keeper) validateAdjacentRewardConfigEdge(ctx context.Context, version ty
 	if !found {
 		return nil
 	}
-	if predecessor.Version >= version.Version {
+	successor, err := checked.AddUint64(predecessor.Version, 1)
+	if err != nil {
 		return types.ErrInvalidState.Wrapf(
-			"reward configuration version %d at effective epoch %d does not advance past version %d at effective epoch %d",
+			"reward configuration version %d at effective epoch %d has no representable successor",
+			predecessor.Version, predecessor.EffectiveEpoch)
+	}
+	if version.Version != successor {
+		return types.ErrInvalidState.Wrapf(
+			"reward configuration version %d at effective epoch %d does not immediately follow version %d at effective epoch %d; "+
+				"canonical versions are contiguous",
 			version.Version, version.EffectiveEpoch, predecessor.Version, predecessor.EffectiveEpoch)
 	}
 	return nil
@@ -317,9 +331,26 @@ func (k Keeper) setRewardConfigVersionIndex(ctx context.Context, version types.R
 //     an ordinary "no such version" answer, which is exactly the confusion every
 //     other read path in this module is built to avoid.
 //
-// Two point reads instead: the index gives an effective epoch, and the canonical
-// row at that epoch is read and validated as usual. The cost does not depend on
-// how many configuration changes the chain has accepted.
+// A bounded, constant number of canonical and index point reads instead, plus the
+// constant adjacent-edge validation every resolution performs. None of it depends
+// on how many configuration changes the chain has accepted.
+//
+// # How absence is decided, and why the index cannot decide it
+//
+// Versions are a CONTIGUOUS sequence, so the history holds exactly 1..latest. That
+// makes the question answerable from the canonical history alone:
+//
+//	number > latest        -> the version was never assigned. Absence.
+//	number <= latest       -> the version exists in canonical history.
+//
+// The derived index is consulted only AFTER that decision, and only to locate the
+// row. A missing index entry for an in-range version is therefore not an answer,
+// it is a hole in derived state — reported as corruption rather than as "no such
+// version", which is what it would have looked like if the index were allowed to
+// classify absence for itself.
+//
+// The ordering matters: consult the authority for the question it can answer, and
+// the accelerator only for the one it cannot.
 //
 // # The index is checked, not trusted
 //
@@ -341,11 +372,27 @@ func (k Keeper) RewardConfigVersionByNumber(
 	if err := k.requireRewardConfigAnchor(ctx); err != nil {
 		return types.RewardConfigVersion{}, false, err
 	}
+	// The authority decides absence. latestRewardConfigVersion is a single reverse
+	// seek to the newest row plus its own edge check, so this is constant work and
+	// not a walk.
+	latest, err := k.latestRewardConfigVersion(ctx)
+	if err != nil {
+		return types.RewardConfigVersion{}, false, err
+	}
+	if number > latest.Version {
+		// Never assigned. The only genuine absence there is.
+		return types.RewardConfigVersion{}, false, nil
+	}
 
 	effectiveEpoch, err := k.RewardConfigVersionIndex.Get(ctx, number)
 	if errors.Is(err, collections.ErrNotFound) {
-		// Ordinary absence: no such version was ever accepted.
-		return types.RewardConfigVersion{}, false, nil
+		// In range, so canonical history HAS this version — the index has lost it.
+		// Derived state that cannot locate a record the authority says exists is
+		// corruption, and reporting it as absence would tell a client the chain
+		// never accepted a configuration it is still governed by.
+		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
+			"reward configuration version %d is within the canonical range 1..%d but has no index entry",
+			number, latest.Version)
 	}
 	if err != nil {
 		return types.RewardConfigVersion{}, false, types.ErrInvalidState.Wrapf(
@@ -474,9 +521,17 @@ func (k Keeper) appendRewardConfigVersion(ctx context.Context, version types.Rew
 			"reward configuration version %d would take effect at epoch %d, at or before the latest version %d effective at epoch %d",
 			version.Version, version.EffectiveEpoch, latest.Version, latest.EffectiveEpoch)
 	}
-	if version.Version <= latest.Version {
+	// The ratified contiguity rule, at the one place canonical history is created
+	// at runtime. Checked arithmetic, so an exhausted version space fails closed
+	// rather than wrapping to a number that would look like a fresh anchor.
+	successor, err := checked.AddUint64(latest.Version, 1)
+	if err != nil {
+		return types.ErrInvalidState.Wrap("reward configuration version space is exhausted")
+	}
+	if version.Version != successor {
 		return types.ErrInvalidState.Wrapf(
-			"reward configuration version %d does not advance past the latest version %d",
+			"reward configuration version %d does not immediately follow the latest version %d; "+
+				"canonical versions are contiguous",
 			version.Version, latest.Version)
 	}
 	if err := k.RewardConfigVersions.Set(ctx, version.EffectiveEpoch, version); err != nil {

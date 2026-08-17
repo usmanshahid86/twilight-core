@@ -50,19 +50,29 @@ type storeAccess struct {
 	rows  int
 }
 
-// countingKVStore counts operations whose key or range falls under one prefix.
+// countingKVStore counts operations whose key or range falls under any watched
+// prefix, keeping a separate tally per prefix.
+//
+// Per-prefix rather than aggregate, because a claim about one collection's cost
+// is not evidence about another's — and the lookup under test spans two.
 type countingKVStore struct {
-	inner  corestore.KVStore
+	inner   corestore.KVStore
+	watched []watchedPrefix
+}
+
+type watchedPrefix struct {
 	prefix []byte
 	access *storeAccess
 }
 
-func (s countingKVStore) count(key []byte) bool {
-	if bytes.HasPrefix(key, s.prefix) {
-		s.access.reads++
-		return true
+func (s countingKVStore) count(key []byte) *storeAccess {
+	for _, watched := range s.watched {
+		if bytes.HasPrefix(key, watched.prefix) {
+			watched.access.reads++
+			return watched.access
+		}
 	}
-	return false
+	return nil
 }
 
 func (s countingKVStore) Get(key []byte) ([]byte, error) { s.count(key); return s.inner.Get(key) }
@@ -71,21 +81,21 @@ func (s countingKVStore) Set(key, value []byte) error    { return s.inner.Set(ke
 func (s countingKVStore) Delete(key []byte) error        { return s.inner.Delete(key) }
 
 func (s countingKVStore) Iterator(start, end []byte) (corestore.Iterator, error) {
-	tracked := s.count(start)
+	access := s.count(start)
 	iter, err := s.inner.Iterator(start, end)
-	if err != nil || !tracked {
+	if err != nil || access == nil {
 		return iter, err
 	}
-	return countingIterator{Iterator: iter, access: s.access}, nil
+	return countingIterator{Iterator: iter, access: access}, nil
 }
 
 func (s countingKVStore) ReverseIterator(start, end []byte) (corestore.Iterator, error) {
-	tracked := s.count(start)
+	access := s.count(start)
 	iter, err := s.inner.ReverseIterator(start, end)
-	if err != nil || !tracked {
+	if err != nil || access == nil {
 		return iter, err
 	}
-	return countingIterator{Iterator: iter, access: s.access}, nil
+	return countingIterator{Iterator: iter, access: access}, nil
 }
 
 // countingIterator counts every advance the walk makes.
@@ -105,13 +115,12 @@ func (i countingIterator) Next() {
 }
 
 type countingKVStoreService struct {
-	inner  corestore.KVStoreService
-	prefix []byte
-	access *storeAccess
+	inner   corestore.KVStoreService
+	watched []watchedPrefix
 }
 
 func (s countingKVStoreService) OpenKVStore(ctx context.Context) corestore.KVStore {
-	return countingKVStore{inner: s.inner.OpenKVStore(ctx), prefix: s.prefix, access: s.access}
+	return countingKVStore{inner: s.inner.OpenKVStore(ctx), watched: s.watched}
 }
 
 // setupCountingFinalization mirrors the ordinary finalization fixture but routes
@@ -133,9 +142,10 @@ func setupCountingFinalization(
 
 	access := &storeAccess{}
 	service := countingKVStoreService{
-		inner:  runtime.NewKVStoreService(keys[types.StoreKey]),
-		prefix: types.RewardConfigVersionsPrefix.Bytes(),
-		access: access,
+		inner: runtime.NewKVStoreService(keys[types.StoreKey]),
+		watched: []watchedPrefix{
+			{prefix: types.RewardConfigVersionsPrefix.Bytes(), access: access},
+		},
 	}
 
 	params := rewardConfigParams()

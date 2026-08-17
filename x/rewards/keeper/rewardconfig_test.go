@@ -121,11 +121,11 @@ func TestRewardConfigTargetBindingFollowsTheCanonicalRule(t *testing.T) {
 func TestRewardConfigBootstrapIsNotAnUnguardedSubtraction(t *testing.T) {
 	k, ctx, _ := setupRewardConfig(t)
 	seedRewardVersion(t, k, ctx, rewardVersionAt(2, 4, "20"))
-	seedRewardVersion(t, k, ctx, rewardVersionAt(9, 500, "90"))
+	seedRewardVersion(t, k, ctx, rewardVersionAt(3, 500, "90"))
 
 	latest, err := k.RewardConfigForTarget(ctx, 10_000)
 	require.NoError(t, err)
-	require.Equal(t, uint64(9), latest.Version, "fixture must have a distinguishable newest version")
+	require.Equal(t, uint64(3), latest.Version, "fixture must have a distinguishable newest version")
 
 	for _, target := range []uint64{1, 2} {
 		version, err := k.RewardConfigForTarget(ctx, target)
@@ -146,7 +146,7 @@ func TestRewardConfigBootstrapIsNotAnUnguardedSubtraction(t *testing.T) {
 func TestRewardConfigBootstrapIsNotAClamp(t *testing.T) {
 	k, ctx, _ := setupRewardConfig(t)
 	require.NoError(t, k.RewardConfigVersions.Remove(ctx, 1))
-	seedRewardVersion(t, k, ctx, rewardVersionAt(4, 4, "40"))
+	seedRewardVersion(t, k, ctx, rewardVersionAt(2, 4, "40"))
 
 	for _, target := range []uint64{1, 2} {
 		_, err := k.RewardConfigForTarget(ctx, target)

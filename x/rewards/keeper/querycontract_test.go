@@ -175,8 +175,8 @@ func TestRewardConfigHistoryQueryFailsClosed(t *testing.T) {
 		{
 			name: "a non-monotonic edge inside the page",
 			corrupt: func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
-				seedRewardVersion(t, k, ctx, rewardVersionAt(5, 4, "20"))
-				seedRewardVersion(t, k, ctx, rewardVersionAt(3, 9, "30"))
+				// A gap: the ratified sequence is contiguous, so 1 then 3 is corrupt.
+				seedRewardVersion(t, k, ctx, rewardVersionAt(3, 4, "20"))
 			},
 		},
 	} {

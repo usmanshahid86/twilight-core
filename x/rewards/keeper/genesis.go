@@ -342,9 +342,9 @@ func (k Keeper) initRewardConfigGenesis(ctx context.Context, genState types.Gene
 		if err := importGenesisCollection(ctx, k.RewardConfigVersions, version.EffectiveEpoch, *version); err != nil {
 			return err
 		}
-		if err := k.setRewardConfigVersionIndex(ctx, *version); err != nil {
-			return types.ErrInvalidGenesis.Wrap(err.Error())
-		}
+	}
+	if err := k.rebuildRewardConfigVersionIndex(ctx, genState.RewardConfigVersions); err != nil {
+		return err
 	}
 	for _, scheduled := range genState.ScheduledRewardConfigs {
 		if err := importGenesisCollection(ctx, k.ScheduledRewardConfigs, scheduled.EffectiveEpoch, *scheduled); err != nil {
@@ -368,6 +368,55 @@ func (k Keeper) initEpochHistoryGenesis(ctx context.Context, genState types.Gene
 	for _, scheduled := range genState.ScheduledEpochConfigs {
 		if err := importGenesisCollection(ctx, k.ScheduledEpochConfigs, scheduled.EffectiveEpoch, *scheduled); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// rebuildRewardConfigVersionIndex derives the version index from the canonical
+// history it is given, and refuses a history the ratified protocol says cannot
+// exist.
+//
+// Versions are a contiguous sequence, so a canonical history of N records holds
+// exactly the numbers 1..N. Checking that here is not defensive duplication of the
+// adjacent-edge rule: it is the precondition the index's whole contract rests on.
+// The lookup classifies an out-of-range version as absence and an in-range missing
+// entry as corruption, and both of those readings are only sound if the range is
+// genuinely gapless. Building an index over 1 and 3 would quietly make version 2
+// "in range and missing" — permanently corrupt, from a document that was accepted.
+//
+// It is refused rather than normalized. Normalizing would mean deciding what a
+// gapped history was supposed to mean, which is not a decision an import path gets
+// to make.
+//
+// The check is deliberately order-independent: it looks at the SET of version
+// numbers, not at the order they arrive in. Requiring a particular slice order
+// would be taking a position on genesis collection ordering, which is a separate
+// open question this must not settle by accident.
+func (k Keeper) rebuildRewardConfigVersionIndex(
+	ctx context.Context, versions []*types.RewardConfigVersion,
+) error {
+	seen := make(map[uint64]struct{}, len(versions))
+	for _, version := range versions {
+		if version == nil {
+			return types.ErrInvalidGenesis.Wrap("reward configuration version is nil")
+		}
+		if version.Version == 0 || version.Version > uint64(len(versions)) {
+			return types.ErrInvalidGenesis.Wrapf(
+				"canonical reward configuration history holds %d versions, so version %d is outside the "+
+					"contiguous range 1..%d",
+				len(versions), version.Version, len(versions))
+		}
+		if _, duplicate := seen[version.Version]; duplicate {
+			return types.ErrInvalidGenesis.Wrapf(
+				"canonical reward configuration history holds version %d more than once", version.Version)
+		}
+		seen[version.Version] = struct{}{}
+	}
+	// Distinct, in 1..N, and N of them: the set is exactly 1..N.
+	for _, version := range versions {
+		if err := k.setRewardConfigVersionIndex(ctx, *version); err != nil {
+			return types.ErrInvalidGenesis.Wrap(err.Error())
 		}
 	}
 	return nil
