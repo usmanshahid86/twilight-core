@@ -332,7 +332,7 @@ func (k Keeper) ensureConsensusAvailable(ctx context.Context, any interface {
 // staged new consensus key was registered in ByConsensus at request time but
 // was never active, so it is released (removed) rather than reserved. The
 // slot's current/old key is left in place; the caller's lifecycle transition is
-// responsible for reserving it under the normal rules. Returns the cancelled
+// responsible for reserving it under the normal rules. Returns the canceled
 // rotation and true when one existed.
 func (k Keeper) cancelPendingRotation(ctx context.Context, slotID uint64) (types.PendingKeyRotation, bool, error) {
 	rotation, err := k.Rotations.Get(ctx, slotID)
