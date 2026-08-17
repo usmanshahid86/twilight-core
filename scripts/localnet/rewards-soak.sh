@@ -18,7 +18,11 @@ CHAIN_ID="${CHAIN_ID:-twilight-rewards-soak-1}"
 NODE_COUNT=4
 
 SOAK_DURATION="${SOAK_DURATION:-240}"
-EPOCH_LENGTH="${EPOCH_LENGTH:-4}"
+# The epoch length must sit inside the ratified immutable interval
+# [360, 720]; genesis refuses anything outside it. These localnets therefore run
+# a fast block time instead of a short epoch — block time is node-local
+# configuration and is not a protocol value.
+EPOCH_LENGTH="${EPOCH_LENGTH:-360}"
 SUBSIDY="${SUBSIDY:-416190}"
 PREMINE="${PREMINE:-on}"
 CLAIM_EVERY_N="${CLAIM_EVERY_N:-3}"
@@ -203,6 +207,9 @@ if [[ "$RESUME" != "on" ]]; then
     jq --arg e "$EPOCH_LENGTH" '
       .app_state.rewards.params.epoch_length_blocks = $e
       | .app_state.rewards.current_epoch_config.epoch_length_blocks = $e
+      # EpochConfigVersion is the sole epoch-geometry authority; the two lines above
+      # are deprecated mirrors that fresh genesis requires to agree with it.
+      | .app_state.rewards.epoch_config_versions[0].epoch_length_blocks = $e
     ' "$genesis" >"$tmp" && mv "$tmp" "$genesis"
     if [[ "$PREMINE" == "off" ]]; then
       jq '.app_state.bank.balances = [] | .app_state.bank.supply = []' "$genesis" >"$tmp" && mv "$tmp" "$genesis"

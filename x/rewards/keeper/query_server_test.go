@@ -23,6 +23,7 @@ func setupQueryServer(t *testing.T) (types.QueryServer, sdk.Context, keeper.Keep
 	cfg, err := keeper.BuildEpochConfigSnapshot(params)
 	require.NoError(t, err)
 	require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
+	seedEpochTimeline(t, k, ctx, params, types.RewardsState{CurrentEpoch: 3, CurrentEpochStartHeight: 50})
 	require.NoError(t, k.SetFinalizedEpoch(ctx, validEpoch(1, params)))
 	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 1)))
 	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 2)))
@@ -45,7 +46,7 @@ func TestQueryServerReadsAndErrors(t *testing.T) {
 	einfo, err := qs.EpochInfo(ctx, &types.QueryEpochInfoRequest{})
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), einfo.State.CurrentEpoch)
-	require.Equal(t, uint64(50+17280-1), einfo.CurrentEpochEndHeight)
+	require.Equal(t, 50+types.DefaultEpochLengthBlocks-1, einfo.CurrentEpochEndHeight)
 	require.False(t, einfo.HasPendingParams)
 
 	// NextHalving (tier 0, full subsidy, first threshold ahead)

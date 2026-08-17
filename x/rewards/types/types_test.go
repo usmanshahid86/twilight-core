@@ -29,7 +29,10 @@ func TestDefaultParams(t *testing.T) {
 	require.Equal(t, "21000000000000", params.MaxSupply)
 	require.Equal(t, "416190", params.InitialBlockSubsidy)
 	require.Equal(t, uint64(5), params.TargetBlockTimeSeconds)
-	require.Equal(t, uint64(17280), params.EpochLengthBlocks)
+	// The recommended initial epoch length, which is also the ratified floor.
+	require.Equal(t, appparams.HardMinEpochLengthBlocks, params.EpochLengthBlocks)
+	require.NoError(t, appparams.ValidateEpochLengthBlocks(params.EpochLengthBlocks),
+		"the default must be admissible under the ratified bounds")
 	require.Equal(t, types.HalvingMode_HALVING_MODE_SUPPLY_THRESHOLD, params.HalvingMode)
 	require.Equal(t, types.DistributionMethod_DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS, params.DistributionMethod)
 	require.Equal(t, types.RemainderPolicy_REMAINDER_POLICY_CARRY_FORWARD, params.RemainderPolicy)
@@ -154,8 +157,16 @@ func TestTreasuryAddressValidation(t *testing.T) {
 func TestImmutableUpdateGuard(t *testing.T) {
 	current := types.DefaultParams()
 	next := current
-	next.EpochLengthBlocks++
+	next.MaxClaimEpochsPerTx++
 	require.NoError(t, types.ValidateUpdate(current, next))
+
+	// Epoch geometry is owned by the canonical epoch-configuration history, so
+	// this path must refuse to move it. Without the guard a params update would
+	// be a second way to change epoch length — immediate, unversioned, and
+	// invisible to every boundary already derived from the history.
+	next = current
+	next.EpochLengthBlocks++
+	require.ErrorIs(t, types.ValidateUpdate(current, next), types.ErrImmutableParam)
 
 	next = current
 	next.NativeDenom = "other"
@@ -182,7 +193,7 @@ func TestDefaultGenesis(t *testing.T) {
 func TestGenesisPendingParamsPresence(t *testing.T) {
 	genesis := types.DefaultGenesis()
 	pending := types.DefaultParams()
-	pending.EpochLengthBlocks++
+	pending.MaxClaimEpochsPerTx++
 	genesis.PendingParams = &pending
 	require.Error(t, genesis.Validate())
 

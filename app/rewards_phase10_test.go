@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
 
 	"github.com/twilight-project/twilight-core/app"
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
@@ -24,6 +26,40 @@ import (
 // what a fresh V2 genesis requires. It exists only so a rewards-focused
 // export/import test can run; it is test scaffolding and encodes no claim about
 // how a real continuation import should behave.
+// renormalizeRewardsGenesis rewrites an exported rewards genesis into the
+// fresh-genesis shape this chain now requires: the original-genesis epoch anchor
+// at the importing chain's initial height, the open epoch back at 1, an empty
+// schedule, a clean pause state and a zero open counter.
+//
+// Like its CoreSlot counterpart this is test scaffolding, not a continuation
+// claim. Rewards genesis import is deliberately fresh-only — the epoch anchor is
+// the permanent origin of every later boundary, so a live cursor cannot simply be
+// re-imported — and deciding what a real continuation import means is separate,
+// later work. The monetary state the surrounding test asserts (cumulative
+// emission, finalized epochs, claim records, balances) is preserved untouched.
+func renormalizeRewardsGenesis(t *testing.T, appState []byte, initialHeight int64) []byte {
+	t.Helper()
+	var state map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(appState, &state))
+
+	cdc := genesisCodec()
+	var rGen rewardstypes.GenesisState
+	require.NoError(t, cdc.UnmarshalJSON(state[rewardstypes.ModuleName], &rGen))
+
+	anchor := rewardstypes.DefaultEpochConfigVersion(*rGen.Params, uint64(initialHeight))
+	rGen.EpochConfigVersions = []*rewardstypes.EpochConfigVersion{&anchor}
+	rGen.ScheduledEpochConfigs = nil
+	rGen.PauseState = &rewardstypes.RewardsPauseState{}
+	rGen.OpenRewardEnabledBlocks = 0
+	rGen.State.CurrentEpoch = 1
+	rGen.State.CurrentEpochStartHeight = uint64(initialHeight)
+
+	state[rewardstypes.ModuleName] = cdc.MustMarshalJSON(&rGen)
+	out, err := json.Marshal(state)
+	require.NoError(t, err)
+	return out
+}
+
 func renormalizeCoreSlotGenesis(t *testing.T, appState []byte, initialHeight int64) []byte {
 	t.Helper()
 	var state map[string]json.RawMessage
@@ -52,16 +88,18 @@ func renormalizeCoreSlotGenesis(t *testing.T, appState []byte, initialHeight int
 func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
 	a := bootApp(t)
 	params := rewardstypes.DefaultParams()
-	params.EpochLengthBlocks = 2
+	// The shortest admissible epoch length; toy values no longer boot a chain.
+	params.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
+	epochLen := int64(params.EpochLengthBlocks)
 	snapshot := rewardstypes.DefaultEpochConfigSnapshot(params)
-	initChainWithRewards(t, a, &rewardstypes.GenesisState{
+	initChainWithRewards(t, a, canonicalRewardsTimeline(&rewardstypes.GenesisState{
 		Params:             &params,
 		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig: &snapshot,
-	})
+	}, 1))
 
 	blockTime := time.Unix(1_700_000_000, 0).UTC()
-	for height := int64(1); height <= 2; height++ {
+	for height := int64(1); height <= epochLen; height++ {
 		_, err := a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: height, Time: blockTime.Add(time.Duration(height) * time.Second)})
 		require.NoError(t, err)
 		_, err = a.Commit()
@@ -70,7 +108,7 @@ func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
 
 	exported, err := a.ExportAppStateAndValidators(false, nil, []string{"auth", "bank", "consensus", "coreslot", "rewards"})
 	require.NoError(t, err)
-	require.Equal(t, int64(3), exported.Height)
+	require.Equal(t, epochLen+1, exported.Height)
 	require.NotEmpty(t, exported.Validators)
 
 	// x/coreslot genesis import is FRESH-genesis only: §80 requires an ACTIVE slot
@@ -85,6 +123,7 @@ func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
 	// works; when H7 lands it will decide what a continuation import means, and
 	// this scaffolding should be revisited then rather than treated as precedent.
 	appState := renormalizeCoreSlotGenesis(t, exported.AppState, exported.Height)
+	appState = renormalizeRewardsGenesis(t, appState, exported.Height)
 
 	b := app.New(log.NewNopLogger(), dbm.NewMemDB(), nil, true, sims.EmptyAppOptions{})
 	_, err = b.InitChain(&abci.RequestInitChain{
@@ -95,35 +134,40 @@ func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = b.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 3, Time: blockTime.Add(3 * time.Second)})
+	_, err = b.FinalizeBlock(&abci.RequestFinalizeBlock{Height: exported.Height, Time: blockTime.Add(3 * time.Second)})
 	require.NoError(t, err)
 	_, err = b.Commit()
 	require.NoError(t, err)
 
-	ctx := b.NewUncachedContext(false, cmtproto.Header{Height: 3})
+	ctx := b.NewUncachedContext(false, cmtproto.Header{Height: exported.Height})
 	state, err := b.RewardsKeeper.GetState(ctx)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), state.CurrentEpoch)
-	require.Equal(t, "832380", state.CumulativeEmitted)
+	// The imported chain re-anchors at epoch 1: rewards genesis import is
+	// fresh-only, so an exported mid-life epoch cursor is renormalized rather
+	// than continued. The monetary facts below are what this test actually
+	// protects, and they survive intact.
+	require.Equal(t, uint64(1), state.CurrentEpoch)
+	epochEmission := strconv.FormatInt(epochLen*416190, 10)
+	require.Equal(t, epochEmission, state.CumulativeEmitted)
 	importedParams, err := b.RewardsKeeper.GetParams(ctx)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), importedParams.EpochLengthBlocks)
+	require.Equal(t, uint64(epochLen), importedParams.EpochLengthBlocks)
 	importedConfig, err := b.RewardsKeeper.GetCurrentEpochConfig(ctx)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), importedConfig.EpochLengthBlocks)
+	require.Equal(t, uint64(epochLen), importedConfig.EpochLengthBlocks)
 	epoch, found, err := b.RewardsKeeper.GetFinalizedEpoch(ctx, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "832380", epoch.MintedEmission)
+	require.Equal(t, epochEmission, epoch.MintedEmission)
 	claim, found, err := b.RewardsKeeper.GetClaimRecord(ctx, 1, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "832380", claim.Amount)
+	require.Equal(t, epochEmission, claim.Amount)
 	require.False(t, claim.Claimed)
-	require.Equal(t, "832380", b.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String())
+	require.Equal(t, epochEmission, b.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String())
 	rewardsAddr := b.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName)
-	require.Equal(t, "832380", b.BankKeeper.GetBalance(ctx, rewardsAddr, app.BaseDenom).Amount.String())
-	active, err := b.RewardsKeeper.GetActiveBlocks(ctx, 2, 1)
+	require.Equal(t, epochEmission, b.BankKeeper.GetBalance(ctx, rewardsAddr, app.BaseDenom).Amount.String())
+	active, err := b.RewardsKeeper.GetActiveBlocks(ctx, 1, 1)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), active, "imported app must continue coherent active-block accounting")
 }
@@ -131,32 +175,43 @@ func TestRewardsPopulatedAppExportImportAndContinue(t *testing.T) {
 func TestRewardsRuntimeFinalizeBlockFailClosed(t *testing.T) {
 	a := bootApp(t)
 	params := rewardstypes.DefaultParams()
-	params.EpochLengthBlocks = 2
+	// The shortest admissible epoch length; toy values no longer boot a chain.
+	params.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
+	epochLen := int64(params.EpochLengthBlocks)
 	snapshot := rewardstypes.DefaultEpochConfigSnapshot(params)
-	initChainWithRewards(t, a, &rewardstypes.GenesisState{
+	initChainWithRewards(t, a, canonicalRewardsTimeline(&rewardstypes.GenesisState{
 		Params:             &params,
 		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig: &snapshot,
-	})
+	}, 1))
 
+	// Drive to the block before the epoch boundary, committing each one.
 	blockTime := time.Unix(1_700_000_000, 0).UTC()
-	_, err := a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 1, Time: blockTime})
-	require.NoError(t, err)
-	_, err = a.Commit()
-	require.NoError(t, err)
+	var err error
+	for height := int64(1); height < epochLen; height++ {
+		_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{
+			Height: height, Time: blockTime.Add(time.Duration(height) * time.Second),
+		})
+		require.NoError(t, err)
+		_, err = a.Commit()
+		require.NoError(t, err)
+	}
 
 	// Corrupt only the test app's stored epoch snapshot to force the existing
 	// unsupported-distribution error during runtime-dispatched rewards EndBlock.
-	ctx := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
+	ctx := a.NewUncachedContext(false, cmtproto.Header{Height: epochLen - 1})
 	bad := snapshot
 	bad.WeightedRewardsEnabled = true
 	require.NoError(t, a.RewardsKeeper.CurrentEpochConfig.Set(ctx, bad))
 
-	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 2, Time: blockTime.Add(time.Second)})
+	// The boundary block is the one that finalizes, so it is the one that fails.
+	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height: epochLen, Time: blockTime.Add(time.Duration(epochLen) * time.Second),
+	})
 	require.Error(t, err, "runtime must propagate rewards EndBlock errors and reject the block")
-	require.Equal(t, int64(1), a.LastBlockHeight(), "failed FinalizeBlock must not advance committed height")
+	require.Equal(t, epochLen-1, a.LastBlockHeight(), "failed FinalizeBlock must not advance committed height")
 
-	committed := a.NewContextLegacy(false, cmtproto.Header{Height: 1})
+	committed := a.NewContextLegacy(false, cmtproto.Header{Height: epochLen - 1})
 	_, found, err := a.RewardsKeeper.GetFinalizedEpoch(committed, 1)
 	require.NoError(t, err)
 	require.False(t, found)

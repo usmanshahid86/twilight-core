@@ -64,30 +64,34 @@ func TestBuildClaimableRequest(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestBuildPauseMsg(t *testing.T) {
-	_, err := buildPauseMsg("auth", false, false, false)
-	require.Error(t, err, "no-flag pause must be rejected")
-
-	msg, err := buildPauseMsg("auth", true, false, true)
+// TestBuildPauseAndResumeMsgAreGlobal pins that the CLI builds a global pause.
+//
+// The deprecated per-area selectors must stay unset: leaving them false is what
+// keeps the message from implying a partial pause the handler would ignore.
+func TestBuildPauseAndResumeMsgAreGlobal(t *testing.T) {
+	pause, err := buildPauseMsg("auth")
 	require.NoError(t, err)
-	require.Equal(t, "auth", msg.EmergencyAuthority)
-	require.True(t, msg.PauseEmissions)
-	require.False(t, msg.PauseEpochSettlement)
-	require.True(t, msg.PauseClaims)
+	require.Equal(t, "auth", pause.EmergencyAuthority)
+	require.False(t, pause.PauseEmissions)
+	require.False(t, pause.PauseEpochSettlement)
+	require.False(t, pause.PauseClaims)
+
+	resume, err := buildResumeMsg("auth")
+	require.NoError(t, err)
+	require.Equal(t, "auth", resume.EmergencyAuthority)
+	require.False(t, resume.ResumeEmissions)
+	require.False(t, resume.ResumeEpochSettlement)
+	require.False(t, resume.ResumeClaims)
 }
 
-func TestBuildResumeMsg(t *testing.T) {
-	_, err := buildResumeMsg("auth", false, false, false)
-	require.Error(t, err, "no-flag resume must be rejected")
-
-	msg, err := buildResumeMsg("auth", false, true, false)
+func TestBuildEpochBoundariesRequest(t *testing.T) {
+	req, err := buildEpochBoundariesRequest([]string{"7"})
 	require.NoError(t, err)
-	require.Equal(t, "auth", msg.EmergencyAuthority)
-	require.False(t, msg.ResumeEmissions)
-	require.True(t, msg.ResumeEpochSettlement)
-	require.False(t, msg.ResumeClaims)
-}
+	require.Equal(t, uint64(7), req.EpochNumber)
 
+	_, err = buildEpochBoundariesRequest([]string{"bad"})
+	require.Error(t, err)
+}
 func TestBuildClaimMsg(t *testing.T) {
 	msg, err := buildClaimMsg("signer-addr", "3", "1", "5")
 	require.NoError(t, err)

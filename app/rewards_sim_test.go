@@ -34,6 +34,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/twilight-project/twilight-core/app"
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	rewardskeeper "github.com/twilight-project/twilight-core/x/rewards/keeper"
@@ -91,8 +92,11 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 	// end; odd seeds run effectively uncapped (no halving). Treasury split on/off;
 	// varied subsidy/epoch/cap.
 	subsidy := int64(100 + rng.Intn(900)) // 100..999 (odd values exercise carry)
-	epochLen := uint64(1 + rng.Intn(4))   // 1..4
-	cap_ := uint64(2 + rng.Intn(4))       // 2..5
+	// Epoch length is randomized inside the RATIFIED admission interval. Toy
+	// lengths can no longer boot a chain, and a simulation that used one would be
+	// exercising a configuration the protocol refuses.
+	epochLen := appparams.HardMinEpochLengthBlocks + uint64(rng.Intn(4))
+	cap_ := uint64(2 + rng.Intn(4)) // 2..5
 	if seed <= 4 {
 		cap_ = uint64(seed + 1) // seeds 1-4 deterministically cover caps 2,3,4,5
 	}
@@ -105,7 +109,9 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 	smallSupply := seed%2 == 0
 	maxSupply := "21000000000000"
 	if smallSupply {
-		maxSupply = fmt.Sprintf("%d", subsidy*40) // half == subsidy*20 -> crossed within the drain
+		// Half of this is one epoch's emission, so the first supply threshold is
+		// crossed at the epoch-1 boundary and the drain runs well past it.
+		maxSupply = fmt.Sprintf("%d", subsidy*int64(epochLen)*2)
 	}
 	rp, snap := rewardsParams(t, func(p *rewardstypes.Params) {
 		p.InitialBlockSubsidy = fmt.Sprintf("%d", subsidy)
@@ -149,10 +155,19 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 		state, err := a.RewardsKeeper.GetState(ctx)
 		require.NoError(t, err)
 		sumEmission, sumTreasury, sumAllocated := math.ZeroInt(), math.ZeroInt(), math.ZeroInt()
-		for e := uint64(1); e < state.CurrentEpoch; e++ {
+		// Walk the finalized records themselves rather than deriving the range from
+		// CurrentEpoch. The epoch counter advances at BeginBlock, so an epoch
+		// finalized at its boundary is still "current" until the next block opens;
+		// a range of e < CurrentEpoch would silently omit it and under-count the
+		// emission the conservation identity is checking.
+		for e := uint64(1); e <= state.CurrentEpoch; e++ {
 			epoch, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, e)
 			require.NoError(t, err)
-			require.Truef(t, found, "seed %d: epoch %d must be finalized (< currentEpoch)", seed, e)
+			if !found {
+				require.Equalf(t, state.CurrentEpoch, e,
+					"seed %d: only the open epoch may be unfinalized", seed)
+				continue
+			}
 			sumEmission = sumEmission.Add(intStr(t, epoch.MintedEmission))
 			sumTreasury = sumTreasury.Add(intStr(t, epoch.TreasuryAmount))
 			sumAllocated = sumAllocated.Add(intStr(t, epoch.AllocatedAmount))
@@ -172,11 +187,20 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 
 	reconcile(ctx)
 
+	// Sized so a handful of advance steps closes an epoch, which is what makes
+	// several epochs finalize within the step budget.
+	advanceChunk := int64(epochLen) / 4
 	for step := 0; step < steps; step++ {
 		switch rng.Intn(6) {
-		case 0, 1, 2: // advance a block (the dominant op)
-			driveBlock(t, a, base, height) // side effect only; ctx is refreshed to the new height below
-			height++
+		case 0, 1, 2: // advance the chain (the dominant op)
+			// A CHUNK of blocks, not one. Epochs are now hundreds of blocks long,
+			// so advancing singly would never close one and the claim, cap and
+			// replay branches below would never become reachable — the simulation
+			// would still pass while exercising almost nothing.
+			for i := int64(0); i < advanceChunk; i++ {
+				driveBlock(t, a, base, height) // side effect only; ctx is refreshed below
+				height++
+			}
 			ctx = base.WithBlockHeight(height) // subsequent ops act at the new current block height
 
 		case 3: // churn: suspend an active slot or reactivate a suspended one (floor-respecting).
@@ -213,7 +237,8 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 	})
 	drain := int(epochLen)*2 + 2
 	if smallSupply {
-		drain = 60 // > 40 block-subsidies => past maxSupply (cap) => crossed the halving
+		// Three full epochs: past the maxSupply cap, so the halving is crossed.
+		drain = int(epochLen) * 3
 	}
 	for i := 0; i < drain; i++ {
 		ctx = driveBlock(t, a, base, height)
@@ -277,8 +302,6 @@ func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ ui
 	if state.CurrentEpoch <= 1 {
 		return // nothing finalized yet
 	}
-	params, err := a.RewardsKeeper.GetParams(ctx)
-	require.NoError(t, err)
 	slot := uint64(1 + rng.Intn(3))
 	start := uint64(1 + rng.Intn(int(state.CurrentEpoch-1)))
 	end := start + uint64(rng.Intn(6)) // delta 0..5 so the cap boundary is reachable for caps 2..5
@@ -288,8 +311,8 @@ func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ ui
 	// -> nonpositive). Empty reason == predicted valid.
 	reason := ""
 	switch {
-	case !params.ClaimsEnabled:
-		reason = "claims are disabled"
+	case !releaseEnabled(t, a, ctx):
+		reason = "rewards release is paused"
 	case end-start >= cap_:
 		reason = "claim range exceeds maximum"
 	default:
@@ -341,31 +364,43 @@ func simClaim(t *testing.T, a *app.App, ctx sdk.Context, rng *rand.Rand, cap_ ui
 			cov.capReject++
 		case "already claimed":
 			cov.replayReject++
-		case "claims are disabled":
+		case "rewards release is paused":
 			cov.pauseClaimReject++
 		}
 	}
 }
 
-// pauseResume toggles a random subset of the three runtime flags via the
-// emergency authority.
-func pauseResume(t *testing.T, a *app.App, ctx sdk.Context, emer string, pause bool, rng *rand.Rand) error {
+// pauseResume drives the canonical global pause through the emergency authority.
+//
+// The message schedules the value for H+1. This simulation does not step a block
+// between the transaction and the steps that observe it, so it then settles the
+// transition directly: the simulation is about what a paused or resumed chain
+// does, and the H+1 timing itself is pinned by dedicated keeper and app tests
+// rather than sampled randomly here.
+//
+// The deprecated per-area selectors on the messages are left at their zero values
+// deliberately — a pause is global, and passing them would suggest otherwise.
+func pauseResume(t *testing.T, a *app.App, ctx sdk.Context, emer string, pause bool, _ *rand.Rand) error {
 	t.Helper()
-	em := rng.Intn(2) == 0
-	se := rng.Intn(2) == 0
-	cl := rng.Intn(2) == 0
-	if !em && !se && !cl {
-		em = true
-	}
 	srv := rewardskeeper.NewMsgServer(a.RewardsKeeper)
 	if pause {
-		_, err := srv.PauseRewards(ctx, &rewardstypes.MsgPauseRewards{
-			EmergencyAuthority: emer, PauseEmissions: em, PauseEpochSettlement: se, PauseClaims: cl,
-		})
-		return err
+		if _, err := srv.PauseRewards(ctx, &rewardstypes.MsgPauseRewards{EmergencyAuthority: emer}); err != nil {
+			return err
+		}
+	} else {
+		if _, err := srv.ResumeRewards(ctx, &rewardstypes.MsgResumeRewards{EmergencyAuthority: emer}); err != nil {
+			return err
+		}
 	}
-	_, err := srv.ResumeRewards(ctx, &rewardstypes.MsgResumeRewards{
-		EmergencyAuthority: emer, ResumeEmissions: em, ResumeEpochSettlement: se, ResumeClaims: cl,
-	})
-	return err
+	return a.RewardsKeeper.SetPauseState(ctx, rewardstypes.RewardsPauseState{CurrentPaused: pause})
+}
+
+// releaseEnabled reports the canonical release state, which is what now governs
+// whether the legacy claim path may move funds. The retired claims_enabled switch
+// carries no authority and must not be used to predict a rejection.
+func releaseEnabled(t *testing.T, a *app.App, ctx sdk.Context) bool {
+	t.Helper()
+	enabled, err := a.RewardsKeeper.SettlementReleaseEnabled(ctx)
+	require.NoError(t, err)
+	return enabled
 }

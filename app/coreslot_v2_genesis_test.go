@@ -17,6 +17,7 @@ import (
 	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
+	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
 // TestFreshV2GenesisBootsThroughTheRealApplication is the app-integration proof for
@@ -73,8 +74,29 @@ func bootFreshV2Genesis(t *testing.T, requestedHeight, initialHeight int64) {
 		NextSlotId:    2,
 	}
 
+	// The rewards genesis must be authored for THIS chain's initial height: the
+	// original-genesis epoch anchor is the permanent origin of every later
+	// boundary, so the module-default document (anchored at height 1) is not a
+	// valid genesis for a chain that starts elsewhere. Rejecting the mismatch is
+	// deliberate — synthesizing the anchor from the context would silently rewrite
+	// canonical state the operator is supposed to declare.
+	rParams := rewardstypes.DefaultParams()
+	rSnap := rewardstypes.DefaultEpochConfigSnapshot(rParams)
+	rAnchor := rewardstypes.DefaultEpochConfigVersion(rParams, uint64(initialHeight))
+	rGen := &rewardstypes.GenesisState{
+		Params: &rParams,
+		State: &rewardstypes.RewardsState{
+			CurrentEpoch: 1, CurrentEpochStartHeight: uint64(initialHeight),
+			CumulativeEmitted: "0", CarryForwardRemainder: "0",
+		},
+		CurrentEpochConfig:  &rSnap,
+		EpochConfigVersions: []*rewardstypes.EpochConfigVersion{&rAnchor},
+		PauseState:          &rewardstypes.RewardsPauseState{},
+	}
+
 	genMap := a.DefaultGenesis()
 	genMap[coreslottypes.ModuleName] = cdc.MustMarshalJSON(csGen)
+	genMap[rewardstypes.ModuleName] = cdc.MustMarshalJSON(rGen)
 	appState, err := json.Marshal(genMap)
 	require.NoError(t, err)
 

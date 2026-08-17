@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"os"
 	"strconv"
 
@@ -63,46 +62,38 @@ func updateParamsCmd() *cobra.Command {
 	})
 }
 
+// pauseCmd schedules a GLOBAL rewards pause for the next block.
+//
+// The per-area flags are gone with the switches they drove: there is one pause
+// state, and offering --emissions/--settlement/--claims would advertise a partial
+// pause the protocol no longer has.
 func pauseCmd() *cobra.Command {
-	cmd := txCmd("pause", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
+	return txCmd("pause", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
 		from, err := signer(cmd)
 		if err != nil {
 			return err
 		}
-		emissions, _ := cmd.Flags().GetBool("emissions")
-		settlement, _ := cmd.Flags().GetBool("settlement")
-		claims, _ := cmd.Flags().GetBool("claims")
-		msg, err := buildPauseMsg(from, emissions, settlement, claims)
+		msg, err := buildPauseMsg(from)
 		if err != nil {
 			return err
 		}
 		return broadcast(cmd, msg)
 	})
-	cmd.Flags().Bool("emissions", false, "pause emissions")
-	cmd.Flags().Bool("settlement", false, "pause epoch settlement")
-	cmd.Flags().Bool("claims", false, "pause claims")
-	return cmd
 }
 
+// resumeCmd schedules a global rewards resume for the next block.
 func resumeCmd() *cobra.Command {
-	cmd := txCmd("resume", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
+	return txCmd("resume", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
 		from, err := signer(cmd)
 		if err != nil {
 			return err
 		}
-		emissions, _ := cmd.Flags().GetBool("emissions")
-		settlement, _ := cmd.Flags().GetBool("settlement")
-		claims, _ := cmd.Flags().GetBool("claims")
-		msg, err := buildResumeMsg(from, emissions, settlement, claims)
+		msg, err := buildResumeMsg(from)
 		if err != nil {
 			return err
 		}
 		return broadcast(cmd, msg)
 	})
-	cmd.Flags().Bool("emissions", false, "resume emissions")
-	cmd.Flags().Bool("settlement", false, "resume epoch settlement")
-	cmd.Flags().Bool("claims", false, "resume claims")
-	return cmd
 }
 
 // claimCmd triggers a claim for a slot over an inclusive epoch range. Anyone may
@@ -136,30 +127,16 @@ func buildUpdateParamsMsg(cdc codec.Codec, from, jsonPath string) (*types.MsgUpd
 	return &types.MsgUpdateRewardsParams{Authority: from, Params: &params}, nil
 }
 
-func buildPauseMsg(from string, emissions, settlement, claims bool) (*types.MsgPauseRewards, error) {
-	if !emissions && !settlement && !claims {
-		return nil, fmt.Errorf("at least one of --emissions, --settlement, --claims is required")
-	}
-	return &types.MsgPauseRewards{
-		EmergencyAuthority:   from,
-		PauseEmissions:       emissions,
-		PauseEpochSettlement: settlement,
-		PauseClaims:          claims,
-	}, nil
+// buildPauseMsg builds a global pause. The deprecated per-area selectors are
+// left unset: they carry no meaning and setting them would imply partial pause
+// semantics the handler ignores.
+func buildPauseMsg(from string) (*types.MsgPauseRewards, error) {
+	return &types.MsgPauseRewards{EmergencyAuthority: from}, nil
 }
 
-func buildResumeMsg(from string, emissions, settlement, claims bool) (*types.MsgResumeRewards, error) {
-	if !emissions && !settlement && !claims {
-		return nil, fmt.Errorf("at least one of --emissions, --settlement, --claims is required")
-	}
-	return &types.MsgResumeRewards{
-		EmergencyAuthority:    from,
-		ResumeEmissions:       emissions,
-		ResumeEpochSettlement: settlement,
-		ResumeClaims:          claims,
-	}, nil
+func buildResumeMsg(from string) (*types.MsgResumeRewards, error) {
+	return &types.MsgResumeRewards{EmergencyAuthority: from}, nil
 }
-
 func buildClaimMsg(from, slotArg, startArg, endArg string) (*types.MsgClaimRewards, error) {
 	slot, err := strconv.ParseUint(slotArg, 10, 64)
 	if err != nil {

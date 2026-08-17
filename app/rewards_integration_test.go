@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"strconv"
 	"testing"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
@@ -11,6 +12,7 @@ import (
 
 	"cosmossdk.io/core/appmodule"
 	"cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
 
 	sdked25519 "github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/cosmos-sdk/testutil/sims"
@@ -21,6 +23,8 @@ import (
 	"github.com/twilight-project/twilight-core/app"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
+
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
@@ -141,13 +145,15 @@ func TestRewardsShortEpochFinalizeSuspendClaim(t *testing.T) {
 
 	// --- Rewards: short epoch (2 blocks), default subsidy, all flags enabled.
 	rParams := rewardstypes.DefaultParams()
-	rParams.EpochLengthBlocks = 2
+	// The shortest admissible epoch; toy lengths can no longer boot a chain.
+	rParams.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
+	epochLen := int64(rParams.EpochLengthBlocks)
 	snapshot := rewardstypes.DefaultEpochConfigSnapshot(rParams)
-	require.NoError(t, a.RewardsKeeper.InitGenesis(base, rewardstypes.GenesisState{
+	require.NoError(t, a.RewardsKeeper.InitGenesis(base, *canonicalRewardsTimeline(&rewardstypes.GenesisState{
 		Params:             &rParams,
 		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig: &snapshot,
-	}))
+	}, 1)))
 
 	// === Block 1: credit both active slots; not yet at the epoch boundary. ===
 	ctx1 := base.WithBlockHeight(1)
@@ -183,14 +189,34 @@ func TestRewardsShortEpochFinalizeSuspendClaim(t *testing.T) {
 	// CoreSlot EndBlock runs before rewards EndBlock (resolved order above).
 	_, err = a.CoreSlotKeeper.EndBlock(ctx2)
 	require.NoError(t, err)
+	require.NoError(t, a.RewardsKeeper.EndBlock(ctx2)) // still before the boundary
 
-	supplyBefore := a.BankKeeper.GetSupply(ctx2, app.BaseDenom).Amount
-	require.NoError(t, a.RewardsKeeper.EndBlock(ctx2)) // height 2 == end: finalize epoch 1
-	supplyAfter := a.BankKeeper.GetSupply(ctx2, app.BaseDenom).Amount
+	// === Blocks 3..epochLen: only slot 2 is active; the last one closes the epoch. ===
+	ctx2 = base.WithBlockHeight(epochLen)
+	var supplyBefore, supplyAfter sdkmath.Int
+	for height := int64(3); height <= epochLen; height++ {
+		ctx := base.WithBlockHeight(height)
+		require.NoError(t, a.RewardsKeeper.BeginBlock(ctx))
+		_, err = a.CoreSlotKeeper.EndBlock(ctx)
+		require.NoError(t, err)
+		if height == epochLen {
+			supplyBefore = a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount
+		}
+		require.NoError(t, a.RewardsKeeper.EndBlock(ctx))
+		if height == epochLen {
+			supplyAfter = a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount
+			ctx2 = ctx
+		}
+	}
 
-	// Two slots × 2 active blocks, subsidy 416190/block, 2 blocks => mint 832380.
-	const mintedEmission = "832380"
-	const perSlotReward = "416190"
+	// Slot 1 earned two blocks before suspension; slot 2 earned the whole epoch.
+	const subsidy = 416190
+	emission := epochLen * subsidy
+	slot1Blocks, slot2Blocks := int64(2), epochLen
+	weight := slot1Blocks + slot2Blocks
+	mintedEmission := strconv.FormatInt(emission, 10)
+	perSlotReward := strconv.FormatInt(emission*slot1Blocks/weight, 10)
+	slot2Reward := strconv.FormatInt(emission*slot2Blocks/weight, 10)
 	require.Equal(t, mintedEmission, supplyAfter.Sub(supplyBefore).String(),
 		"supply must rise by exactly the clipped epoch emission (no double mint)")
 
@@ -205,6 +231,16 @@ func TestRewardsShortEpochFinalizeSuspendClaim(t *testing.T) {
 	require.Equal(t, perSlotReward, rec1.Amount)
 	require.Equal(t, pay1, rec1.PayoutAddress)
 	require.False(t, rec1.Claimed)
+
+	// The counterweight: allocation is proportional to earned blocks, so the slot
+	// that stayed active takes the larger share.
+	rec2, found, err := a.RewardsKeeper.GetClaimRecord(ctx2, 2, 1)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, slot2Reward, rec2.Amount)
+	require.Equal(t, uint64(slot2Blocks), rec2.BlocksActive)
+	require.Equal(t, uint64(slot1Blocks), rec1.BlocksActive,
+		"slot 1 earned only the blocks before its suspension took effect")
 
 	// === Claim slot 1 (the suspended slot) via an arbitrary signer != payout. ===
 	signer := acc(9)

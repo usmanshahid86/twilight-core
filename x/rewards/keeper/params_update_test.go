@@ -14,7 +14,6 @@ func TestMsgUpdateRewardsParamsQueuesAuthorityUpdate(t *testing.T) {
 	k, ctx, _ := setupAccountingKeeper(t, core, 1, types.DefaultParams())
 	server := keeper.NewMsgServer(k)
 	next := types.DefaultParams()
-	next.EpochLengthBlocks = 99
 	next.InitialBlockSubsidy = "123"
 
 	_, err := server.UpdateRewardsParams(ctx, &types.MsgUpdateRewardsParams{Authority: core.authority, Params: &next})
@@ -22,7 +21,7 @@ func TestMsgUpdateRewardsParamsQueuesAuthorityUpdate(t *testing.T) {
 	pending, found, err := k.GetPendingParams(ctx)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, uint64(99), pending.EpochLengthBlocks)
+	require.Equal(t, "123", pending.InitialBlockSubsidy)
 	cfg, err := k.GetCurrentEpochConfig(ctx)
 	require.NoError(t, err)
 	require.Equal(t, types.DefaultEpochLengthBlocks, cfg.EpochLengthBlocks)
@@ -44,6 +43,9 @@ func TestMsgUpdateRewardsParamsRejectsImmutableAndUnsupportedChanges(t *testing.
 		func(p *types.Params) { p.WeightedRewardsEnabled = true },
 		func(p *types.Params) { p.EmissionTreasuryShareBps = 10_001 },
 		func(p *types.Params) { p.EmissionsEnabled = false },
+		// Epoch geometry belongs to the canonical history; the generic params
+		// path must not be a second, unversioned way to move it.
+		func(p *types.Params) { p.EpochLengthBlocks = 99 },
 	} {
 		next := types.DefaultParams()
 		mutate(&next)
@@ -52,38 +54,47 @@ func TestMsgUpdateRewardsParamsRejectsImmutableAndUnsupportedChanges(t *testing.
 	}
 }
 
-func TestEmergencyPauseAndResumeOnlyImmediateFlags(t *testing.T) {
+// TestEmergencyPauseAndResumeScheduleForNextBlock replaces the retired
+// per-flag immediate-pause test.
+//
+// Two properties matter and both are asserted: the transition is scheduled for
+// H+1 rather than applied in H, and it is global — the deprecated per-area
+// selectors on the message are ignored rather than honored.
+func TestEmergencyPauseAndResumeScheduleForNextBlock(t *testing.T) {
 	core := &coreSlotKeeperMock{authority: addr(1), emergency: addr(2)}
 	k, ctx, _ := setupAccountingKeeper(t, core, 1, types.DefaultParams())
 	server := keeper.NewMsgServer(k)
-	pending := types.DefaultParams()
-	pending.EpochLengthBlocks = 99
-	require.NoError(t, k.SetPendingParams(ctx, pending))
+	ctx = ctx.WithBlockHeight(10)
 
-	_, err := server.PauseRewards(ctx, &types.MsgPauseRewards{
-		EmergencyAuthority: core.emergency, PauseEmissions: true, PauseEpochSettlement: true, PauseClaims: true,
-	})
-	require.NoError(t, err)
-	params, err := k.GetParams(ctx)
-	require.NoError(t, err)
-	require.False(t, params.EmissionsEnabled)
-	require.False(t, params.EpochSettlementEnabled)
-	require.False(t, params.ClaimsEnabled)
-	stillPending, found, err := k.GetPendingParams(ctx)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, uint64(99), stillPending.EpochLengthBlocks)
-
-	_, err = server.ResumeRewards(ctx, &types.MsgResumeRewards{
-		EmergencyAuthority: core.emergency, ResumeEmissions: true, ResumeEpochSettlement: true, ResumeClaims: true,
-	})
-	require.NoError(t, err)
-	params, err = k.GetParams(ctx)
-	require.NoError(t, err)
-	require.True(t, params.EmissionsEnabled)
-	require.True(t, params.EpochSettlementEnabled)
-	require.True(t, params.ClaimsEnabled)
-
-	_, err = server.PauseRewards(ctx, &types.MsgPauseRewards{EmergencyAuthority: addr(9), PauseClaims: true})
+	// Only the emergency authority may schedule.
+	_, err := server.PauseRewards(ctx, &types.MsgPauseRewards{EmergencyAuthority: addr(9)})
 	require.Error(t, err)
+
+	// Deliberately set only ONE deprecated selector: a global pause must result.
+	_, err = server.PauseRewards(ctx, &types.MsgPauseRewards{
+		EmergencyAuthority: core.emergency, PauseEmissions: true,
+	})
+	require.NoError(t, err)
+
+	state, err := k.GetPauseState(ctx)
+	require.NoError(t, err)
+	require.False(t, state.CurrentPaused, "H must remain governed by the state effective at H")
+	require.True(t, state.HasPending)
+	require.True(t, state.PendingValue)
+	require.Equal(t, uint64(11), state.PendingEffectiveHeight)
+
+	// Release is still enabled during H: the pending value is not visible early.
+	enabled, err := k.SettlementReleaseEnabled(ctx)
+	require.NoError(t, err)
+	require.True(t, enabled)
+
+	// A second change in the same block replaces the pending value; the last
+	// accepted transaction wins.
+	_, err = server.ResumeRewards(ctx, &types.MsgResumeRewards{EmergencyAuthority: core.emergency})
+	require.NoError(t, err)
+	state, err = k.GetPauseState(ctx)
+	require.NoError(t, err)
+	require.True(t, state.HasPending)
+	require.False(t, state.PendingValue)
+	require.Equal(t, uint64(11), state.PendingEffectiveHeight)
 }

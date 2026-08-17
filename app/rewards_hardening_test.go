@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 
 	"github.com/twilight-project/twilight-core/app"
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
@@ -89,13 +91,16 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	require.Equal(t, []string{"rewards"}, a.ModuleManager.OrderBeginBlockers)
 
 	rParams := rewardstypes.DefaultParams()
-	rParams.EpochLengthBlocks = 2 // short epoch so it closes within the test
+	// The shortest admissible epoch, so it still closes within the test. Toy
+	// lengths are no longer bootable: the ratified interval is [360, 720].
+	rParams.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
+	epochLen := int64(rParams.EpochLengthBlocks)
 	rSnap := rewardstypes.DefaultEpochConfigSnapshot(rParams)
-	rewardsGen := &rewardstypes.GenesisState{
+	rewardsGen := canonicalRewardsTimeline(&rewardstypes.GenesisState{
 		Params:             &rParams,
 		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig: &rSnap,
-	}
+	}, 1)
 	initChainWithRewards(t, a, rewardsGen)
 
 	blockTime := time.Unix(1_700_000_000, 0).UTC()
@@ -117,10 +122,18 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	_, err = a.Commit()
 	require.NoError(t, err)
 
-	// === Block 2 via the runtime block loop (the configured epoch boundary). ===
-	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 2, Time: blockTime})
-	require.NoError(t, err)
-	ctx2 := a.NewContextLegacy(false, cmtproto.Header{Height: 2, Time: blockTime})
+	// === Drive to the configured epoch boundary through the runtime loop. ===
+	// Block 1 was already committed above; each iteration finalizes one block and
+	// commits it, leaving the boundary block uncommitted so its state is readable.
+	for height := int64(2); height <= epochLen; height++ {
+		_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: height, Time: blockTime})
+		require.NoError(t, err)
+		if height < epochLen {
+			_, err = a.Commit()
+			require.NoError(t, err)
+		}
+	}
+	ctx2 := a.NewContextLegacy(false, cmtproto.Header{Height: epochLen, Time: blockTime})
 
 	// Runtime-dispatched EndBlock must have finalized the epoch exactly once.
 	epoch, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx2, 1)
@@ -128,10 +141,27 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	require.True(t, found, "runtime-dispatched EndBlock must finalize the epoch at the boundary")
 	state, err := a.RewardsKeeper.GetState(ctx2)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), state.CurrentEpoch, "CurrentEpoch must advance after finalization")
+	// Finalization does NOT advance the epoch. The next epoch opens at its own
+	// first BeginBlock, which is also where a scheduled configuration is consumed;
+	// advancing here would make every scheduled change unreachable.
+	require.Equal(t, uint64(1), state.CurrentEpoch, "finalization must not advance the epoch")
 
-	// 1 slot × 2 active blocks × 416190 subsidy = 832380 minted into real supply.
-	const mintedEmission = "832380"
+	// The next block opens the next epoch through the runtime BeginBlocker.
+	_, err = a.Commit()
+	require.NoError(t, err)
+	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: epochLen + 1, Time: blockTime})
+	require.NoError(t, err)
+	ctx3 := a.NewContextLegacy(false, cmtproto.Header{Height: epochLen + 1, Time: blockTime})
+	state, err = a.RewardsKeeper.GetState(ctx3)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), state.CurrentEpoch, "the epoch advances at BeginBlock")
+	open, err := a.RewardsKeeper.GetOpenRewardEnabledBlocks(ctx3)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), open,
+		"the first enabled block of the new epoch counts 1, not the previous epoch total plus one")
+
+	// One slot, one full epoch of reward-enabled blocks, at the default subsidy.
+	mintedEmission := strconv.FormatInt(epochLen*416190, 10)
 	supplyAfter := a.BankKeeper.GetSupply(ctx2, app.BaseDenom).Amount
 	require.Equal(t, mintedEmission, supplyAfter.Sub(supplyBefore).String(),
 		"supply delta must equal the minted epoch emission")
@@ -190,10 +220,14 @@ func TestRewardsAuthorityMsgRoutedThroughApp(t *testing.T) {
 	require.NoError(t, a.RewardsKeeper.SetState(ctx, rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"}))
 	snap := rewardstypes.DefaultEpochConfigSnapshot(rParams)
 	require.NoError(t, a.RewardsKeeper.SetCurrentEpochConfig(ctx, snap))
+	require.NoError(t, a.RewardsKeeper.SetPauseState(ctx, rewardstypes.RewardsPauseState{}))
 
 	// --- MsgUpdateRewardsParams routed through the app MsgServiceRouter. ---
 	queued := rewardstypes.DefaultParams()
-	queued.EpochLengthBlocks = 3 // mutable economic change
+	// A mutable economic change. Epoch length is deliberately NOT usable here:
+	// geometry belongs to the canonical epoch-configuration history, so the
+	// generic params path refuses it.
+	queued.InitialBlockSubsidy = "3"
 	updateMsg := &rewardstypes.MsgUpdateRewardsParams{Authority: app.AuthorityAddress(), Params: &queued}
 	handler := a.MsgServiceRouter().Handler(updateMsg)
 	require.NotNil(t, handler, "rewards MsgUpdateRewardsParams must be registered on the app router")
@@ -204,7 +238,7 @@ func TestRewardsAuthorityMsgRoutedThroughApp(t *testing.T) {
 	pending, found, err := a.RewardsKeeper.GetPendingParams(ctx)
 	require.NoError(t, err)
 	require.True(t, found, "update must queue PendingParams")
-	require.Equal(t, uint64(3), pending.EpochLengthBlocks)
+	require.Equal(t, "3", pending.InitialBlockSubsidy)
 	// Current epoch config is NOT mutated immediately.
 	cfg, err := a.RewardsKeeper.GetCurrentEpochConfig(ctx)
 	require.NoError(t, err)
@@ -219,11 +253,23 @@ func TestRewardsAuthorityMsgRoutedThroughApp(t *testing.T) {
 	pauseMsg := &rewardstypes.MsgPauseRewards{EmergencyAuthority: app.EmergencyAuthorityAddress(), PauseEmissions: true}
 	_, err = a.MsgServiceRouter().Handler(pauseMsg)(ctx, pauseMsg)
 	require.NoError(t, err, "CoreSlot emergency authority must be able to pause via the app router")
-	paused, err := a.RewardsKeeper.GetParams(ctx)
+	// The pause is global and scheduled for H+1: the deprecated per-area selector
+	// on the message is ignored, and the block that accepted it is still governed
+	// by the state effective at its own start.
+	pauseState, err := a.RewardsKeeper.GetPauseState(ctx)
 	require.NoError(t, err)
-	require.False(t, paused.EmissionsEnabled, "pause must toggle only the requested flag")
-	require.True(t, paused.EpochSettlementEnabled, "settlement flag must be untouched")
-	require.True(t, paused.ClaimsEnabled, "claims flag must be untouched")
+	require.False(t, pauseState.CurrentPaused, "the accepting block keeps its own effective state")
+	require.True(t, pauseState.HasPending)
+	require.True(t, pauseState.PendingValue)
+	require.Equal(t, uint64(2), pauseState.PendingEffectiveHeight)
+
+	// The retired Params switches are untouched by a pause: they carry no
+	// authority and must not drift into looking like a second pause surface.
+	retired, err := a.RewardsKeeper.GetParams(ctx)
+	require.NoError(t, err)
+	require.True(t, retired.EmissionsEnabled)
+	require.True(t, retired.EpochSettlementEnabled)
+	require.True(t, retired.ClaimsEnabled)
 
 	// Non-emergency-authority rejected (the normal authority cannot pause).
 	badPause := &rewardstypes.MsgPauseRewards{EmergencyAuthority: app.AuthorityAddress(), PauseClaims: true}
@@ -255,15 +301,23 @@ func TestRewardsAppGenesisExportImportRoundTrip(t *testing.T) {
 
 	params := rewardstypes.DefaultParams()
 	pending := rewardstypes.DefaultParams()
-	pending.EpochLengthBlocks = 9 // a queued, mutable economic change
+	// A queued, mutable economic change. Epoch length is deliberately not used:
+	// geometry is owned by the canonical epoch-configuration history.
+	pending.InitialBlockSubsidy = "9"
 	snap := rewardstypes.DefaultEpochConfigSnapshot(params)
-	rGen := &rewardstypes.GenesisState{
+	// Rewards genesis import is fresh-only, exactly as CoreSlot's became: the
+	// original-genesis epoch anchor must be version 1 effective at epoch 1, so a
+	// mid-life exported state no longer re-imports unchanged. Reconstructing a
+	// live chain's rewards state is continuation work and is out of scope here, so
+	// this round trip uses a fresh-genesis-shaped document with non-default
+	// economics rather than a synthetic mid-life epoch.
+	rGen := canonicalRewardsTimeline(&rewardstypes.GenesisState{
 		Params:             &params,
-		State:              &rewardstypes.RewardsState{CurrentEpoch: 5, CurrentEpochStartHeight: 100, CumulativeEmitted: "1000000", CarryForwardRemainder: "250"},
+		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "1000000", CarryForwardRemainder: "250"},
 		CurrentEpochConfig: &snap,
 		HasPendingParams:   true,
 		PendingParams:      &pending,
-	}
+	}, 1)
 
 	// Import into app A through the real app genesis path.
 	a := bootApp(t)
@@ -285,13 +339,13 @@ func TestRewardsAppGenesisExportImportRoundTrip(t *testing.T) {
 
 	stateB, err := b.RewardsKeeper.GetState(ctxB)
 	require.NoError(t, err)
-	require.Equal(t, uint64(5), stateB.CurrentEpoch)
+	require.Equal(t, uint64(1), stateB.CurrentEpoch)
 	require.Equal(t, "1000000", stateB.CumulativeEmitted)
 	require.Equal(t, "250", stateB.CarryForwardRemainder)
 	pendingB, found, err := b.RewardsKeeper.GetPendingParams(ctxB)
 	require.NoError(t, err)
 	require.True(t, found, "pending params must survive the app export/import round trip")
-	require.Equal(t, uint64(9), pendingB.EpochLengthBlocks)
+	require.Equal(t, "9", pendingB.InitialBlockSubsidy)
 }
 
 // TestRewardsEndBlockFailClosedNoHalfCommit proves the fail-closed failure mode
@@ -305,9 +359,23 @@ func TestRewardsEndBlockFailClosedNoHalfCommit(t *testing.T) {
 	ctx := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
 
 	params := rewardstypes.DefaultParams()
-	params.EpochLengthBlocks = 2
 	require.NoError(t, a.RewardsKeeper.SetParams(ctx, params))
 	require.NoError(t, a.RewardsKeeper.SetState(ctx, rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"}))
+
+	// Every prerequisite of a real finalization is established first — canonical
+	// history for the open epoch and the reward-enabled count it accrued — so the
+	// boundary genuinely resolves and the injected fault is the reason the block
+	// fails. Without the history, EndBlock would abort while merely trying to
+	// locate the boundary, and this test would pass without ever reaching the
+	// behavior it claims to cover.
+	anchor := rewardstypes.DefaultEpochConfigVersion(params, 1)
+	require.NoError(t, a.RewardsKeeper.EpochConfigVersions.Set(ctx, anchor.EffectiveEpoch, anchor))
+	require.NoError(t, a.RewardsKeeper.SetOpenRewardEnabledBlocks(ctx, params.EpochLengthBlocks))
+
+	boundary := int64(params.EpochLengthBlocks) // epoch 1 runs heights 1..360
+	ready, err := a.RewardsKeeper.ShouldFinalizeAtHeight(ctx, uint64(boundary))
+	require.NoError(t, err)
+	require.True(t, ready, "the fixture must actually reach the canonical boundary")
 
 	// Inject an unsupported (weighted) epoch config directly into the collection,
 	// bypassing the validating setter, to force a finalization fault at the boundary.
@@ -315,9 +383,11 @@ func TestRewardsEndBlockFailClosedNoHalfCommit(t *testing.T) {
 	badCfg.WeightedRewardsEnabled = true
 	require.NoError(t, a.RewardsKeeper.CurrentEpochConfig.Set(ctx, badCfg))
 
-	// At the configured boundary, EndBlock must fail closed.
-	boundaryCtx := ctx.WithBlockHeight(2)
-	require.Error(t, a.RewardsKeeper.EndBlock(boundaryCtx), "unsupported config must abort finalization")
+	// At the configured boundary, EndBlock must fail closed — and specifically on
+	// the injected fault.
+	boundaryCtx := ctx.WithBlockHeight(boundary)
+	require.ErrorIs(t, a.RewardsKeeper.EndBlock(boundaryCtx), rewardstypes.ErrUnsupportedFeature,
+		"unsupported config must abort finalization")
 
 	// No partial commit: no finalized epoch, cumulative unchanged, epoch not advanced.
 	_, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, 1)

@@ -47,12 +47,15 @@ func TestGetTxCmdRegistersAllTxs(t *testing.T) {
 		require.NotNil(t, subcommand(t, cmd, name))
 	}
 
-	// Pause/resume expose only the three immediate flags.
+	// Pause/resume are GLOBAL and take no area selectors: offering them would
+	// advertise a partial pause the protocol no longer has.
 	for _, name := range []string{"pause", "resume"} {
 		c := subcommand(t, cmd, name)
-		require.NotNil(t, c.Flags().Lookup("emissions"))
-		require.NotNil(t, c.Flags().Lookup("settlement"))
-		require.NotNil(t, c.Flags().Lookup("claims"))
+		require.NoError(t, c.Args(c, []string{}))
+		for _, retired := range []string{"emissions", "settlement", "claims"} {
+			require.Nilf(t, c.Flags().Lookup(retired),
+				"%s must not expose the retired --%s selector", name, retired)
+		}
 	}
 
 	// update-params takes a single JSON file arg.

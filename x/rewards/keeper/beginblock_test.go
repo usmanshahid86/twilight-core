@@ -40,10 +40,14 @@ func TestBeginBlockCountersAreScopedByEpoch(t *testing.T) {
 	k, ctx, _ := setupAccountingKeeper(t, coreSlots, 1, types.DefaultParams())
 	require.NoError(t, k.BeginBlock(ctx))
 
+	// Move the open epoch forward to where the canonical history actually places
+	// it. An arbitrary start height would be corruption, not a fixture: state and
+	// history must name the same block for the epoch they both describe.
 	state, err := k.GetState(ctx)
 	require.NoError(t, err)
 	state.CurrentEpoch = 2
-	state.CurrentEpochStartHeight = 20
+	state.CurrentEpochStartHeight, err = k.EpochStartHeight(ctx, 2)
+	require.NoError(t, err)
 	require.NoError(t, k.SetState(ctx, state))
 	require.NoError(t, k.BeginBlock(ctx))
 	require.NoError(t, k.BeginBlock(ctx))
@@ -54,6 +58,44 @@ func TestBeginBlockCountersAreScopedByEpoch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), epochOne)
 	require.Equal(t, uint64(2), epochTwo)
+}
+
+// TestConsensusCountersRefuseToWrap covers the two per-block counters that feed
+// allocation and emission.
+//
+// Neither can reach its maximum on a real chain, which is exactly why an
+// unchecked increment would be invisible until it mattered: wrapping a slot's
+// participation to zero silently transfers its share of the pool to the other
+// slots, and wrapping the reward-enabled count collapses the epoch's emission.
+// Both are value transfers, not arithmetic curiosities.
+func TestConsensusCountersRefuseToWrap(t *testing.T) {
+	const maxUint64 = ^uint64(0)
+
+	t.Run("a slot's active-block count", func(t *testing.T) {
+		coreSlots := &coreSlotKeeperMock{active: []coreslottypes.CoreSlot{
+			accountingSlot(1, coreslottypes.SlotStatus_SLOT_STATUS_ACTIVE),
+		}}
+		k, ctx, _ := setupAccountingKeeper(t, coreSlots, 1, types.DefaultParams())
+		require.NoError(t, k.SetActiveBlocks(ctx, 1, 1, maxUint64))
+
+		require.ErrorIs(t, k.IncrementActiveBlocks(ctx, 1, 1), types.ErrInvalidState)
+		require.ErrorIs(t, k.BeginBlock(ctx), types.ErrInvalidState)
+
+		// And the wrapped value was never written.
+		blocks, err := k.GetActiveBlocks(ctx, 1, 1)
+		require.NoError(t, err)
+		require.Equal(t, maxUint64, blocks)
+	})
+
+	t.Run("the open reward-enabled block count", func(t *testing.T) {
+		k, ctx, _ := setupAccountingKeeper(t, &coreSlotKeeperMock{}, 1, types.DefaultParams())
+		require.NoError(t, k.SetOpenRewardEnabledBlocks(ctx, maxUint64))
+
+		require.ErrorIs(t, k.BeginBlock(ctx), types.ErrInvalidState)
+		blocks, err := k.GetOpenRewardEnabledBlocks(ctx)
+		require.NoError(t, err)
+		require.Equal(t, maxUint64, blocks)
+	})
 }
 
 func TestBeginBlockEmptyActiveSetSucceeds(t *testing.T) {
@@ -116,12 +158,15 @@ func TestBeginBlockRequiresStateConfigAndCoreSlotRead(t *testing.T) {
 		require.ErrorIs(t, k.BeginBlock(ctx), collections.ErrNotFound)
 	})
 
-	t.Run("missing config", func(t *testing.T) {
+	t.Run("missing epoch history", func(t *testing.T) {
+		// BeginBlock resolves the next epoch's start from canonical history, not
+		// from the deprecated snapshot. With no history it cannot decide whether
+		// this block opens an epoch, and must fail closed rather than assume not.
 		k, ctx, _ := setupKeeper(t, &coreSlotKeeperMock{})
 		params := types.DefaultParams()
 		require.NoError(t, k.SetParams(ctx, params))
 		require.NoError(t, k.SetState(ctx, accountingState(1)))
-		require.ErrorIs(t, k.BeginBlock(ctx), collections.ErrNotFound)
+		require.ErrorIs(t, k.BeginBlock(ctx), types.ErrEpochConfigNotFound)
 	})
 
 	t.Run("CoreSlot read failure", func(t *testing.T) {
@@ -150,10 +195,12 @@ func setupAccountingKeeper(
 	t.Helper()
 	k, ctx, bank := setupKeeper(t, coreSlots)
 	require.NoError(t, k.SetParams(ctx, params))
-	require.NoError(t, k.SetState(ctx, accountingState(epoch)))
+	state := accountingState(epoch)
+	require.NoError(t, k.SetState(ctx, state))
 	cfg, err := keeper.BuildEpochConfigSnapshot(params)
 	require.NoError(t, err)
 	require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
+	seedEpochTimeline(t, k, ctx, params, state)
 	return k, ctx, bank
 }
 

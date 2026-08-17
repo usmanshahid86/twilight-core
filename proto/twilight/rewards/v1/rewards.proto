@@ -12,6 +12,48 @@ message RewardsState {
   string carry_forward_remainder = 4;
 }
 
+// EpochConfigVersion is one immutable entry in the canonical epoch-configuration
+// history and is the SOLE authority for epoch geometry.
+//
+// Version 1 is created at fresh genesis, anchored to the chain's original
+// initial height, and is never rewritten. Every later version is created when a
+// scheduled configuration becomes effective, taking that block's height as its
+// effective start height. Boundaries are derived from this history and are never
+// stored per epoch.
+message EpochConfigVersion {
+  uint64 version = 1;
+  uint64 effective_epoch = 2;
+  uint64 effective_start_height = 3;
+  uint64 epoch_length_blocks = 4;
+}
+
+// ScheduledEpochConfig is one future epoch-length change, keyed by the epoch it
+// becomes effective at.
+//
+// It stores the future LENGTH and never a precomputed future start height:
+// replacing an earlier scheduled value would leave any cached later boundary
+// stale, so projected boundaries are always derived from immutable history plus
+// the ordered schedule.
+message ScheduledEpochConfig {
+  uint64 effective_epoch = 1;
+  uint64 epoch_length_blocks = 2;
+}
+
+// RewardsPauseState is the single canonical rewards-pause state.
+//
+// It replaces the three independent pause booleans on Params. A pause or resume
+// accepted in block H schedules its value for H+1: the value is held in
+// pending_value with pending_effective_height = H+1, and becomes current at the
+// beginning of that block, before any reward sampling. has_pending separates a
+// scheduled resume (pending_value = false) from the absence of any schedule,
+// which a bare bool cannot express.
+message RewardsPauseState {
+  bool current_paused = 1;
+  bool has_pending = 2;
+  bool pending_value = 3;
+  uint64 pending_effective_height = 4;
+}
+
 message SlotActiveBlocks {
   uint64 slot_id = 1;
   uint64 blocks_active = 2;
@@ -33,6 +75,15 @@ message EpochReward {
   repeated EligibleSlotReward rewards = 13;
   string cumulative_emitted_after_epoch = 14;
   EpochConfigSnapshot config = 15;
+  // reward_enabled_blocks is the count of reward-enabled blocks the epoch
+  // actually accrued, and is the block-count input the emission recurrence used.
+  //
+  // The open counter is reset when the next epoch opens, so persisting it here
+  // is what keeps the epoch's accounting observable afterwards. This field is an
+  // implementation representation chosen for auditability; the architecture
+  // requires the counter to exist and to drive emission, not that the finalized
+  // record carry it.
+  uint64 reward_enabled_blocks = 16;
 }
 
 message EligibleSlotReward {

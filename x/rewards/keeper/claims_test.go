@@ -49,13 +49,22 @@ func TestClaimRewardsFailuresDoNotMarkRecords(t *testing.T) {
 		require.False(t, record.Claimed)
 	})
 
-	t.Run("claims disabled", func(t *testing.T) {
+	t.Run("release paused", func(t *testing.T) {
+		// The legacy claim surface has no release authority of its own: while it
+		// survives transitionally it obeys the canonical pause state. Flipping the
+		// retired claims_enabled switch must NOT block a claim, and pausing must.
 		k, ctx, _ := setupClaims(t)
 		params, err := k.GetParams(ctx)
 		require.NoError(t, err)
 		params.ClaimsEnabled = false
 		require.NoError(t, k.SetParams(ctx, params))
-		require.Error(t, k.ClaimRewards(ctx, &types.MsgClaimRewards{Signer: addr(9), SlotId: 1, StartEpoch: 1, EndEpoch: 1}))
+		require.NoError(t, k.ClaimRewards(ctx, &types.MsgClaimRewards{Signer: addr(9), SlotId: 1, StartEpoch: 1, EndEpoch: 1}),
+			"the retired claims_enabled switch must not gate release")
+
+		k, ctx, _ = setupClaims(t)
+		require.NoError(t, k.SetPauseState(ctx, types.RewardsPauseState{CurrentPaused: true}))
+		require.Error(t, k.ClaimRewards(ctx, &types.MsgClaimRewards{Signer: addr(9), SlotId: 1, StartEpoch: 1, EndEpoch: 1}),
+			"a paused chain must not release through the legacy claim path")
 	})
 
 	t.Run("already claimed and missing", func(t *testing.T) {

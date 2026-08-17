@@ -38,8 +38,16 @@ func (k Keeper) claimRewards(ctx context.Context, msg *types.MsgClaimRewards) er
 	if err != nil {
 		return err
 	}
-	if !params.ClaimsEnabled {
-		return types.ErrUnsupportedFeature.Wrap("claims are disabled")
+	// Monetary release is governed by the canonical release state, not by the
+	// retired claims_enabled switch. The legacy claim surface survives only as
+	// transitional compatibility, and while it survives it must not be a second
+	// release authority that could pay out while the chain is paused.
+	releaseEnabled, err := k.SettlementReleaseEnabled(ctx)
+	if err != nil {
+		return err
+	}
+	if !releaseEnabled {
+		return types.ErrUnsupportedFeature.Wrap("rewards release is paused")
 	}
 	rangeDelta := msg.EndEpoch - msg.StartEpoch
 	if rangeDelta >= params.MaxClaimEpochsPerTx {

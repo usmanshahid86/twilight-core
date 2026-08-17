@@ -122,7 +122,29 @@ func setupKeeper(t *testing.T, coreSlotKeeper keeper.CoreSlotKeeper) (keeper.Kee
 	ctx := sdk.NewContext(cms, cmtproto.Header{Height: 1}, false, log.NewNopLogger())
 	bank := &bankKeeperMock{}
 	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(keys[types.StoreKey]), accountKeeperMock{}, bank, coreSlotKeeper, testEconomicAddresses(t))
+	// The canonical pause state and the open counter have no defaults: after
+	// genesis an absent one is corruption, so every fixture must establish them
+	// exactly as InitGenesis would.
+	require.NoError(t, k.SetPauseState(ctx, types.RewardsPauseState{}))
+	require.NoError(t, k.SetOpenRewardEnabledBlocks(ctx, 0))
 	return k, ctx, bank
+}
+
+// seedEpochTimeline writes a canonical epoch-configuration history consistent
+// with the fixture's open epoch, so geometry resolves the same way it would on a
+// real chain. The anchor is version 1 effective at the fixture's own epoch, which
+// is all the resolver needs; only fresh genesis additionally requires that epoch
+// to be 1.
+func seedEpochTimeline(
+	t *testing.T, k keeper.Keeper, ctx sdk.Context, params types.Params, state types.RewardsState,
+) {
+	t.Helper()
+	require.NoError(t, k.EpochConfigVersions.Set(ctx, state.CurrentEpoch, types.EpochConfigVersion{
+		Version:              1,
+		EffectiveEpoch:       state.CurrentEpoch,
+		EffectiveStartHeight: state.CurrentEpochStartHeight,
+		EpochLengthBlocks:    params.EpochLengthBlocks,
+	}))
 }
 
 func (m *bankKeeperMock) failMint() {

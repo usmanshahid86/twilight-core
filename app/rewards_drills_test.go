@@ -29,6 +29,7 @@ package app_test
 // economic branch logic, which is identical regardless of the caller.
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/twilight-project/twilight-core/app"
+	appparams "github.com/twilight-project/twilight-core/app/params"
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
@@ -157,11 +159,29 @@ func rewardsParams(t *testing.T, mutate func(p *rewardstypes.Params)) (rewardsty
 }
 
 func genesisState(p rewardstypes.Params, snap rewardstypes.EpochConfigSnapshot) rewardstypes.GenesisState {
-	return rewardstypes.GenesisState{
+	gen := rewardstypes.GenesisState{
 		Params:             &p,
 		State:              &rewardstypes.RewardsState{CurrentEpoch: 1, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"},
 		CurrentEpochConfig: &snap,
 	}
+	return *canonicalRewardsTimeline(&gen, 1)
+}
+
+// canonicalRewardsTimeline fills the canonical epoch-timeline fields every fresh
+// rewards genesis now requires: the original-genesis epoch anchor, the single
+// pause state, and the open reward-enabled block counter.
+//
+// None of the three has a runtime default — after genesis an absent one is
+// corruption rather than a zero value — so a fixture that omitted them would be
+// testing against state no chain is ever in.
+func canonicalRewardsTimeline(gen *rewardstypes.GenesisState, initialHeight uint64) *rewardstypes.GenesisState {
+	anchor := rewardstypes.DefaultEpochConfigVersion(*gen.Params, initialHeight)
+	anchor.EffectiveEpoch = gen.State.CurrentEpoch
+	anchor.EffectiveStartHeight = gen.State.CurrentEpochStartHeight
+	gen.EpochConfigVersions = []*rewardstypes.EpochConfigVersion{&anchor}
+	gen.PauseState = &rewardstypes.RewardsPauseState{}
+	gen.OpenRewardEnabledBlocks = 0
+	return gen
 }
 
 // ===========================================================================
@@ -174,37 +194,87 @@ func genesisState(p rewardstypes.Params, snap rewardstypes.EpochConfigSnapshot) 
 // the headline economic branch C1 never exercised (default first halving is
 // ~1,460 epochs away).
 // ===========================================================================
+// drillEpochLen is the epoch length every real-app drill boots with.
+//
+// The ratified admission interval is [HardMinEpochLengthBlocks,
+// HardMaxEpochLengthBlocks], so a chain can no longer be started with the toy
+// two- or five-block epochs these drills used to use. Each drill therefore keeps
+// its economic branch but rescales its monetary parameters against this length,
+// and drives whole epochs rather than a handful of blocks.
+const drillEpochLen = int64(appparams.HardMinEpochLengthBlocks)
+
+// drillOddEpochLen is an ODD admissible epoch length.
+//
+// A carry remainder needs a pool that does not divide evenly across equal slots.
+// The floor is even, so an even length can never produce an odd emission from an
+// integer subsidy; one block more is still inside the ratified interval and
+// restores the odd case the carry drill depends on.
+const drillOddEpochLen = drillEpochLen + 1
+
+// driveBlocks runs count keeper-level blocks starting at height from, matching
+// driveBlock's style. It exists because driveBlock and the ABCI-loop helper below
+// advance different machinery and must not be mixed within one drill.
+func driveBlocks(t *testing.T, a *app.App, base sdk.Context, from, count int64) sdk.Context {
+	t.Helper()
+	ctx := base.WithBlockHeight(from)
+	for height := from; height < from+count; height++ {
+		ctx = driveBlock(t, a, base, height)
+	}
+	return ctx
+}
+
+// driveEpochBlocks runs count blocks of the real ABCI loop starting at height
+// from, and returns a context at the last height.
+func driveEpochBlocks(t *testing.T, a *app.App, from, count int64) sdk.Context {
+	t.Helper()
+	blockTime := time.Unix(1_700_000_000, 0).UTC()
+	last := from
+	for height := from; height < from+count; height++ {
+		_, err := a.FinalizeBlock(&abci.RequestFinalizeBlock{
+			Height: height, Time: blockTime.Add(time.Duration(height) * time.Second),
+		})
+		require.NoError(t, err)
+		_, err = a.Commit()
+		require.NoError(t, err)
+		last = height
+	}
+	return a.NewUncachedContext(false, cmtproto.Header{Height: last})
+}
+
 func TestDrillHalvingSubsidyDecay(t *testing.T) {
 	a := bootApp(t)
+	// Scaled so epoch 1 lands EXACTLY on the first supply threshold: one epoch
+	// emits epochLen * subsidy, and max supply is twice that, so
+	// threshold_1 = maxSupply/2 is reached precisely at the epoch-1 boundary.
+	const subsidy = 100
+	epochEmission := drillEpochLen * subsidy
+	maxSupply := 2 * epochEmission
+
 	p, snap := rewardsParams(t, func(p *rewardstypes.Params) {
-		p.MaxSupply = "1000"
-		p.InitialBlockSubsidy = "100"
-		p.EpochLengthBlocks = 5
+		p.MaxSupply = strconv.FormatInt(maxSupply, 10)
+		p.InitialBlockSubsidy = strconv.Itoa(subsidy)
+		p.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
 	})
 	gen := genesisState(p, snap)
 	initChainWithRewards(t, a, &gen)
 
-	blockTime := time.Unix(1_700_000_000, 0).UTC()
-	for height := int64(1); height <= 10; height++ {
-		_, err := a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: height, Time: blockTime.Add(time.Duration(height) * time.Second)})
-		require.NoError(t, err)
-		_, err = a.Commit()
-		require.NoError(t, err)
-	}
+	ctx := driveEpochBlocks(t, a, 1, 2*drillEpochLen)
 
-	ctx := a.NewUncachedContext(false, cmtproto.Header{Height: 10})
+	halved := epochEmission / 2
 
 	epoch1, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "500", epoch1.MintedEmission, "epoch 1 emits 5 blocks x 100 subsidy in tier 0")
-	require.Equal(t, "500", epoch1.CumulativeEmittedAfterEpoch)
+	require.Equal(t, strconv.FormatInt(epochEmission, 10), epoch1.MintedEmission,
+		"epoch 1 emits one epoch of blocks at the tier-0 subsidy")
+	require.Equal(t, strconv.FormatInt(epochEmission, 10), epoch1.CumulativeEmittedAfterEpoch)
 
 	epoch2, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, 2)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "250", epoch2.MintedEmission, "subsidy halves to 50 once cumulative reaches the maxSupply/2 threshold")
-	require.Equal(t, "750", epoch2.CumulativeEmittedAfterEpoch)
+	require.Equal(t, strconv.FormatInt(halved, 10), epoch2.MintedEmission,
+		"the subsidy halves once cumulative reaches the maxSupply/2 threshold")
+	require.Equal(t, strconv.FormatInt(epochEmission+halved, 10), epoch2.CumulativeEmittedAfterEpoch)
 
 	// The realized halving: epoch 2 emission is exactly half of epoch 1.
 	require.Equal(t, intStr(t, epoch1.MintedEmission).QuoRaw(2), intStr(t, epoch2.MintedEmission),
@@ -214,17 +284,17 @@ func TestDrillHalvingSubsidyDecay(t *testing.T) {
 	rec1, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "500", rec1.Amount)
+	require.Equal(t, strconv.FormatInt(epochEmission, 10), rec1.Amount)
 	rec2, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 2)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "250", rec2.Amount)
+	require.Equal(t, strconv.FormatInt(halved, 10), rec2.Amount)
 
 	// Identity (zero premine, zero treasury): supply == cumulative; both <= maxSupply.
 	state, err := a.RewardsKeeper.GetState(ctx)
 	require.NoError(t, err)
-	require.Equal(t, "750", state.CumulativeEmitted)
-	require.Equal(t, "750", a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String(),
+	require.Equal(t, strconv.FormatInt(epochEmission+halved, 10), state.CumulativeEmitted)
+	require.Equal(t, strconv.FormatInt(epochEmission+halved, 10), a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String(),
 		"supply must equal cumulative emitted under zero premine")
 	assertInvariants(t, a, ctx)
 }
@@ -243,52 +313,49 @@ func TestDrillTreasuryBpsSplit(t *testing.T) {
 	treasury := acc(30)
 	p, snap := rewardsParams(t, func(p *rewardstypes.Params) {
 		p.InitialBlockSubsidy = "1000"
-		p.EpochLengthBlocks = 2
+		p.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
 		p.EmissionTreasuryShareBps = 1000 // 10%
 		p.TreasuryAddress = treasury
 	})
 	gen := genesisState(p, snap)
 	initChainWithRewards(t, a, &gen)
 
-	blockTime := time.Unix(1_700_000_000, 0).UTC()
-	for height := int64(1); height <= 2; height++ {
-		_, err := a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: height, Time: blockTime.Add(time.Duration(height) * time.Second)})
-		require.NoError(t, err)
-		_, err = a.Commit()
-		require.NoError(t, err)
-	}
+	ctx := driveEpochBlocks(t, a, 1, drillEpochLen)
 
-	ctx := a.NewUncachedContext(false, cmtproto.Header{Height: 2})
+	// One epoch of blocks at 1000 subsidy; 10% to treasury, the rest is the pool.
+	emission := drillEpochLen * 1000
+	treasuryCut := emission / 10
+	pool := emission - treasuryCut
 
 	epoch, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "2000", epoch.MintedEmission, "2 blocks x 1000 subsidy")
-	require.Equal(t, "200", epoch.TreasuryAmount, "10% of 2000")
-	require.Equal(t, "1800", epoch.RewardPool, "pool is emission minus treasury")
-	require.Equal(t, "1800", epoch.AllocatedAmount)
+	require.Equal(t, strconv.FormatInt(emission, 10), epoch.MintedEmission)
+	require.Equal(t, strconv.FormatInt(treasuryCut, 10), epoch.TreasuryAmount, "10% of the emission")
+	require.Equal(t, strconv.FormatInt(pool, 10), epoch.RewardPool, "pool is emission minus treasury")
+	require.Equal(t, strconv.FormatInt(pool, 10), epoch.AllocatedAmount)
 	require.Equal(t, "0", epoch.CarryOut)
 
 	// Treasury address actually received the split out of the minted coins.
-	require.Equal(t, "200", a.BankKeeper.GetBalance(ctx, mustAddr(t, treasury), app.BaseDenom).Amount.String(),
+	require.Equal(t, strconv.FormatInt(treasuryCut, 10), a.BankKeeper.GetBalance(ctx, mustAddr(t, treasury), app.BaseDenom).Amount.String(),
 		"treasury address must hold exactly the split amount")
 
 	// Single slot's claimable reward is the post-treasury pool.
 	rec, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "1800", rec.Amount)
+	require.Equal(t, strconv.FormatInt(pool, 10), rec.Amount)
 
 	// Identity with treasury: emission is fully minted (counts in supply and
 	// cumulative); the treasury portion left the module but stays in supply.
 	state, err := a.RewardsKeeper.GetState(ctx)
 	require.NoError(t, err)
-	require.Equal(t, "2000", state.CumulativeEmitted)
-	require.Equal(t, "2000", a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String(),
+	require.Equal(t, strconv.FormatInt(emission, 10), state.CumulativeEmitted)
+	require.Equal(t, strconv.FormatInt(emission, 10), a.BankKeeper.GetSupply(ctx, app.BaseDenom).Amount.String(),
 		"supply == cumulative; treasury coins are still in circulation")
-	// Coverage: module balance (1800) covers the single unclaimed reward; treasury
+	// Coverage: the module balance covers the single unclaimed reward; treasury
 	// coins are excluded from both sides of the coverage invariant.
-	require.Equal(t, "1800", a.BankKeeper.GetBalance(ctx, a.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName), app.BaseDenom).Amount.String())
+	require.Equal(t, strconv.FormatInt(pool, 10), a.BankKeeper.GetBalance(ctx, a.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName), app.BaseDenom).Amount.String())
 	assertInvariants(t, a, ctx)
 }
 
@@ -306,25 +373,30 @@ func TestDrillNonzeroCarryForward(t *testing.T) {
 	a := bootApp(t)
 	base := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
 
+	// An ODD subsidy over an ODD epoch length gives an odd emission, which two
+	// equal slots cannot divide.
+	const subsidy = 416191
+	emission := drillOddEpochLen * subsidy
+	require.Equal(t, int64(1), emission%2, "the drill needs an odd pool to produce a carry")
+
 	p, snap := rewardsParams(t, func(p *rewardstypes.Params) {
-		p.InitialBlockSubsidy = "416191" // odd -> non-divisible across 2 slots
-		p.EpochLengthBlocks = 1
+		p.InitialBlockSubsidy = strconv.Itoa(subsidy)
+		p.EpochLengthBlocks = uint64(drillOddEpochLen)
 	})
 	initCoreSlotsAndRewards(t, a, base, []slotSpec{
 		{id: 1, operator: acc(2), payout: acc(12), keyMarker: 1},
 		{id: 2, operator: acc(3), payout: acc(13), keyMarker: 2},
 	}, genesisState(p, snap))
 
-	// Epoch 1 (height 1): emission 416191, pool 416191, each slot 208095,
-	// allocated 416190, carryOut 1.
-	ctx1 := driveBlock(t, a, base, 1)
+	// Epoch 1: the odd pool leaves a remainder of exactly 1.
+	ctx1 := driveBlocks(t, a, base, 1, drillOddEpochLen)
 	epoch1, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx1, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "416191", epoch1.MintedEmission)
+	require.Equal(t, strconv.FormatInt(emission, 10), epoch1.MintedEmission)
 	require.Equal(t, "0", epoch1.CarryIn)
-	require.Equal(t, "416191", epoch1.RewardPool)
-	require.Equal(t, "416190", epoch1.AllocatedAmount)
+	require.Equal(t, strconv.FormatInt(emission, 10), epoch1.RewardPool)
+	require.Equal(t, strconv.FormatInt(emission-1, 10), epoch1.AllocatedAmount)
 	require.Equal(t, "1", epoch1.CarryOut, "odd pool split across 2 equal slots leaves a remainder of 1")
 
 	state1, err := a.RewardsKeeper.GetState(ctx1)
@@ -332,21 +404,21 @@ func TestDrillNonzeroCarryForward(t *testing.T) {
 	require.Equal(t, "1", state1.CarryForwardRemainder, "carry persists into the next epoch's state")
 	assertInvariants(t, a, ctx1)
 
-	// Epoch 2 (height 2): the carry-in is folded into the pool.
-	ctx2 := driveBlock(t, a, base, 2)
+	// Epoch 2: the carry-in is folded into the pool, which now divides cleanly.
+	ctx2 := driveBlocks(t, a, base, drillOddEpochLen+1, drillOddEpochLen)
 	epoch2, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx2, 2)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "416191", epoch2.MintedEmission)
+	require.Equal(t, strconv.FormatInt(emission, 10), epoch2.MintedEmission)
 	require.Equal(t, "1", epoch2.CarryIn, "epoch 1's carryOut is epoch 2's carryIn")
-	require.Equal(t, "416192", epoch2.RewardPool, "pool = emission + carryIn")
-	require.Equal(t, "416192", epoch2.AllocatedAmount, "even pool now divides cleanly across 2 slots")
+	require.Equal(t, strconv.FormatInt(emission+1, 10), epoch2.RewardPool, "pool = emission + carryIn")
+	require.Equal(t, strconv.FormatInt(emission+1, 10), epoch2.AllocatedAmount, "even pool now divides cleanly across 2 slots")
 	require.Equal(t, "0", epoch2.CarryOut)
 
 	// Identity: cumulative = sum of emissions; allocated + carry == cumulative.
 	state2, err := a.RewardsKeeper.GetState(ctx2)
 	require.NoError(t, err)
-	require.Equal(t, "832382", state2.CumulativeEmitted, "2 x 416191")
+	require.Equal(t, strconv.FormatInt(2*emission, 10), state2.CumulativeEmitted)
 	require.Equal(t, "0", state2.CarryForwardRemainder)
 	allocated := intStr(t, epoch1.AllocatedAmount).Add(intStr(t, epoch2.AllocatedAmount))
 	require.Equal(t, state2.CumulativeEmitted, allocated.String(),
@@ -372,7 +444,7 @@ func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 	op1, pay1 := acc(2), acc(12)
 	p, snap := rewardsParams(t, func(p *rewardstypes.Params) {
 		p.InitialBlockSubsidy = "100"
-		p.EpochLengthBlocks = 3
+		p.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
 	})
 	initCoreSlotsAndRewards(t, a, base, []slotSpec{
 		{id: 1, operator: op1, payout: pay1, keyMarker: 1},
@@ -383,16 +455,23 @@ func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 	driveBlock(t, a, base, 1)
 
 	// Suspend slot 1 mid-epoch through the real CoreSlot path, BEFORE block 2's
-	// BeginBlock, so block 2 and 3 observe only slot 2.
+	// BeginBlock, so every remaining block of the epoch observes only slot 2.
 	csMsg := coreslotkeeper.NewMsgServer(a.CoreSlotKeeper)
 	_, err := csMsg.SuspendCoreSlot(base.WithBlockHeight(2), &coreslottypes.MsgSuspendCoreSlot{
 		Authority: app.AuthorityAddress(), SlotId: 1, Reason: "branch-coverage-churn-drill",
 	})
 	require.NoError(t, err)
 
-	// Blocks 2 and 3: only slot 2 is active; block 3 closes the epoch.
-	driveBlock(t, a, base, 2)
-	ctx3 := driveBlock(t, a, base, 3)
+	// The rest of the epoch: only slot 2 is active. The last block closes it.
+	ctx3 := driveBlocks(t, a, base, 2, drillEpochLen-1)
+
+	// Slot 1 earned exactly one block; slot 2 earned the whole epoch.
+	emission := drillEpochLen * 100
+	slot1Blocks, slot2Blocks := int64(1), drillEpochLen
+	totalWeight := slot1Blocks + slot2Blocks
+	slot1Amount := emission * slot1Blocks / totalWeight
+	slot2Amount := emission * slot2Blocks / totalWeight
+	allocated := slot1Amount + slot2Amount
 
 	// Allocation is proportional to active blocks (1:3), not uniform. The
 	// per-slot active-block counts are preserved on the finalized claim records
@@ -400,21 +479,23 @@ func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 	epoch, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx3, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "300", epoch.MintedEmission, "3 blocks x 100 subsidy")
-	require.Equal(t, "300", epoch.AllocatedAmount)
-	require.Equal(t, "0", epoch.CarryOut, "300 splits cleanly in the ratio 1:3")
+	require.Equal(t, strconv.FormatInt(emission, 10), epoch.MintedEmission)
+	require.Equal(t, strconv.FormatInt(allocated, 10), epoch.AllocatedAmount)
+	require.Equal(t, strconv.FormatInt(emission-allocated, 10), epoch.CarryOut,
+		"whatever the floors leave is carry, and it is bounded by one per positive slot")
+	require.LessOrEqual(t, emission-allocated, int64(1), "two positive slots leave at most one unit")
 
 	rec1, found, err := a.RewardsKeeper.GetClaimRecord(ctx3, 1, 1)
 	require.NoError(t, err)
 	require.True(t, found, "suspended-but-earned slot 1 still has a claim record")
 	require.Equal(t, uint64(1), rec1.BlocksActive, "slot 1 was active only for block 1 before suspension")
-	require.Equal(t, "75", rec1.Amount, "300 * 1/4")
+	require.Equal(t, strconv.FormatInt(slot1Amount, 10), rec1.Amount, "one block out of the epoch's total weight")
 	require.Equal(t, pay1, rec1.PayoutAddress)
 	rec2, found, err := a.RewardsKeeper.GetClaimRecord(ctx3, 2, 1)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, uint64(3), rec2.BlocksActive, "slot 2 stayed active for all 3 blocks")
-	require.Equal(t, "225", rec2.Amount, "300 * 3/4")
+	require.Equal(t, uint64(slot2Blocks), rec2.BlocksActive, "slot 2 stayed active for the whole epoch")
+	require.Equal(t, strconv.FormatInt(slot2Amount, 10), rec2.Amount)
 
 	// CoreSlot reflects the churn: slot 1 is suspended but its row/payout survive.
 	s1, err := a.CoreSlotKeeper.GetSlot(ctx3, 1)
@@ -426,10 +507,10 @@ func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx3, &rewardstypes.MsgClaimRewards{
 		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 1,
 	}))
-	require.Equal(t, "75", a.BankKeeper.GetBalance(ctx3, mustAddr(t, pay1), app.BaseDenom).Amount.String())
+	require.Equal(t, strconv.FormatInt(slot1Amount, 10), a.BankKeeper.GetBalance(ctx3, mustAddr(t, pay1), app.BaseDenom).Amount.String())
 
 	// Identity holds across the churn.
-	require.Equal(t, "300", a.BankKeeper.GetSupply(ctx3, app.BaseDenom).Amount.String())
+	require.Equal(t, strconv.FormatInt(emission, 10), a.BankKeeper.GetSupply(ctx3, app.BaseDenom).Amount.String())
 	assertInvariants(t, a, ctx3)
 }
 
@@ -448,23 +529,22 @@ func TestDrillMaxClaimEpochsCap(t *testing.T) {
 	pay := acc(12)
 	p, snap := rewardsParams(t, func(p *rewardstypes.Params) {
 		p.InitialBlockSubsidy = "100"
-		p.EpochLengthBlocks = 1
+		p.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
 		p.MaxClaimEpochsPerTx = 3
 	})
 	initCoreSlotsAndRewards(t, a, base, []slotSpec{
 		{id: 1, operator: acc(2), payout: pay, keyMarker: 1},
 	}, genesisState(p, snap))
 
-	// 4 single-block epochs -> 4 finalized epochs, each crediting the slot 100.
-	var ctx sdk.Context
-	for h := int64(1); h <= 4; h++ {
-		ctx = driveBlock(t, a, base, h)
-	}
+	// Four full epochs -> four finalized epochs, each crediting the single slot
+	// one epoch's worth of subsidy.
+	perEpoch := drillEpochLen * 100
+	ctx := driveBlocks(t, a, base, 1, 4*drillEpochLen)
 	for epoch := uint64(1); epoch <= 4; epoch++ {
 		rec, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, epoch)
 		require.NoError(t, err)
 		require.Truef(t, found, "epoch %d must be finalized with a claim record", epoch)
-		require.Equal(t, "100", rec.Amount)
+		require.Equal(t, strconv.FormatInt(perEpoch, 10), rec.Amount)
 	}
 
 	// A span exceeding the cap is rejected (delta 3 >= cap 3).
@@ -478,11 +558,12 @@ func TestDrillMaxClaimEpochsCap(t *testing.T) {
 	require.True(t, a.BankKeeper.GetBalance(ctx, mustAddr(t, pay), app.BaseDenom).Amount.IsZero(),
 		"a rejected over-cap claim must pay nothing")
 
-	// The maximum allowed span (delta 2, epochs 1..3) succeeds and pays 300.
+	// The maximum allowed span (delta 2, epochs 1..3) succeeds and pays three
+	// epochs' worth.
 	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
 		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 3,
 	}))
-	require.Equal(t, "300", a.BankKeeper.GetBalance(ctx, mustAddr(t, pay), app.BaseDenom).Amount.String())
+	require.Equal(t, strconv.FormatInt(3*perEpoch, 10), a.BankKeeper.GetBalance(ctx, mustAddr(t, pay), app.BaseDenom).Amount.String())
 
 	// Epoch 4 is still unclaimed and claimable on its own.
 	rec4, _, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 4)
@@ -491,7 +572,7 @@ func TestDrillMaxClaimEpochsCap(t *testing.T) {
 	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
 		Signer: acc(9), SlotId: 1, StartEpoch: 4, EndEpoch: 4,
 	}))
-	require.Equal(t, "400", a.BankKeeper.GetBalance(ctx, mustAddr(t, pay), app.BaseDenom).Amount.String())
+	require.Equal(t, strconv.FormatInt(4*perEpoch, 10), a.BankKeeper.GetBalance(ctx, mustAddr(t, pay), app.BaseDenom).Amount.String())
 
 	assertInvariants(t, a, ctx)
 }
@@ -517,10 +598,18 @@ func TestDrillCombinedAllBranches(t *testing.T) {
 
 	treasury := acc(40)
 	pay1 := acc(12)
+	// Max supply is twice a single epoch's emission, so the first supply
+	// threshold is crossed at the epoch-1 boundary and later epochs emit at a
+	// decayed tier — the same shape as the original two-epoch-per-halving setup,
+	// rescaled to an admissible epoch length.
+	const combinedSubsidy = 100
+	combinedEpochEmission := drillEpochLen * combinedSubsidy
+	combinedMaxSupply := 2 * combinedEpochEmission
+
 	p, snap := rewardsParams(t, func(p *rewardstypes.Params) {
-		p.MaxSupply = "1000"
-		p.InitialBlockSubsidy = "100"
-		p.EpochLengthBlocks = 3
+		p.MaxSupply = strconv.FormatInt(combinedMaxSupply, 10)
+		p.InitialBlockSubsidy = strconv.Itoa(combinedSubsidy)
+		p.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
 		p.EmissionTreasuryShareBps = 1000 // 10% to treasury every epoch
 		p.TreasuryAddress = treasury
 		p.MaxClaimEpochsPerTx = 2
@@ -563,41 +652,37 @@ func TestDrillCombinedAllBranches(t *testing.T) {
 		assertInvariants(t, a, ctx)
 	}
 
-	// --- Epoch 1 (heights 1-3): all 3 slots uniformly active. ---
-	driveBlock(t, a, base, 1)
-	driveBlock(t, a, base, 2)
-	ctx := driveBlock(t, a, base, 3)
+	// --- Epoch 1: all 3 slots uniformly active. ---
+	ctx := driveBlocks(t, a, base, 1, drillEpochLen)
 	reconcile(ctx, 1)
 
-	// --- Epoch 2 (heights 4-6): churn -- suspend slot 3 after the first block. ---
-	driveBlock(t, a, base, 4)
+	// --- Epoch 2: churn -- suspend slot 3 after its first block. ---
+	epoch2Start := drillEpochLen + 1
+	driveBlock(t, a, base, epoch2Start)
 	csMsg := coreslotkeeper.NewMsgServer(a.CoreSlotKeeper)
-	_, err := csMsg.SuspendCoreSlot(base.WithBlockHeight(5), &coreslottypes.MsgSuspendCoreSlot{
+	_, err := csMsg.SuspendCoreSlot(base.WithBlockHeight(epoch2Start+1), &coreslottypes.MsgSuspendCoreSlot{
 		Authority: app.AuthorityAddress(), SlotId: 3, Reason: "combined-drill-churn",
 	})
 	require.NoError(t, err)
-	driveBlock(t, a, base, 5)
-	ctx = driveBlock(t, a, base, 6)
-	// Slot 3 active only for block 4 of epoch 2; slots 1,2 active all 3 blocks.
-	// Read the preserved count off the finalized claim record (live counters are
-	// deleted at finalization).
+	ctx = driveBlocks(t, a, base, epoch2Start+1, drillEpochLen-1)
+	// Slot 3 was active only for the first block of epoch 2; slots 1 and 2 for all
+	// of it. Read the preserved count off the finalized claim record, since the
+	// live counters are deleted at finalization.
 	rec3, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 3, 2)
 	require.NoError(t, err)
 	require.True(t, found, "suspended-but-earned slot 3 still has a claim record for epoch 2")
 	require.Equal(t, uint64(1), rec3.BlocksActive, "suspended slot 3 earned only the first block of epoch 2")
 	reconcile(ctx, 2)
 
-	// --- Epochs 3 and 4 (heights 7-12): only slots 1,2 active; cross the halving. ---
-	for h := int64(7); h <= 12; h++ {
-		ctx = driveBlock(t, a, base, h)
-	}
+	// --- Epochs 3 and 4: only slots 1,2 active; cross the halving. ---
+	ctx = driveBlocks(t, a, base, 2*drillEpochLen+1, 2*drillEpochLen)
 	reconcile(ctx, 4)
 
 	// Confirm the headline branches actually fired over the run.
 	state, err := a.RewardsKeeper.GetState(ctx)
 	require.NoError(t, err)
-	require.True(t, intStr(t, state.CumulativeEmitted).GT(math.NewInt(500)),
-		"run must cross the maxSupply/2 = 500 halving threshold")
+	require.True(t, intStr(t, state.CumulativeEmitted).GT(math.NewInt(combinedMaxSupply/2)),
+		"run must cross the maxSupply/2 halving threshold")
 	// Some epoch must show subsidy decay (emission dropped vs an earlier epoch).
 	e1, _, err := a.RewardsKeeper.GetFinalizedEpoch(ctx, 1)
 	require.NoError(t, err)

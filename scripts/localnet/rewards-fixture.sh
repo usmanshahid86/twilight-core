@@ -25,7 +25,11 @@ BIN="${BIN:-$ROOT/build/twilightd}"
 # default 17280-block epoch that never finalizes here. Override with the fixture-specific names if needed.
 NET="${REWARDS_FIXTURE_HOME:-/tmp/twilight-rewards-fixture}"
 CHAIN_ID="${REWARDS_FIXTURE_CHAIN_ID:-twilight-rewards-fixture-1}"
-EPOCH_LENGTH="${REWARDS_EPOCH_LENGTH:-10}"
+# The epoch length must sit inside the ratified immutable interval
+# [360, 720]; genesis refuses anything outside it. These localnets therefore run
+# a fast block time instead of a short epoch — block time is node-local
+# configuration and is not a protocol value.
+EPOCH_LENGTH="${REWARDS_EPOCH_LENGTH:-360}"
 EPOCHS_TO_RUN="${EPOCHS_TO_RUN:-3}"     # let this many epochs finalize before leaving it running
 CLAIM_SLOT="${CLAIM_SLOT:-1}"
 CLAIM_SIGNER="${CLAIM_SIGNER:-operator1}"
@@ -112,6 +116,9 @@ for node in 0 1 2 3; do
   jq --arg epoch "$EPOCH_LENGTH" '
     .app_state.rewards.params.epoch_length_blocks = $epoch
     | .app_state.rewards.current_epoch_config.epoch_length_blocks = $epoch
+    # EpochConfigVersion is the sole epoch-geometry authority; the two lines above
+    # are deprecated mirrors that fresh genesis requires to agree with it.
+    | .app_state.rewards.epoch_config_versions[0].epoch_length_blocks = $epoch
   ' "$genesis" >"$tmp" && mv "$tmp" "$genesis"
 done
 

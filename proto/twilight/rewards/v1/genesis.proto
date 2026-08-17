@@ -14,4 +14,15 @@ message GenesisState {
   EpochConfigSnapshot current_epoch_config = 5;
   bool has_pending_params = 6;
   Params pending_params = 7;
+  // Canonical epoch-configuration history. Fresh genesis carries exactly one
+  // entry: version 1, effective at epoch 1, anchored to the chain's initial
+  // height.
+  repeated EpochConfigVersion epoch_config_versions = 8;
+  // Future epoch-length schedule keyed by effective epoch. Fresh genesis
+  // requires this to be empty; a non-empty schedule is continuation state.
+  repeated ScheduledEpochConfig scheduled_epoch_configs = 9;
+  // The single canonical rewards-pause state.
+  RewardsPauseState pause_state = 10;
+  // The open epoch's reward-enabled block count. Fresh genesis requires zero.
+  uint64 open_reward_enabled_blocks = 11;
 }

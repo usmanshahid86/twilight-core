@@ -30,13 +30,14 @@ func TestTreasuryPaymentAndFailureAtomicity(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
 
-		require.NoError(t, k.EndBlock(ctx.WithBlockHeight(2)))
+		// 10% of a 3600 emission.
+		require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
 		require.Len(t, bank.sends, 1)
-		require.Equal(t, "2utwlt", bank.sends[0].amounts.String())
+		require.Equal(t, "360utwlt", bank.sends[0].amounts.String())
 		epoch, found, err := k.GetFinalizedEpoch(ctx, 1)
 		require.NoError(t, err)
 		require.True(t, found)
-		require.Equal(t, "2", epoch.TreasuryAmount)
+		require.Equal(t, "360", epoch.TreasuryAmount)
 	})
 
 	t.Run("send failure", func(t *testing.T) {
@@ -51,7 +52,7 @@ func TestTreasuryPaymentAndFailureAtomicity(t *testing.T) {
 		require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
 		bank.failSend()
 
-		require.Error(t, k.EndBlock(ctx.WithBlockHeight(2)))
+		require.Error(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
 		_, found, err := k.GetFinalizedEpoch(ctx, 1)
 		require.NoError(t, err)
 		require.False(t, found)

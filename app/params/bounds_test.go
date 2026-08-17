@@ -414,3 +414,79 @@ func TestCalibratedBoundsValidateStructural(t *testing.T) {
 		}
 	})
 }
+
+// TestValidateEpochLengthBlocks exercises the ratified admission interval
+//
+//	HardMinEpochLengthBlocks <= epoch_length_blocks <= HardMaxEpochLengthBlocks
+//
+// against the real constants. The bounds are consensus values now, so a test that
+// injected its own numbers would prove the relation while saying nothing about
+// what the chain actually admits.
+func TestValidateEpochLengthBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value uint64
+		ok    bool
+	}{
+		{name: "one below the floor", value: HardMinEpochLengthBlocks - 1},
+		{name: "at the floor", value: HardMinEpochLengthBlocks, ok: true},
+		{name: "one above the floor", value: HardMinEpochLengthBlocks + 1, ok: true},
+		{name: "one below the ceiling", value: HardMaxEpochLengthBlocks - 1, ok: true},
+		{name: "at the ceiling", value: HardMaxEpochLengthBlocks, ok: true},
+		{name: "one above the ceiling", value: HardMaxEpochLengthBlocks + 1},
+		{name: "zero", value: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateEpochLengthBlocks(tc.value)
+			if tc.ok {
+				if err != nil {
+					t.Fatalf("epoch length %d rejected: %v", tc.value, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("epoch length %d accepted", tc.value)
+			}
+		})
+	}
+}
+
+// TestRatifiedEpochLengthBoundsLocked freezes the two ratified values.
+//
+// They are immutable within a running network, so a later edit is a consensus
+// change rather than a calibration tweak. The literals are spelled out here
+// deliberately: the test must fail if the constants move, not track them.
+func TestRatifiedEpochLengthBoundsLocked(t *testing.T) {
+	if HardMinEpochLengthBlocks != 360 {
+		t.Errorf("HardMinEpochLengthBlocks = %d, want 360", HardMinEpochLengthBlocks)
+	}
+	if HardMaxEpochLengthBlocks != 720 {
+		t.Errorf("HardMaxEpochLengthBlocks = %d, want 720", HardMaxEpochLengthBlocks)
+	}
+	if HardMinEpochLengthBlocks > HardMaxEpochLengthBlocks {
+		t.Fatal("the admission interval is inverted")
+	}
+}
+
+// TestRecommendedBeaconGeometryFitsTheHardMinimum is the relation the floor was
+// chosen to satisfy: r6's recommended geometry must fit inside the SHORTEST
+// permitted epoch, and must keep fitting as geometries change.
+func TestRecommendedBeaconGeometryFitsTheHardMinimum(t *testing.T) {
+	recommended := SelectionParams{
+		MaxSelectionRateBps:          2_500,
+		BeaconStartOffsetBlocks:      48,
+		BeaconWindowBlocks:           24,
+		MinExternalBeaconBlocks:      12,
+		MinDistinctExternalProposers: 4,
+	}
+	if err := recommended.Validate(HardMinEpochLengthBlocks); err != nil {
+		t.Fatalf("recommended beacon geometry must fit the hard minimum: %v", err)
+	}
+
+	// And a geometry that does not fit is refused, so the check is load-bearing.
+	tooWide := recommended
+	tooWide.BeaconWindowBlocks = HardMinEpochLengthBlocks
+	if err := tooWide.Validate(HardMinEpochLengthBlocks); err == nil {
+		t.Error("a beacon window as long as the shortest epoch must be refused")
+	}
+}

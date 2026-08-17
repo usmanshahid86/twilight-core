@@ -4,26 +4,26 @@ import (
 	"context"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+
+	"github.com/twilight-project/twilight-core/internal/checked"
+	"github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
+// EndBlock finalizes the open epoch when this block is its canonical last.
+//
+// Finalization is unconditional at that boundary — see ShouldFinalizeAtHeight for
+// why it must not be gated on the pause state. It does NOT advance the epoch
+// counter; the next epoch becomes current at its own first BeginBlock.
 func (k Keeper) EndBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	cacheCtx, write := sdkCtx.CacheContext()
 	cacheGoCtx := sdk.WrapSDKContext(cacheCtx)
 
-	state, err := k.GetState(cacheGoCtx)
+	height, err := checked.Uint64FromInt64(cacheCtx.BlockHeight())
 	if err != nil {
-		return err
+		return types.ErrInvalidState.Wrapf("block height is not representable: %v", err)
 	}
-	cfg, err := k.GetCurrentEpochConfig(cacheGoCtx)
-	if err != nil {
-		return err
-	}
-	params, err := k.GetParams(cacheGoCtx)
-	if err != nil {
-		return err
-	}
-	ready, err := ShouldFinalizeAtHeight(uint64(cacheCtx.BlockHeight()), state, cfg, params.EpochSettlementEnabled)
+	ready, err := k.ShouldFinalizeAtHeight(cacheGoCtx, height)
 	if err != nil {
 		return err
 	}
