@@ -160,16 +160,37 @@ func TestFinalizationCarriesTheWholePoolWhenNobodyParticipated(t *testing.T) {
 
 // TestFinalizationOmitsZeroAmountEntitlements proves a floored-to-zero share
 // creates no obligation while still counting toward the residue bound.
+//
+// # Why the fixture is shaped this way
+//
+// This test previously used three equal participants and a pool of 20, which
+// divides to 6 each — three POSITIVE entitlements and not a zero share anywhere.
+// It asserted the outcome correctly and proved nothing about the behavior in its
+// name, because the branch under test was never entered.
+//
+// Producing a real zero share needs pool*weight < W. With a subsidy of 10 the pool
+// is 10 per reward-enabled block, so a weight-1 Slot only floors away once the
+// participation total exceeds it — hence one heavy Slot and twenty-one light ones
+// over a two-block epoch:
+//
+//	pool = 20, W = 2 + 21 = 23
+//	slot 1  : floor(20 * 2 / 23) = 1   -> persisted
+//	slots 2+: floor(20 * 1 / 23) = 0   -> counted, not persisted
+//
+// The residue is then 19 across 22 participants, which is inside the bound of 21
+// and far outside the bound of 0 that the single persisted row would give. So the
+// fixture also distinguishes n_pos from "number of entitlements written", which is
+// the substitution the residue check exists to catch.
 func TestFinalizationOmitsZeroAmountEntitlements(t *testing.T) {
+	const participants = 22
+
 	k, ctx, _, core := setupFinalization(t, true)
-	// Three participants and a pool that cannot divide: subsidy 10 over 360 blocks
-	// is 3600, but only two blocks are reward-enabled here, so the pool is 20 and
-	// the third Slot's share floors away.
-	core.slots[3] = slotWithID(core.slots[1], 3)
 	require.NoError(t, k.SetOpenRewardEnabledBlocks(ctx, 2))
-	require.NoError(t, k.SetActiveBlocks(ctx, 1, 1, 1))
-	require.NoError(t, k.SetActiveBlocks(ctx, 1, 2, 1))
-	require.NoError(t, k.SetActiveBlocks(ctx, 1, 3, 1))
+	require.NoError(t, k.SetActiveBlocks(ctx, 1, 1, 2))
+	for slotID := uint64(2); slotID <= participants; slotID++ {
+		core.slots[slotID] = slotWithID(core.slots[1], slotID)
+		require.NoError(t, k.SetActiveBlocks(ctx, 1, slotID, 1))
+	}
 
 	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
 
@@ -177,14 +198,22 @@ func TestFinalizationOmitsZeroAmountEntitlements(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, "20", epoch.MintedEmission)
-	// 20 across three equal participants: each floors to 6, carrying 2.
-	require.Equal(t, "18", epoch.AllocatedAmount)
-	require.Equal(t, "2", epoch.CarryOut)
+	require.Equal(t, "1", epoch.AllocatedAmount, "only the heavy slot's share survives the floor")
+	require.Equal(t, "19", epoch.CarryOut, "every floored-away share stays in the pool as carry")
 
 	entitlements, err := k.IterateEntitlementsForEpoch(ctx, 1)
 	require.NoError(t, err)
-	require.Len(t, entitlements, 3)
-	requireLiability(t, k, ctx, "18")
+	require.Len(t, entitlements, 1, "a zero-amount entitlement is never persisted")
+	require.Equal(t, uint64(1), entitlements[0].SlotId)
+	require.Equal(t, "1", entitlements[0].EntitlementAmount)
+	requireLiability(t, k, ctx, "1")
+
+	// The residue bound was satisfied against 22 participants, not against the one
+	// row that was written. Recomputing n_pos from the persisted entitlements would
+	// give a bound of 0 and reject this epoch, which is why the substitution is a
+	// defect rather than a simplification.
+	require.Greater(t, 19, len(entitlements)-1,
+		"the carry exceeds what the persisted rows alone would permit")
 }
 
 // TestFinalizationEnforcesTheResidueBound is the assertion a definitional

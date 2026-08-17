@@ -169,15 +169,24 @@ func (k Keeper) DenomCorrectnessInvariant() sdk.Invariant {
 //     only field permitted to move, and it may never pass the amount it is
 //     bounded by.
 //
-// The historical claim-marker check is kept for aggregates that predate the
-// switchover, which may still carry rows and must still carry no claim markers.
+// The first property is now ENFORCED rather than described. It used to be stated
+// in this comment while the code below only rejected mutable claim markers inside
+// the rows — so an aggregate that acquired unclaimed rows satisfied the invariant
+// and contradicted its own documentation.
+//
+// Requiring the collection to be empty is correct for conforming POC1 state and
+// costs nothing to a conforming chain: V2 finalization writes no rows, and fresh
+// genesis refuses a document that carries a finalized epoch at all. An aggregate
+// with rows can therefore only come from state written directly for explicitly
+// legacy regression coverage, which is exactly the state this invariant should
+// distinguish from a real chain's.
 func (k Keeper) ClosedEpochImmutabilityInvariant() sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
 		err := k.FinalizedEpochs.Walk(ctx, nil, func(_ uint64, epoch types.EpochReward) (bool, error) {
-			for _, reward := range epoch.Rewards {
-				if reward.Claimed || reward.ClaimedAtHeight != 0 {
-					return true, fmt.Errorf("finalized epoch %d aggregate contains mutable claim marker", epoch.EpochNumber)
-				}
+			if len(epoch.Rewards) != 0 {
+				return true, fmt.Errorf(
+					"finalized epoch %d aggregate embeds %d per-slot rows; the canonical per-slot record is the slot entitlement",
+					epoch.EpochNumber, len(epoch.Rewards))
 			}
 			return false, nil
 		})

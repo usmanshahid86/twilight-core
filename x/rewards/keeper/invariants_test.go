@@ -81,11 +81,26 @@ func TestDenomAndClosedEpochImmutabilityInvariants(t *testing.T) {
 	require.True(t, broken)
 	require.NoError(t, k.Params.Set(ctx, types.DefaultParams()))
 
+	// A V2 aggregate embeds no per-slot rows at all. The invariant used to accept
+	// one that did as long as no row carried a claim marker, which contradicted
+	// what its own comment claimed it proved.
+	clean := validEpoch(1, types.DefaultParams())
+	require.NoError(t, k.FinalizedEpochs.Set(ctx, 1, clean))
+	_, broken = k.ClosedEpochImmutabilityInvariant()(ctx)
+	require.False(t, broken, "a V2 aggregate with no embedded rows is conforming")
+
 	epoch := validEpoch(1, types.DefaultParams())
-	reward := validClaim(1, 1)
-	reward.Claimed = true
-	reward.ClaimedAtHeight = 5
-	epoch.Rewards = []*types.EligibleSlotReward{&reward}
+	unclaimed := validClaim(1, 1)
+	epoch.Rewards = []*types.EligibleSlotReward{&unclaimed}
+	require.NoError(t, k.FinalizedEpochs.Set(ctx, 1, epoch))
+	_, broken = k.ClosedEpochImmutabilityInvariant()(ctx)
+	require.True(t, broken,
+		"an embedded per-slot row is a second immutable copy of an obligation, claimed or not")
+
+	claimed := validClaim(1, 1)
+	claimed.Claimed = true
+	claimed.ClaimedAtHeight = 5
+	epoch.Rewards = []*types.EligibleSlotReward{&claimed}
 	require.NoError(t, k.FinalizedEpochs.Set(ctx, 1, epoch))
 	_, broken = k.ClosedEpochImmutabilityInvariant()(ctx)
 	require.True(t, broken)

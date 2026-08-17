@@ -295,11 +295,15 @@ func (k Keeper) assertReleaseCeiling(entitlement types.SlotEntitlement, requeste
 // recordRelease advances released_amount and lowers the outstanding liability by
 // exactly the value transferred.
 //
-// Only the released amount is rewritten. The record is re-read from the store
-// rather than reusing the caller's copy so the write is applied to what is
-// actually there, and every other field is carried through unchanged — a release
-// must not be able to restate the amount that bounds it, or the destination it
-// was bounded toward.
+// Only the released amount is rewritten. Every other field is carried through
+// from the record the caller loaded — a release must not be able to restate the
+// amount that bounds it, or the destination it was bounded toward.
+//
+// The caller's copy is used rather than a fresh read, and that is safe because of
+// where the caller got it: loadReleasableEntitlement read and validated it inside
+// this same cache, and nothing between there and here can have written to the
+// entitlement. A re-read would cost a lookup to obtain a value already known to be
+// identical.
 func (k Keeper) recordRelease(ctx context.Context, entitlement types.SlotEntitlement, released sdkmath.Int) error {
 	current, err := entitlement.Released()
 	if err != nil {
