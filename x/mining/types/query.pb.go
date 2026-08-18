@@ -37,7 +37,7 @@ const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 //
 // The economic-address validator's sentinels are the sole authority for these values.
 // A handler may only map those sentinels onto this enum; it may not infer a cause of
-// its own, and an unrecognised failure is an RPC error rather than a guessed value.
+// its own, and an unrecognized failure is an RPC error rather than a guessed value.
 type EconomicAddressRejectionReason int32
 
 const (

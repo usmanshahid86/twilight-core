@@ -4665,7 +4665,7 @@
         "ECONOMIC_ADDRESS_REJECTION_REASON_BANK_BLOCKED"
       ],
       "default": "ECONOMIC_ADDRESS_REJECTION_REASON_UNSPECIFIED",
-      "description": "Why an address may not receive protocol value.\n\nDeclared here rather than in mining.proto because it is query-only and must never\nbecome stored state. Keeping it out of the stored-state file makes that structural\ninstead of a convention someone has to remember.\n\nThe economic-address validator's sentinels are the sole authority for these values.\nA handler may only map those sentinels onto this enum; it may not infer a cause of\nits own, and an unrecognised failure is an RPC error rather than a guessed value.\n\n - ECONOMIC_ADDRESS_REJECTION_REASON_NONE: Admissible: no rejection.\n - ECONOMIC_ADDRESS_REJECTION_REASON_INVALID: Not an account address for this chain: malformed, foreign prefix, or all-zero."
+      "description": "Why an address may not receive protocol value.\n\nDeclared here rather than in mining.proto because it is query-only and must never\nbecome stored state. Keeping it out of the stored-state file makes that structural\ninstead of a convention someone has to remember.\n\nThe economic-address validator's sentinels are the sole authority for these values.\nA handler may only map those sentinels onto this enum; it may not infer a cause of\nits own, and an unrecognized failure is an RPC error rather than a guessed value.\n\n - ECONOMIC_ADDRESS_REJECTION_REASON_NONE: Admissible: no rejection.\n - ECONOMIC_ADDRESS_REJECTION_REASON_INVALID: Not an account address for this chain: malformed, foreign prefix, or all-zero."
     },
     "v1EligibleSlotReward": {
       "type": "object",

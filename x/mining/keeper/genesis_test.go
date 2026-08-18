@@ -262,6 +262,17 @@ func account(marker byte) string {
 // address to prove the refusal.
 const fixtureModuleAccount = "mining_test_module_account"
 
+// blockedRecipient marks the one bank-blocked address the test rule knows about,
+// for the same reason and with the same consequence: a validator holding an empty
+// blocked set could not refuse a blocked destination, so every assertion about that
+// arm would pass against a rule that had stopped enforcing it. The marker is
+// distinct from every participant and signer marker the fixtures pay to, including
+// the 0x30-0x50 block the recipient-count bound generates.
+const blockedRecipient = 0xb1
+
+// blockedAddress is the address bank prohibits from receiving funds.
+func blockedAddress() string { return account(blockedRecipient) }
+
 func setupKeeper(t *testing.T, core keeper.CoreSlotKeeper) (keeper.Keeper, sdk.Context) {
 	k, ctx, _ := setupKeeperWithRewards(t, core, newRewardsMock())
 	return k, ctx
@@ -271,21 +282,39 @@ func setupKeeperWithRewards(
 	t *testing.T, core keeper.CoreSlotKeeper, rewards *rewardsKeeperMock,
 ) (keeper.Keeper, sdk.Context, *rewardsKeeperMock) {
 	t.Helper()
+	return setupKeeperWithValidator(t, core, rewards, fixtureEconomicAddresses(t))
+}
+
+// fixtureEconomicAddresses builds the canonical §25 rule exactly as the app builds
+// it, from both authorities: the module-account names declared by auth, and the
+// bank blocked set. Each arm needs at least one member or the fixtures could not
+// tell an enforced rule from an absent one.
+func fixtureEconomicAddresses(t *testing.T) economicaddress.Validator {
+	t.Helper()
+	validator, err := economicaddress.New(
+		addresscodec.NewBech32Codec(sdk.GetConfig().GetBech32AccountAddrPrefix()),
+		[]string{fixtureModuleAccount},
+		map[string]bool{blockedAddress(): true},
+	)
+	require.NoError(t, err)
+	return validator
+}
+
+// setupKeeperWithValidator takes the economic-address rule as a parameter so a test
+// can reach the one state the app can never be in: an unconfigured validator, which
+// answers nothing rather than answering permissively.
+func setupKeeperWithValidator(
+	t *testing.T,
+	core keeper.CoreSlotKeeper,
+	rewards *rewardsKeeperMock,
+	validator economicaddress.Validator,
+) (keeper.Keeper, sdk.Context, *rewardsKeeperMock) {
+	t.Helper()
 	registry := codectypes.NewInterfaceRegistry()
 	types.RegisterInterfaces(registry)
 	keys := storetypes.NewKVStoreKeys(types.StoreKey)
 	cms := integration.CreateMultiStore(keys, log.NewNopLogger())
 	ctx := sdk.NewContext(cms, cmtproto.Header{Height: 1}, false, log.NewNopLogger())
-
-	// The canonical §25 rule, built exactly as the app builds it. It needs at
-	// least one module account name: a validator that knew of no module accounts
-	// could not refuse a payout to one.
-	validator, err := economicaddress.New(
-		addresscodec.NewBech32Codec(sdk.GetConfig().GetBech32AccountAddrPrefix()),
-		[]string{fixtureModuleAccount},
-		nil,
-	)
-	require.NoError(t, err)
 
 	k := keeper.NewKeeper(
 		codec.NewProtoCodec(registry),

@@ -673,7 +673,7 @@ func (q queryServer) TargetEpochInterpretation(
 // is what lets a caller distinguish "this participant is excluded" from "the chain
 // could not tell me", and the second must never collapse into the first.
 //
-// Classification maps the validator's sentinels and nothing else. An unrecognised
+// Classification maps the validator's sentinels and nothing else. An unrecognized
 // error becomes Internal rather than a guessed enum value, so a sentinel added
 // upstream later surfaces as an explicit failure instead of landing in whichever
 // bucket happened to be nearest.
@@ -713,8 +713,8 @@ func (q queryServer) ValidateEconomicAddress(
 
 // economicAddressRejectionReason maps a validator sentinel onto the public enum.
 //
-// The second return reports whether the error was recognised at all. A caller must
-// not treat an unrecognised failure as a rejection: the enum describes reasons an
+// The second return reports whether the error was recognized at all. A caller must
+// not treat an unrecognized failure as a rejection: the enum describes reasons an
 // address is inadmissible, and "the rule could not be applied" is not one of them.
 func economicAddressRejectionReason(err error) (types.EconomicAddressRejectionReason, bool) {
 	switch {
