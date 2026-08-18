@@ -677,6 +677,16 @@ func (q queryServer) TargetEpochInterpretation(
 // error becomes Internal rather than a guessed enum value, so a sentinel added
 // upstream later surfaces as an explicit failure instead of landing in whichever
 // bucket happened to be nearest.
+//
+// # This one is not a historical query
+//
+// It reports admissibility under the SERVING NODE'S CURRENTLY CONFIGURED rule. The
+// module-account and bank-blocked sets are application configuration copied into
+// the immutable validator when the process is constructed; they are not consensus
+// state read through the query context, and this query does not reconstruct the app
+// configuration of a prior height. Supplying a block height therefore does not
+// change which rule answers, and the contract must not be presented as though it
+// did.
 func (q queryServer) ValidateEconomicAddress(
 	_ context.Context, req *types.QueryValidateEconomicAddressRequest,
 ) (*types.QueryValidateEconomicAddressResponse, error) {

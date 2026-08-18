@@ -131,7 +131,7 @@ func (c *pinnedChain) headContext() sdk.Context {
 	return c.app.NewUncachedContext(false, cmtproto.Header{Height: c.head})
 }
 
-// protoMessage is the marshalling surface every generated request and response
+// protoMessage is the marshaling surface every generated request and response
 // already has.
 type protoMessage interface {
 	Marshal() ([]byte, error)
