@@ -19,3 +19,13 @@ var (
 	// underflowing an unsigned subtraction into the newest version.
 	BindingEpochForTarget = bindingEpochForTarget
 )
+
+// FinalizeSettlementWithoutCache is the finalization body with the handler's own
+// cache stripped off.
+//
+// It exists to make the ORDER of the two effects observable. With the cache in
+// place both orderings are safe, so no ordinary test can tell them apart — which
+// is exactly the condition under which a later edit could reorder them unnoticed
+// and leave the guarantee resting on the cache alone. Driving the body directly
+// shows which ordering fails safe when that cache is not there.
+var FinalizeSettlementWithoutCache = Keeper.finalizeSettlement

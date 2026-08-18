@@ -20,3 +20,15 @@ const (
 	AttributeKeyRecipientCount = "recipient_count"
 	AttributeKeyChunkTotal     = "chunk_total"
 )
+
+// Finalization events.
+const (
+	EventTypeSettlementFinalized = "mining_settlement_finalized"
+)
+
+// Finalization attribute keys.
+const (
+	AttributeKeyFinalizationReason = "finalization_reason"
+	AttributeKeyReleasedRemainder  = "released_remainder"
+	AttributeKeyFinalizedHeight    = "finalized_height"
+)

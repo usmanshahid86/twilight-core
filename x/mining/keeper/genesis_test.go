@@ -79,6 +79,13 @@ type rewardsKeeperMock struct {
 	payCalls       int
 	remainderCalls int
 
+	// remainderErr makes the operator-remainder release refuse, and
+	// remainderShortfall makes it report success while leaving part of the
+	// entitlement unreleased — the one way to reach the finalization post-condition,
+	// which is proven from state rather than assumed from the call returning nil.
+	remainderErr       error
+	remainderShortfall string
+
 	// payErr makes the release boundary refuse. It models the two ways the real
 	// boundary can reject a set x/mining has already admitted: its own entitlement
 	// ceiling, and a bank send that fails partway through the set.
@@ -197,9 +204,38 @@ func (m *rewardsKeeperMock) addReleased(slotID, epoch uint64, amount sdkmath.Int
 	return fmt.Errorf("no entitlement for slot %d in epoch %d", slotID, epoch)
 }
 
-func (m *rewardsKeeperMock) PayEntitlementRemainderToOperator(context.Context, uint64, uint64) error {
+// PayEntitlementRemainderToOperator settles the entitlement to full, the way the
+// real boundary does: it releases whatever remains to the immutable payout
+// snapshot. There is no recipient parameter here either — the double cannot model
+// a redirection the production interface makes unrepresentable.
+func (m *rewardsKeeperMock) PayEntitlementRemainderToOperator(
+	_ context.Context, slotID, epoch uint64,
+) error {
 	m.remainderCalls++
-	return nil
+	if m.remainderErr != nil {
+		return m.remainderErr
+	}
+	list := m.entitlements[epoch]
+	for i := range list {
+		if list[i].SlotId != slotID {
+			continue
+		}
+		amount, ok := sdkmath.NewIntFromString(list[i].EntitlementAmount)
+		if !ok {
+			return fmt.Errorf("entitlement amount %q is not an integer", list[i].EntitlementAmount)
+		}
+		settled := amount
+		if m.remainderShortfall != "" {
+			short, ok := sdkmath.NewIntFromString(m.remainderShortfall)
+			if !ok {
+				return fmt.Errorf("shortfall %q is not an integer", m.remainderShortfall)
+			}
+			settled = amount.Sub(short)
+		}
+		list[i].ReleasedAmount = settled.String()
+		return nil
+	}
+	return fmt.Errorf("no entitlement for slot %d in epoch %d", slotID, epoch)
 }
 
 // settlementSlot is an admitted CoreSlot carrying the settlement credential that

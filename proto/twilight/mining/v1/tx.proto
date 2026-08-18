@@ -4,6 +4,8 @@ package twilight.mining.v1;
 import "amino/amino.proto";
 import "cosmos/msg/v1/msg.proto";
 
+import "twilight/mining/v1/mining.proto";
+
 option go_package = "github.com/twilight-project/twilight-core/x/mining/types";
 
 // The settlement transactions are the only messages x/mining will ever own.
@@ -19,6 +21,10 @@ service Msg {
   // SubmitSettlementChunk releases one bounded batch of participant payouts
   // against an open settlement.
   rpc SubmitSettlementChunk(MsgSubmitSettlementChunk) returns (MsgSubmitSettlementChunkResponse);
+
+  // FinalizeSettlement closes an open settlement, releasing whatever remains of
+  // the entitlement to its immutable operator payout snapshot.
+  rpc FinalizeSettlement(MsgFinalizeSettlement) returns (MsgFinalizeSettlementResponse);
 }
 
 // SettlementChunkPayout is one participant line: a destination and the amount it
@@ -65,4 +71,43 @@ message MsgSubmitSettlementChunk {
 // querying rather than by assuming.
 message MsgSubmitSettlementChunkResponse {
   uint64 next_chunk_index = 1;
+}
+
+// MsgFinalizeSettlement terminally closes one settlement.
+//
+// It carries an identity and a signer, and nothing else. Note what is absent, and
+// that the absence is the design rather than an omission: no payout destination,
+// no remainder amount, no released amount, no finalization reason, no deadline, no
+// participant ceiling, no settlement mode and no configuration version. Every one
+// of those is derived from canonical state, so a caller cannot propose a value for
+// any of them — redirection and re-pricing are unrepresentable rather than
+// rejected, and a rejection path could be relaxed by a later edit where a missing
+// field cannot.
+//
+// Who may send it depends on the settlement, not on the message: an operator-only
+// settlement and one past its deadline are finalizable by any valid account, while
+// one still inside its participant window is finalizable only by the Slot's
+// settlement address. In every case the caller decides only WHETHER the transition
+// happens now, never where the money goes.
+message MsgFinalizeSettlement {
+  option (cosmos.msg.v1.signer) = "signer";
+  option (amino.name) = "twilight/mining/MsgFinalizeSettlement";
+
+  string signer = 1;
+  uint64 slot_id = 2;
+  uint64 epoch = 3;
+}
+
+// MsgFinalizeSettlementResponse reports what the transition resolved to.
+//
+// Both fields are derived and neither is authority. The reason is readable from
+// the settlement afterwards and the released remainder from the entitlement; they
+// are returned because a caller that has just triggered a terminal money movement
+// should not have to issue a second read to learn which authorization arm applied
+// and how much moved.
+message MsgFinalizeSettlementResponse {
+  SettlementFinalizationReason finalization_reason = 1;
+  // Base-denom integer, arbitrary precision. Zero when the entitlement had already
+  // been fully distributed to participants.
+  string released_remainder = 2;
 }

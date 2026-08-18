@@ -27,3 +27,16 @@ func (m msgServer) SubmitSettlementChunk(
 	}
 	return &types.MsgSubmitSettlementChunkResponse{NextChunkIndex: next}, nil
 }
+
+func (m msgServer) FinalizeSettlement(
+	ctx context.Context, msg *types.MsgFinalizeSettlement,
+) (*types.MsgFinalizeSettlementResponse, error) {
+	reason, remainder, err := m.Keeper.FinalizeSettlement(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	return &types.MsgFinalizeSettlementResponse{
+		FinalizationReason: reason,
+		ReleasedRemainder:  remainder.String(),
+	}, nil
+}

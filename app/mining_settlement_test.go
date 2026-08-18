@@ -8,6 +8,7 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/stretchr/testify/require"
 
+	"cosmossdk.io/collections"
 	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -360,5 +361,232 @@ func TestAFutureAnchorBlocksReleaseOnTheRealBank(t *testing.T) {
 	settlement, _, err := e.app.MiningKeeper.GetSettlement(e.ctx, e.slotID, e.epoch)
 	require.NoError(t, err)
 	require.Zero(t, settlement.NextChunkIndex)
+	assertInvariants(t, e.app, e.ctx)
+}
+
+// Settlement finalization against the real application.
+//
+// The keeper tests establish the authorization model against a double that records
+// releases without moving balances. What only a real bank can establish is where
+// the operator remainder actually lands, that a permissionless caller receives
+// nothing for triggering it, that a zero remainder performs no bank operation at
+// all, and that a failure after a successful transfer unwinds the money.
+
+func (e settlementEnv) finalize(signer string) *miningtypes.MsgFinalizeSettlement {
+	return &miningtypes.MsgFinalizeSettlement{Signer: signer, SlotId: e.slotID, Epoch: e.epoch}
+}
+
+// atDeadline moves the canonical settlement clock to the settlement's derived
+// deadline, through the same clock consensus maintains.
+func atDeadline(t *testing.T, e settlementEnv) {
+	t.Helper()
+	settlement, found, err := e.app.MiningKeeper.GetSettlement(e.ctx, e.slotID, e.epoch)
+	require.NoError(t, err)
+	require.True(t, found)
+	deadline, err := e.app.MiningKeeper.SettlementDeadlineClock(e.ctx, settlement)
+	require.NoError(t, err)
+	require.NoError(t, e.app.MiningKeeper.SettlementClock.Set(e.ctx, deadline))
+}
+
+// TestFinalizationPaysTheOperatorRemainderOnTheRealBank is §22A.
+//
+// Part of the entitlement went to a participant; the rest must reach the operator's
+// immutable payout snapshot and nowhere else, with escrow falling by exactly the
+// whole entitlement across both movements.
+func TestFinalizationPaysTheOperatorRemainderOnTheRealBank(t *testing.T) {
+	e := bootSettlement(t)
+	participant := acc(0x81)
+
+	owed := e.entitlement(t)
+	amount, err := owed.Amount()
+	require.NoError(t, err)
+	require.Equal(t, e.payout, owed.PayoutAddress, "the operator destination is the payout snapshot")
+
+	escrowBefore := e.escrow(t)
+	operatorBefore := e.balance(t, e.payout)
+	distributed := amount.QuoRaw(4)
+
+	_, err = e.msgServer.SubmitSettlementChunk(e.ctx,
+		e.chunk(0, payoutLine(participant, distributed.String())))
+	require.NoError(t, err)
+
+	response, err := e.msgServer.FinalizeSettlement(e.ctx, e.finalize(e.settlement))
+	require.NoError(t, err)
+	require.Equal(t,
+		miningtypes.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY,
+		response.FinalizationReason)
+
+	remainder := amount.Sub(distributed)
+	require.Equal(t, remainder.String(), response.ReleasedRemainder)
+	require.Equal(t, distributed.String(), e.balance(t, participant).String(),
+		"the participant keeps what it was paid")
+	require.Equal(t, operatorBefore.Add(remainder).String(), e.balance(t, e.payout).String(),
+		"the operator receives exactly the remainder")
+	require.Equal(t, escrowBefore.Sub(amount).String(), e.escrow(t).String(),
+		"escrow fell by the whole entitlement across both movements")
+	require.Equal(t, amount.String(), e.entitlement(t).ReleasedAmount)
+
+	settlement, _, err := e.app.MiningKeeper.GetSettlement(e.ctx, e.slotID, e.epoch)
+	require.NoError(t, err)
+	require.True(t, settlement.Finalized)
+	require.Equal(t, uint64(e.ctx.BlockHeight()), settlement.FinalizedHeight)
+	assertInvariants(t, e.app, e.ctx)
+}
+
+// TestFinalizingAFullyDistributedEntitlementMovesNothing is §22B.
+//
+// The entitlement was distributed in full to participants, so the operator is owed
+// nothing. Finalization still happens, and it must perform no bank operation — a
+// zero-value transfer would touch an account for no reason.
+func TestFinalizingAFullyDistributedEntitlementMovesNothing(t *testing.T) {
+	e := bootSettlement(t)
+	participant := acc(0x82)
+
+	owed := e.entitlement(t)
+	amount, err := owed.Amount()
+	require.NoError(t, err)
+	_, err = e.msgServer.SubmitSettlementChunk(e.ctx,
+		e.chunk(0, payoutLine(participant, amount.String())))
+	require.NoError(t, err)
+
+	escrowBefore := e.escrow(t)
+	operatorBefore := e.balance(t, e.payout)
+	operatorAccountBefore := e.app.AccountKeeper.GetAccount(e.ctx, mustAddr(t, e.payout))
+
+	response, err := e.msgServer.FinalizeSettlement(e.ctx, e.finalize(e.settlement))
+	require.NoError(t, err)
+	require.Equal(t, "0", response.ReleasedRemainder)
+
+	require.Equal(t, escrowBefore.String(), e.escrow(t).String(), "escrow is untouched")
+	require.Equal(t, operatorBefore.String(), e.balance(t, e.payout).String())
+	require.Equal(t, operatorAccountBefore, e.app.AccountKeeper.GetAccount(e.ctx, mustAddr(t, e.payout)),
+		"no account side effect from a zero remainder")
+
+	settlement, _, err := e.app.MiningKeeper.GetSettlement(e.ctx, e.slotID, e.epoch)
+	require.NoError(t, err)
+	require.True(t, settlement.Finalized)
+	assertInvariants(t, e.app, e.ctx)
+}
+
+// TestPermissionlessFinalizationPaysTheOperatorAndNotTheCaller is §22C.
+//
+// Past the deadline anyone may trigger the transition. The point of the test is
+// what the trigger does NOT buy: the caller's balance is unchanged and the money
+// goes only to the immutable payout snapshot.
+func TestPermissionlessFinalizationPaysTheOperatorAndNotTheCaller(t *testing.T) {
+	e := bootSettlement(t)
+	caller := acc(0x83)
+	atDeadline(t, e)
+
+	owed := e.entitlement(t)
+	amount, err := owed.Amount()
+	require.NoError(t, err)
+	operatorBefore := e.balance(t, e.payout)
+	require.True(t, e.balance(t, caller).IsZero())
+
+	response, err := e.msgServer.FinalizeSettlement(e.ctx, e.finalize(caller))
+	require.NoError(t, err)
+	require.Equal(t,
+		miningtypes.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_AFTER_DEADLINE,
+		response.FinalizationReason)
+
+	require.Equal(t, operatorBefore.Add(amount).String(), e.balance(t, e.payout).String(),
+		"the whole remainder reached the operator")
+	require.True(t, e.balance(t, caller).IsZero(),
+		"triggering finalization pays the caller nothing")
+	assertInvariants(t, e.app, e.ctx)
+}
+
+// TestOperatorOnlyFinalizationPaysTheOperatorInFull is §22D.
+//
+// The mode is reached through the keeper-level fixture seam rather than by adding a
+// message that could produce it, and no Selection state is involved.
+func TestOperatorOnlyFinalizationPaysTheOperatorInFull(t *testing.T) {
+	e := bootSettlement(t)
+	caller := acc(0x84)
+
+	settlement, found, err := e.app.MiningKeeper.GetSettlement(e.ctx, e.slotID, e.epoch)
+	require.NoError(t, err)
+	require.True(t, found)
+	settlement.SettlementMode = miningtypes.SettlementMode_SETTLEMENT_MODE_OPERATOR_ONLY
+	require.NoError(t, e.app.MiningKeeper.Settlements.Set(
+		e.ctx, collections.Join(e.slotID, e.epoch), settlement))
+
+	owed := e.entitlement(t)
+	amount, err := owed.Amount()
+	require.NoError(t, err)
+	operatorBefore := e.balance(t, e.payout)
+
+	response, err := e.msgServer.FinalizeSettlement(e.ctx, e.finalize(caller))
+	require.NoError(t, err)
+	require.Equal(t,
+		miningtypes.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_OPERATOR_ONLY,
+		response.FinalizationReason)
+	require.Equal(t, amount.String(), response.ReleasedRemainder)
+	require.Equal(t, operatorBefore.Add(amount).String(), e.balance(t, e.payout).String())
+	require.True(t, e.balance(t, caller).IsZero())
+	assertInvariants(t, e.app, e.ctx)
+}
+
+// TestAFailureAfterTheRemainderTransferUnwindsTheMoney is the §24 atomicity proof,
+// at the one seam that is genuinely reachable with a real bank.
+//
+// The remainder release commits into the handler's cache, and the terminal write
+// that follows then fails on its block-height guard. That guard is a real
+// fail-closed check — a terminal settlement must record a positive finalization
+// height, and a nonpositive height converted to unsigned would record an enormous
+// one — not an error path added for this test.
+//
+// What must hold is that the transfer does not survive the failure. If it did, the
+// operator would have been paid against a settlement still OPEN, and an OPEN
+// settlement can be finalized again — paying the operator twice.
+func TestAFailureAfterTheRemainderTransferUnwindsTheMoney(t *testing.T) {
+	e := bootSettlement(t)
+	escrowBefore := e.escrow(t)
+	operatorBefore := e.balance(t, e.payout)
+
+	// Height zero: every authorization check still passes and the remainder release
+	// succeeds, then the terminal write refuses.
+	broken := e.ctx.WithBlockHeight(0)
+	_, err := e.msgServer.FinalizeSettlement(broken, e.finalize(e.settlement))
+	require.ErrorIs(t, err, miningtypes.ErrInvalidState)
+	require.Contains(t, err.Error(), "requires a positive block height")
+
+	require.Equal(t, operatorBefore.String(), e.balance(t, e.payout).String(),
+		"the operator transfer was unwound")
+	require.Equal(t, escrowBefore.String(), e.escrow(t).String(), "escrow is untouched")
+	require.Equal(t, "0", e.entitlement(t).ReleasedAmount,
+		"the entitlement-side released amount was unwound with it")
+
+	settlement, _, err := e.app.MiningKeeper.GetSettlement(e.ctx, e.slotID, e.epoch)
+	require.NoError(t, err)
+	require.False(t, settlement.Finalized, "the settlement remains open and retryable")
+	require.Zero(t, settlement.FinalizedHeight)
+
+	// And it finalizes cleanly once the cause is gone, exactly once.
+	response, err := e.msgServer.FinalizeSettlement(e.ctx, e.finalize(e.settlement))
+	require.NoError(t, err)
+	amount, err := e.entitlement(t).Amount()
+	require.NoError(t, err)
+	require.Equal(t, amount.String(), response.ReleasedRemainder)
+	require.Equal(t, operatorBefore.Add(amount).String(), e.balance(t, e.payout).String())
+	assertInvariants(t, e.app, e.ctx)
+}
+
+// TestFinalizationIsTerminalOnTheRealBank proves a second attempt pays nothing.
+func TestFinalizationIsTerminalOnTheRealBank(t *testing.T) {
+	e := bootSettlement(t)
+	_, err := e.msgServer.FinalizeSettlement(e.ctx, e.finalize(e.settlement))
+	require.NoError(t, err)
+	operatorAfterFirst := e.balance(t, e.payout)
+	escrowAfterFirst := e.escrow(t)
+
+	_, err = e.msgServer.FinalizeSettlement(e.ctx, e.finalize(e.settlement))
+	require.ErrorIs(t, err, miningtypes.ErrInvalidState)
+	require.Contains(t, err.Error(), "already finalized")
+
+	require.Equal(t, operatorAfterFirst.String(), e.balance(t, e.payout).String(),
+		"no second payout")
+	require.Equal(t, escrowAfterFirst.String(), e.escrow(t).String())
 	assertInvariants(t, e.app, e.ctx)
 }
