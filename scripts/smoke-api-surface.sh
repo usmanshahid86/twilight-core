@@ -73,6 +73,18 @@ check_generic() {
   fi
 }
 
+# A route that was deliberately retired must no longer be served. An unregistered
+# pattern reaches the gateway's routing-error handler, which answers 501; anything
+# else means the handler is still wired.
+check_retired() {
+  local path="$1" c; c="$(code "$BASE_REST$path")"
+  if [[ "$c" == "501" ]]; then
+    printf '  ok    %-52s -> %s (retired; no longer served)\n' "$path" "$c"; pass=$((pass+1))
+  else
+    printf '  FAIL  %-52s -> %s (retired route still answering)\n' "$path" "$c"; fail=$((fail+1))
+  fi
+}
+
 # Informational only — never fails the run.
 check_absent() {
   local path="$1" c; c="$(code "$BASE_REST$path")"
@@ -92,8 +104,9 @@ check_custom /twilight/rewards/v1/supply-schedule
 check_custom /twilight/rewards/v1/module-balances
 check_custom /twilight/rewards/v1/current-epoch/active-blocks
 check_custom /twilight/rewards/v1/epochs/1
-check_custom /twilight/rewards/v1/slots/1/rewards
-check_custom "/twilight/rewards/v1/slots/1/claimable?start_epoch=1&end_epoch=1"
+# Retired with the legacy claim path: both were claim-record-backed.
+check_retired /twilight/rewards/v1/slots/1/rewards
+check_retired "/twilight/rewards/v1/slots/1/claimable?start_epoch=1&end_epoch=1"
 
 echo
 echo "-- x/coreslot REST --"

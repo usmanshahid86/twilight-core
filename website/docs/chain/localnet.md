@@ -23,32 +23,37 @@ epoch.
 make localnet-smoke
 ```
 
-## `make localnet-rewards-smoke`
+## `make localnet-rewards-epoch-smoke`
 
-Starts an **isolated** four-node network (`/tmp/twilight-rewards-localnet`) with a
-short rewards epoch and drives it through epoch finalization and a claim transaction.
+Starts an **isolated** four-node network (`/tmp/twilight-rewards-localnet`) and
+drives it through a full epoch boundary.
 
-**Covers:** rewards finalization, exact minting, active-block participation allocation, a claim
-transaction, and cross-node app-hash agreement before finalization, after
-finalization, and after the claim.
+**Covers:** rewards finalization, exact minting, active-block participation
+allocation, the entitlements the epoch creates, and cross-node app-hash agreement
+before and after finalization.
+
+This is **not a money-movement proof**. It closes an epoch and checks the
+obligation the epoch produced; it submits no settlement chunk, so no value is
+released. The transaction that releases participant value is
+`MsgSubmitSettlementChunk` in `x/mining`.
 
 ```bash
-make localnet-rewards-smoke
+make localnet-rewards-epoch-smoke
 ```
 
 The script (`scripts/localnet/rewards-smoke.sh`) edits **only its own isolated
-generated genesis** to set `epoch_length_blocks = 10`; production defaults and the
-default smoke are untouched.
+generated genesis**; production defaults and the default smoke are untouched. The
+epoch length must sit inside the ratified immutable interval [360, 720], so the
+run uses a fast block time rather than a short epoch.
 
-### What a short-epoch run produces
+### What a run produces
 
-| Stage | Height | Result |
-|---|---|---|
-| Pre-finalization | 2 | epoch 1 open; 4 active-block rows; module balance 0; 4-node hash agreement |
-| After finalization | 10 | epoch advances to 2; minted `4,161,900utwlt` (= 10 × 416,190); 4 slots × `1,040,475utwlt`; carry 0; 4-node hash agreement |
-| After claim | 13 | slot 1 claimed; module balance `3,121,425utwlt`; supply unchanged; double-claim fails; 4-node hash agreement |
+| Stage | Result |
+|---|---|
+| Pre-finalization | epoch 1 open; 4 active-block rows; module balance 0; 4-node hash agreement |
+| After finalization | epoch advances to 2; minted `149,828,400utwlt` (= 360 × 416,190); 4 entitlements × `37,457,100utwlt`; escrow holds the full emission; carry 0; 4-node hash agreement |
 
-The minted emission is **per block over the epoch** (`10 × 416,190`), not per
+The minted emission is **per block over the epoch** (`360 × 416,190`), not per
 slot — distribution then splits the minted pool across the 4 active slots. See
 [Rewards economics](../rewards/economics.mdx).
 

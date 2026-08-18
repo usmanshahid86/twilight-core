@@ -2,7 +2,6 @@ package cli
 
 import (
 	"os"
-	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -19,7 +18,7 @@ import (
 // existing Msgs; it adds no new messages and infers no authority.
 func GetTxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "rewards", Short: "Rewards module transactions", DisableFlagParsing: true, SuggestionsMinimumDistance: 2}
-	cmd.AddCommand(updateParamsCmd(), pauseCmd(), resumeCmd(), claimCmd())
+	cmd.AddCommand(updateParamsCmd(), pauseCmd(), resumeCmd())
 	return cmd
 }
 
@@ -96,23 +95,6 @@ func resumeCmd() *cobra.Command {
 	})
 }
 
-// claimCmd triggers a claim for a slot over an inclusive epoch range. Anyone may
-// sign; funds always go to each row's snapshotted payout address. The CLI exposes
-// no payout or amount override.
-func claimCmd() *cobra.Command {
-	return txCmd("claim [slot-id] [start-epoch] [end-epoch]", cobra.ExactArgs(3), func(cmd *cobra.Command, args []string) error {
-		from, err := signer(cmd)
-		if err != nil {
-			return err
-		}
-		msg, err := buildClaimMsg(from, args[0], args[1], args[2])
-		if err != nil {
-			return err
-		}
-		return broadcast(cmd, msg)
-	})
-}
-
 // --- Pure message builders (testable without a client context/network) ---
 
 func buildUpdateParamsMsg(cdc codec.Codec, from, jsonPath string) (*types.MsgUpdateRewardsParams, error) {
@@ -136,19 +118,4 @@ func buildPauseMsg(from string) (*types.MsgPauseRewards, error) {
 
 func buildResumeMsg(from string) (*types.MsgResumeRewards, error) {
 	return &types.MsgResumeRewards{EmergencyAuthority: from}, nil
-}
-func buildClaimMsg(from, slotArg, startArg, endArg string) (*types.MsgClaimRewards, error) {
-	slot, err := strconv.ParseUint(slotArg, 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	start, err := strconv.ParseUint(startArg, 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	end, err := strconv.ParseUint(endArg, 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	return &types.MsgClaimRewards{Signer: from, SlotId: slot, StartEpoch: start, EndEpoch: end}, nil
 }

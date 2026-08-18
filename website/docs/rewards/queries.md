@@ -18,8 +18,7 @@ output. Raw `--help` captures for every command live under
 | `epoch-info` | — | Current epoch, start height, configured end height, pending params |
 | `next-halving` | — | Current tier, current subsidy, next threshold, remaining-to-halving |
 | `epoch-reward` | `[epoch]` | Finalized epoch aggregate (minted, pool, allocated, carry, slot rewards) |
-| `slot-rewards` | `[slot-id]` | Claim records for a slot (paginated, ascending epoch) |
-| `claimable` | `[slot-id] [start-epoch] [end-epoch]` | Unclaimed positive rewards in a range + total |
+| `pause-state` | — | Canonical pause state, any pending H+1 transition, and whether release is enabled |
 | `cumulative-emitted` | — | Cumulative emitted + max supply |
 | `supply-schedule` | — | Params + next-halving view |
 | `current-active-blocks` | — | Active-block counters for the open epoch (paginated, ascending slot) |
@@ -31,8 +30,7 @@ output. Raw `--help` captures for every command live under
 twilightd rewards-query params --node <rpc>
 twilightd rewards-query epoch-info --node <rpc>
 twilightd rewards-query epoch-reward 1 --node <rpc>
-twilightd rewards-query slot-rewards 1 --limit 10 --node <rpc>
-twilightd rewards-query claimable 1 1 1 --node <rpc>
+twilightd rewards-query pause-state --node <rpc>
 twilightd rewards-query current-active-blocks --limit 10 --node <rpc>
 twilightd rewards-query module-balances --node <rpc>
 twilightd rewards-query cumulative-emitted --node <rpc>
@@ -62,9 +60,12 @@ slot id.
   `current_epoch_end_height`, `has_pending_params`.
 - **`epoch-reward`** → `epoch_reward.minted_emission`,
   `epoch_reward.reward_pool`, `epoch_reward.allocated_amount`,
-  `epoch_reward.carry_out`, `epoch_reward.rewards[]` (per-slot).
-- **`slot-rewards`** → `rewards[].epoch_number`, `rewards[].amount`,
-  `rewards[].payout_address`, `rewards[].claimed`, `pagination.next_key`.
+  `epoch_reward.carry_out`. The embedded `epoch_reward.rewards[]` is retained in
+  the stored shape but is always empty; the obligation an epoch creates is a slot
+  entitlement.
+- **`pause-state`** → `pause_state.current_paused`, `pause_state.has_pending`,
+  `pause_state.pending_value`, `pause_state.pending_effective_height`,
+  `release_enabled`.
 - **`module-balances`** → `denom` (`utwlt`), `rewards_balance`,
   `fee_pool_balance`.
 - **`cumulative-emitted`** → `cumulative_emitted`, `max_supply`.

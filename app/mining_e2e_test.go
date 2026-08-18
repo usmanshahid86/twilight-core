@@ -228,14 +228,11 @@ func TestDefinitivePOC1SettlementEndToEnd(t *testing.T) {
 
 	// --- 9. no legacy claim path was involved anywhere ------------------------
 	//
-	// The V2 lifecycle above created no ClaimRecord and needed none. This is the
-	// evidence that the legacy surface can be retired without breaking it.
-	claims, err := a.RewardsKeeper.IterateClaimRecordsForSlot(ctx, 1, 1, 1)
-	require.NoError(t, err)
-	require.Empty(t, claims, "the definitive payout path creates no claim record")
-	_, claimFound, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 1)
-	require.NoError(t, err)
-	require.False(t, claimFound, "and none exists for the epoch it settled")
+	// This used to assert that no ClaimRecord had been created. That assertion is
+	// now unwritable, and its absence is the stronger statement: the claim store,
+	// its message, its queries and its CLI no longer exist, so the lifecycle proven
+	// above is the only way entitlement value can leave escrow. What was once a
+	// runtime check is now a property of the type system.
 
 	assertInvariants(t, a, ctx)
 

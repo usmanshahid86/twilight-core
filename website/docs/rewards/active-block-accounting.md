@@ -48,5 +48,6 @@ are deleted, so this reflects the currently-open epoch only.
 
 ## Cleanup
 
-When an epoch finalizes, its active-block rows are deleted. The carry and claim
-records persist; the counters do not.
+When an epoch finalizes, its active-block rows are deleted. The carry and the
+entitlements persist; the counters do not. The per-slot count the epoch produced
+is preserved on the entitlement.

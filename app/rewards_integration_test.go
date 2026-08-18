@@ -112,15 +112,15 @@ func TestRewardsModuleWiringAndOrdering(t *testing.T) {
 	require.Empty(t, feePoolAcc.GetPermissions())
 }
 
-// TestRewardsShortEpochFinalizeSuspendClaim drives a short epoch through the
+// TestRewardsEpochFinalizeSuspendAndRelease drives a short epoch through the
 // booted app's real keepers (real bank, real module accounts, real CoreSlot). It
 // proves: active-block credit accrues; a slot suspended mid-epoch (through the
-// real CoreSlot path) after earning credit still finalizes and stays claimable;
-// CoreSlot retains the slot row, addresses, and reward-weight row; finalization
-// mints exactly the clipped emission into the real rewards module account; a
-// claim transfers exactly that reward to the snapshotted payout address and
-// nothing to a different signer; and every rewards invariant holds against the
-// real bank.
+// real CoreSlot path) after earning credit still finalizes and keeps its
+// entitlement; CoreSlot retains the slot row, addresses, and reward-weight row;
+// finalization mints exactly the clipped emission into the real rewards module
+// account; releasing the entitlement transfers exactly that reward to the
+// snapshotted payout address and nothing to a different signer; and every rewards
+// invariant holds against the real bank.
 func TestRewardsEpochFinalizeSuspendAndRelease(t *testing.T) {
 	a := bootApp(t)
 	base := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
@@ -250,13 +250,10 @@ func TestRewardsEpochFinalizeSuspendAndRelease(t *testing.T) {
 	require.Equal(t, uint64(slot1Blocks), ent1.TotalBlocksActive,
 		"slot 1 earned only the blocks before its suspension took effect")
 
-	// The legacy path owns nothing here.
-	_, found, err = a.RewardsKeeper.GetClaimRecord(ctx2, 1, 1)
-	require.NoError(t, err)
-	require.False(t, found, "V2 finalization creates no claim record")
-	require.Error(t, a.RewardsKeeper.ClaimRewards(ctx2, &rewardstypes.MsgClaimRewards{
-		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 1,
-	}), "the legacy claim path must be unable to pay a V2 obligation")
+	// There is no longer a legacy path to own anything here. The claim store, its
+	// message and its queries were retired once Settlement became the only way
+	// entitlement value leaves escrow, so the constrained release below is not one
+	// of two ways to pay this obligation — it is the only one.
 
 	// === Release slot 1 (the suspended slot) through the constrained boundary. ===
 	//

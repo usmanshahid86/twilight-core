@@ -160,34 +160,3 @@ func (k Keeper) SetFinalizedEpoch(ctx context.Context, epoch types.EpochReward) 
 	}
 	return k.FinalizedEpochs.Set(ctx, epoch.EpochNumber, epoch)
 }
-
-func (k Keeper) GetClaimRecord(ctx context.Context, slotID, epoch uint64) (types.EligibleSlotReward, bool, error) {
-	value, err := k.ClaimRecords.Get(ctx, collections.Join(slotID, epoch))
-	if errors.Is(err, collections.ErrNotFound) {
-		return types.EligibleSlotReward{}, false, nil
-	}
-	return value, err == nil, err
-}
-
-func (k Keeper) SetClaimRecord(ctx context.Context, reward types.EligibleSlotReward) error {
-	if reward.SlotId == 0 || reward.EpochNumber == 0 {
-		return types.ErrInvalidState.Wrap("claim record requires nonzero slot and epoch")
-	}
-	if err := k.validateRewardRecord("claim record", &reward); err != nil {
-		return err
-	}
-	return k.ClaimRecords.Set(ctx, collections.Join(reward.SlotId, reward.EpochNumber), reward)
-}
-
-func (k Keeper) IterateClaimRecordsForSlot(ctx context.Context, slotID, startEpoch, endEpoch uint64) ([]types.EligibleSlotReward, error) {
-	if slotID == 0 || startEpoch == 0 || endEpoch < startEpoch {
-		return nil, types.ErrInvalidState.Wrap("invalid claim record range")
-	}
-	rows := make([]types.EligibleSlotReward, 0)
-	rng := collections.NewPrefixedPairRange[uint64, uint64](slotID).StartInclusive(startEpoch).EndInclusive(endEpoch)
-	err := k.ClaimRecords.Walk(ctx, rng, func(_ collections.Pair[uint64, uint64], reward types.EligibleSlotReward) (bool, error) {
-		rows = append(rows, reward)
-		return false, nil
-	})
-	return rows, err
-}

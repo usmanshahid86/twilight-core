@@ -22,19 +22,21 @@ subsidy summed over the epoch (clipped by the supply cap), builds a pool, and
 allocates it by each slot's active-block participation. The minted amount depends on
 blocks and the halving tier — not on the slot count.
 
-## Rewards are claimed, not auto-paid
+## Rewards are escrowed, not auto-paid
 
-Finalization writes immutable per-slot **claim records** snapshotting each slot's
-payout address and amount. Anyone can submit a claim transaction; funds always go
-to the snapshotted payout address. Claims move already-minted balance and never
-change total supply.
+Finalization writes one immutable per-slot **entitlement** snapshotting the slot's
+payout address and the amount it earned. The value stays in the rewards module
+account until **settlement** releases it: `x/mining` pays the epoch's participants
+and returns the remainder to the snapshotted payout address. A release moves
+already-minted balance and never changes total supply.
 
 ## Two authorities
 
 - **Authority** (CoreSlot) — admits slots and queues rewards params updates
   (activated at the next epoch boundary).
-- **Emergency authority** (CoreSlot) — can immediately pause/resume rewards
-  emissions, settlement, or claims.
+- **Emergency authority** (CoreSlot) — can pause and resume rewards. There is one
+  canonical pause state, effective at the start of the next block; it stops accrual
+  and release together, but not epoch time.
 
 Neither can change the immutable `native_denom` or `max_supply`.
 

@@ -3,6 +3,8 @@ package types_test
 import (
 	"testing"
 
+	"github.com/cosmos/cosmos-sdk/codec"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/stretchr/testify/require"
 
 	"github.com/twilight-project/twilight-core/x/rewards/types"
@@ -10,16 +12,14 @@ import (
 
 // Fresh genesis carries no closed-epoch state.
 //
-// A fresh chain has finalized nothing, so it has no archive, no obligations in
-// either representation, and owes nothing. Four rules, one fact.
+// A fresh chain has finalized nothing, so it has no archive, no obligations, and
+// owes nothing. Three rules, one fact.
 //
-// The claim-record rule is the one worth being explicit about. It is NOT the
-// legacy retirement work package: ClaimRewards, its queries and its CLI all
-// remain, and continue to serve state seeded directly for explicitly legacy
-// regression coverage. What it closes is the only remaining way a conforming POC1
-// chain could come to hold a claim record at all — V2 finalization creates
-// entitlements and nothing else, so genesis was the last source. With it closed, a
-// payable claim and a payable entitlement can no longer coexist over one escrow.
+// The claim ledger that used to need a fourth rule no longer exists: the message,
+// its queries, its CLI, its event and its store prefix were removed, and the
+// genesis field number is reserved. What remains to prove is that its absence is
+// enforced at the decode boundary rather than merely undocumented, which is what
+// TestARetiredClaimLedgerCannotEnterThroughGenesis covers.
 
 func closedEpochRecord(t *testing.T, genesis *types.GenesisState) *types.EpochReward {
 	t.Helper()
@@ -45,20 +45,6 @@ func TestFreshGenesisCarriesNoClosedEpochState(t *testing.T) {
 			reason: "fresh genesis carries 1 finalized epochs",
 			mutate: func(t *testing.T, g *types.GenesisState) {
 				g.FinalizedEpochs = []*types.EpochReward{closedEpochRecord(t, g)}
-			},
-		},
-		{
-			name:   "a legacy claim record",
-			reason: "fresh genesis carries 1 legacy claim records",
-			mutate: func(_ *testing.T, g *types.GenesisState) {
-				// Deliberately NOT paired with a finalized epoch. Pairing it would be
-				// well-formed under the old rules and would now be refused for the
-				// archive instead, so the claim rule would never be reached.
-				g.ClaimRecords = []*types.EligibleSlotReward{{
-					SlotId: 1, EpochNumber: 1,
-					OperatorAddress: testAddress(2), PayoutAddress: testAddress(3),
-					RewardWeight: "1.000000000000000000", EffectiveWeight: "10", Amount: "1",
-				}}
 			},
 		},
 		{
@@ -120,8 +106,65 @@ func TestDefaultGenesisIsAConformingFreshDocument(t *testing.T) {
 	genesis := types.DefaultGenesis()
 	require.NoError(t, genesis.Validate())
 	require.Empty(t, genesis.FinalizedEpochs)
-	require.Empty(t, genesis.ClaimRecords)
 	require.Empty(t, genesis.SlotEntitlements)
 	require.Equal(t, "0", genesis.OutstandingEntitlementLiability)
 	require.Equal(t, "0", genesis.State.CarryForwardRemainder)
+}
+
+// TestARetiredClaimLedgerCannotEnterThroughGenesis closes the last door the
+// retired claim path could have come back through.
+//
+// Removing a proto field does not by itself remove the state: an operator holding
+// a pre-retirement export still has a document with a `claim_records` array in it,
+// describing obligations this chain can no longer pay. The dangerous outcome is
+// not a refusal — it is a SILENT one, where the array is skipped as unknown and a
+// chain starts having quietly discarded a ledger somebody was owed under.
+//
+// So the property under test is that the decode fails, and fails naming the field.
+// Genesis import goes through cdc.UnmarshalJSON (x/rewards/module.go), which is
+// strict about unknown fields; this pins that strictness as a retirement guarantee
+// rather than leaving it as an incidental property of the codec.
+//
+// The reserved field number is the other half: it stops a future field from
+// inheriting the wire bytes an old binary document would decode into it.
+func TestARetiredClaimLedgerCannotEnterThroughGenesis(t *testing.T) {
+	registry := codectypes.NewInterfaceRegistry()
+	types.RegisterInterfaces(registry)
+	cdc := codec.NewProtoCodec(registry)
+
+	for _, tc := range []struct {
+		name string
+		doc  string
+	}{
+		{
+			name: "a populated legacy ledger",
+			doc:  `{"claim_records":[{"slot_id":"1","epoch_number":"1","amount":"5"}]}`,
+		},
+		{
+			// An empty array is the shape a pre-retirement export of a chain that
+			// never wrote a claim record produces. It carries no value, so skipping
+			// it would look harmless — but accepting the field at all would mean the
+			// populated case above is rejected only by luck of its contents.
+			name: "an empty legacy ledger",
+			doc:  `{"claim_records":[]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var genesis types.GenesisState
+			err := cdc.UnmarshalJSON([]byte(tc.doc), &genesis)
+			require.Error(t, err, "a genesis document carrying the retired claim ledger must be refused, not silently stripped")
+			require.Contains(t, err.Error(), "claim_records",
+				"the refusal must name the retired field so an operator can see what was rejected")
+		})
+	}
+
+	// Control. Without this the cases above would also pass against a codec that
+	// rejects every document, which would prove nothing about the retired field.
+	t.Run("a conforming document still decodes", func(t *testing.T) {
+		encoded, err := cdc.MarshalJSON(types.DefaultGenesis())
+		require.NoError(t, err)
+
+		var genesis types.GenesisState
+		require.NoError(t, cdc.UnmarshalJSON(encoded, &genesis))
+	})
 }

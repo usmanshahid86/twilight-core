@@ -41,11 +41,11 @@ twilightd rewards-query params --node <rpc> --output json | jq .epoch_settlement
 If `false` and unintended, `resume --settlement` via the emergency authority. The
 open epoch finalizes once at the first enabled EndBlock past its boundary.
 
-## Claims failing for everyone
+## Releases failing for everyone
 
-Check `claims_enabled`. If paused intentionally (incident containment), communicate
-the window. If not, `resume --claims`. Per-claim failures (already claimed,
-insufficient balance) are not incidents — see
+Check the canonical pause state. If paused intentionally (incident containment),
+communicate the window; if not, `resume` via the emergency authority. Individual
+settlement rejections are not incidents — see
 [Troubleshooting](../rewards/troubleshooting.md).
 
 ## Wrong params queued
@@ -56,9 +56,10 @@ params apply only to the next epoch onward and can be re-queued.
 
 ## Module-balance coverage failure
 
-If `module-balances.rewards_balance` < unclaimed + carry, stop and investigate —
-this should not occur under the rewards accounting invariants (the coverage invariant holds after
-every finalize/claim). Treat as a critical accounting defect.
+If `module-balances.rewards_balance` < outstanding entitlements + carry, stop and
+investigate — this should not occur under the rewards accounting invariants (the
+coverage invariant holds after every finalize and every release). Treat as a
+critical accounting defect.
 
 ## Key compromise
 

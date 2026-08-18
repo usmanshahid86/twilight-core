@@ -9,21 +9,10 @@ option go_package = "github.com/twilight-project/twilight-core/x/rewards/types";
 
 service Msg {
   option (cosmos.msg.v1.service) = true;
-  rpc ClaimRewards(MsgClaimRewards) returns (MsgClaimRewardsResponse);
   rpc UpdateRewardsParams(MsgUpdateRewardsParams) returns (MsgUpdateRewardsParamsResponse);
   rpc PauseRewards(MsgPauseRewards) returns (MsgPauseRewardsResponse);
   rpc ResumeRewards(MsgResumeRewards) returns (MsgResumeRewardsResponse);
 }
-
-message MsgClaimRewards {
-  option (cosmos.msg.v1.signer) = "signer";
-  option (amino.name) = "twilight/rewards/MsgClaimRewards";
-  string signer = 1;
-  uint64 slot_id = 2;
-  uint64 start_epoch = 3;
-  uint64 end_epoch = 4;
-}
-message MsgClaimRewardsResponse {}
 
 message MsgUpdateRewardsParams {
   option (cosmos.msg.v1.signer) = "authority";

@@ -19,9 +19,9 @@ import { constants } from '@site/docs/_snippets/constants.mdx';
 
 :::warning utwlt is the only accounting denom
 `{constants.nativeDenom}` is the only denomination used by balances, minting,
-rewards, and claims. `{constants.displayDenom}` / `{constants.symbol}` /
+rewards, and settlement. `{constants.displayDenom}` / `{constants.symbol}` /
 "{constants.name}" are **display metadata only** and never appear in accounting
-state. Rewards mint only `{constants.nativeDenom}`; claims pay only
+state. Rewards mint only `{constants.nativeDenom}`; releases pay only
 `{constants.nativeDenom}`. CLI and query outputs are in `{constants.nativeDenom}`
 unless explicitly formatted otherwise.
 :::
@@ -41,7 +41,7 @@ fixture, not a production premine — see [Localnet](localnet.md) and
 
 | Account | Permission | Purpose |
 |---|---|---|
-| `{constants.rewardsModuleAccount}` | `Minter` | Holds minted epoch emission and unclaimed rewards; the only minter on the chain |
+| `{constants.rewardsModuleAccount}` | `Minter` | Holds minted epoch emission and unreleased entitlements; the only minter on the chain |
 | `{constants.feePoolModuleAccount}` | _(none)_ | Dormant fee plumbing; holds nothing while fees are disabled |
 
 Module-account permissions are declared in `app/config.go`. The

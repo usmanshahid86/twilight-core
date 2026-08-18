@@ -34,7 +34,7 @@ Local end-to-end and chaos checks:
 
 ```bash
 make localnet-smoke           # 4-node localnet sanity
-make localnet-rewards-smoke   # rewards finalize + claim
+make localnet-rewards-epoch-smoke  # rewards epoch finalization + entitlements
 make drills                   # lifecycle + restart-rotation + quorum drills
 ```
 

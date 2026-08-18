@@ -9,16 +9,16 @@ created at genesis. See also [Accounts & Denoms](../chain/accounts-and-denoms.md
 
 | Account | Permission | Holds | Used by |
 |---|---|---|---|
-| `rewards` | `Minter` | minted rewards before allocation; unclaimed rewards and carry-forward after finalization | mint at finalization; send on claim/treasury |
+| `rewards` | `Minter` | minted rewards before allocation; unreleased entitlements and carry-forward after finalization | mint at finalization; send on release/treasury |
 | `rewards_fee_pool` | _(none)_ | nothing (dormant) | reserved for future fee plumbing |
 
 ## How each account is used
 
 - **`rewards`** is the only `Minter` on the chain. At finalization the bank
-  keeper mints the epoch emission into it; claims send from it to payout
-  addresses; the optional treasury transfer sends from it. The
-  module-balance-coverage invariant requires its balance to always cover unclaimed
-  records + carry.
+  keeper mints the epoch emission into it; settlement releases send from it to
+  participants and payout addresses; the optional treasury transfer sends from it.
+  The module-balance-coverage invariant requires its balance to always cover the
+  outstanding entitlement liability + carry.
 - **`rewards_fee_pool`** has **no** permissions and holds nothing while fees are
   disabled (v1). It exists so a future fee-enabled upgrade has a destination
   without a genesis/store rewrite.

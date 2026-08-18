@@ -176,54 +176,6 @@ func (q queryServer) EpochReward(ctx context.Context, req *types.QueryEpochRewar
 	return &types.QueryEpochRewardResponse{EpochReward: &epoch}, nil
 }
 
-func (q queryServer) SlotRewards(ctx context.Context, req *types.QuerySlotRewardsRequest) (*types.QuerySlotRewardsResponse, error) {
-	if req == nil || req.SlotId == 0 {
-		return nil, status.Error(codes.InvalidArgument, "slot id must be positive")
-	}
-	// ClaimRecords is keyed (slotID, epoch); prefix by slot yields ascending epoch order.
-	rewards, pageRes, err := query.CollectionPaginate(
-		ctx, q.ClaimRecords, req.Pagination,
-		func(_ collections.Pair[uint64, uint64], reward types.EligibleSlotReward) (*types.EligibleSlotReward, error) {
-			r := reward
-			return &r, nil
-		},
-		query.WithCollectionPaginationPairPrefix[uint64, uint64](req.SlotId),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return &types.QuerySlotRewardsResponse{Rewards: rewards, Pagination: pageRes}, nil
-}
-
-func (q queryServer) ClaimableRewards(ctx context.Context, req *types.QueryClaimableRewardsRequest) (*types.QueryClaimableRewardsResponse, error) {
-	if req == nil || req.SlotId == 0 || req.StartEpoch == 0 || req.EndEpoch < req.StartEpoch {
-		return nil, status.Error(codes.InvalidArgument, "invalid slot id or epoch range")
-	}
-	rows, err := q.IterateClaimRecordsForSlot(ctx, req.SlotId, req.StartEpoch, req.EndEpoch)
-	if err != nil {
-		return nil, err
-	}
-	total := sdkmath.ZeroInt()
-	rewards := make([]*types.EligibleSlotReward, 0, len(rows))
-	for i := range rows {
-		reward := rows[i]
-		if reward.Claimed {
-			continue
-		}
-		amount, err := types.ParseAmountString("claim amount", reward.Amount)
-		if err != nil {
-			return nil, err
-		}
-		if !amount.IsPositive() {
-			continue
-		}
-		total = total.Add(amount)
-		r := reward
-		rewards = append(rewards, &r)
-	}
-	return &types.QueryClaimableRewardsResponse{Rewards: rewards, TotalAmount: total.String()}, nil
-}
-
 func (q queryServer) CumulativeEmitted(ctx context.Context, _ *types.QueryCumulativeEmittedRequest) (*types.QueryCumulativeEmittedResponse, error) {
 	state, err := q.GetState(ctx)
 	if err != nil {

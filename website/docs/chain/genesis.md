@@ -39,7 +39,7 @@ Fresh default rewards genesis (from `x/rewards/types/defaults.go`):
 - `state` — `current_epoch = 1`, `current_epoch_start_height = 1`,
   `cumulative_emitted = "0"`, `carry_forward_remainder = "0"`.
 - `current_epoch_config` — the epoch snapshot built from `params`.
-- no pending params, no finalized epochs, no claim records.
+- no pending params, no finalized epochs, no slot entitlements.
 
 No premine: default genesis sets `cumulative_emitted = 0` and adds no rewards
 balances. Total supply begins at zero and rises only through emission.

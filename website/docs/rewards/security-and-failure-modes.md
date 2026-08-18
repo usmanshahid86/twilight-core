@@ -14,13 +14,14 @@ are exercised in tests rather than auto-run on-chain.
 |---|---|---|
 | `SupplyCapInvariant` | bank `utwlt` supply ≤ `max_supply` | over-mint / cap breach |
 | `CumulativeEmittedInvariant` | `cumulative_emitted` ≤ `max_supply` | accounting drift past the cap |
-| `ModuleBalanceCoverageInvariant` | rewards balance ≥ unclaimed claim records + carry | the module cannot cover what it owes |
+| `ModuleBalanceCoverageInvariant` | rewards balance ≥ outstanding entitlements + carry | the module cannot cover what it owes |
+| `EntitlementLiabilityInvariant` | the O(1) liability accumulator equals the full scan of entitlement records | the accumulator drifted from what it summarizes |
 | `DenomCorrectnessInvariant` | native/fee denom = `utwlt`; no display metadata in amounts | a display denom leaked into accounting |
-| `ClosedEpochImmutabilityInvariant` | finalized epoch aggregates carry no claim markers | a closed epoch was mutated |
+| `ClosedEpochImmutabilityInvariant` | finalized aggregates embed no per-slot rows; no entitlement releases past its bound | a closed epoch was mutated |
 
-After each finalization and claim, module-balance coverage is expected to hold:
-`balance ≥ unclaimed + carry`. These invariants are also checked in app and localnet validation against real
-bank state.
+After each finalization and each release, module-balance coverage is expected to
+hold: `balance ≥ outstanding entitlements + carry`. These invariants are also
+checked in app and localnet validation against real bank state.
 
 ## Fail-closed lifecycle
 
@@ -45,20 +46,18 @@ retains its data). Monitor for repeated EndBlock errors in node logs.
 ## Determinism
 
 No rewards state transition reads wall-clock time, randomness, environment
-variables, or CometBFT-local config. Finalization and claims iterate sorted
+variables, or CometBFT-local config. Finalization and release iterate sorted
 collections (never raw Go map order). Cross-node app-hash agreement after
-finalization and after claim is the multi-node evidence.
+finalization is the multi-node evidence.
 
 ## Failure-mode reference
 
 | Symptom | Likely cause | Check |
 |---|---|---|
-| Epoch not finalizing | settlement paused, or boundary not reached | `epoch-info` (`current_epoch_end_height`, height); params `epoch_settlement_enabled` |
-| Mint is zero at finalization | emissions paused, or subsidy floored to 0 near cap | params `emissions_enabled`; `next-halving` |
-| Claim rejected | claims paused, not finalized, already claimed, range too large, or insufficient module balance | `params`; `epoch-reward`; `slot-rewards`; `module-balances` |
-| Double claim rejected | record already `claimed` | `slot-rewards <slot>` shows `claimed: true` |
+| Epoch not finalizing | boundary not reached | `epoch-info` (`current_epoch_end_height`, height) |
+| Mint is zero at finalization | rewards paused, or subsidy floored to 0 near cap | `pause-state`; `next-halving` |
+| Release rejected | rewards paused, epoch not finalized, no entitlement, or the amount exceeds what remains | `pause-state`; `epoch-reward`; `module-balances` |
 | Params update rejected | immutable field changed, unsupported feature, or wrong authority | see [Parameters](params.md#v1-feature-guards) |
-| `claimable` returns empty | nothing finalized for the range, or already claimed | `epoch-reward`, `slot-rewards` |
 | App-hash divergence across nodes | **critical** — a state fork | stop, investigate before continuing; see [Localnet](../chain/localnet.md) |
 | Pagination returns empty `next_key` | last page reached | normal; stop paging |
 
@@ -67,9 +66,8 @@ finalization and after claim is the multi-node evidence.
 - **Authority key compromise** (CoreSlot authority): could queue malicious params
   at the next boundary, but **cannot** change `native_denom`/`max_supply`
   (immutable) and cannot pause (that is emergency authority). Rotate via CoreSlot.
-- **Emergency key compromise:** could pause emissions/settlement/claims
-  (denial-of-service on rewards), but cannot mint, redirect payouts, or change
-  immutable fields. Rotate via CoreSlot.
-- **Arbitrary claim signer:** harmless — funds only ever go to the snapshotted
-  payout address; a malicious signer pays gas to deliver someone else's reward to
-  the correct destination.
+- **Emergency key compromise:** could pause rewards (denial-of-service on accrual
+  and release), but cannot mint, redirect payouts, or change immutable fields.
+  Rotate via CoreSlot.
+- **Payout destination:** an operator's remainder can only reach the payout
+  address snapshotted at finalization. No caller can redirect it.

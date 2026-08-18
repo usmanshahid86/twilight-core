@@ -168,7 +168,6 @@ cat > "$MANIFEST" <<'JSON'
       "/twilight.coreslot.v1.MsgUpdateParams"
     ],
     "rewards": [
-      "/twilight.rewards.v1.MsgClaimRewards",
       "/twilight.rewards.v1.MsgUpdateRewardsParams",
       "/twilight.rewards.v1.MsgPauseRewards",
       "/twilight.rewards.v1.MsgResumeRewards"

@@ -1,9 +1,24 @@
 # ADR-0002: Rewards emission and supply-threshold halving
 
-- **Status:** Accepted — implemented in [`x/rewards`](../../../x/rewards)
+- **Status:** Accepted — implemented in [`x/rewards`](../../../x/rewards). The
+  **claim-based payout** decision recorded here was superseded in V2 (see below);
+  every other decision in this record still holds.
 - **Date:** 2026-06-29
 - **Relates to:** [architecture overview](../overview.md),
   [ADR-0001](0001-coreslot-poa.md) (reward weight is separate state from consensus power)
+
+:::note Superseded in part — payout mechanism
+This record describes the V1 **claim** model. V2 replaced it: finalization now writes a
+per-`(slot, epoch)` **`SlotEntitlement`**, and value leaves escrow only through **settlement**
+in `x/mining`, which pays the epoch's participants and returns the remainder to the payout
+address snapshotted at finalization. The claim message, its queries, its REST routes, its event
+and its store prefix have all been removed, and the prefix is permanently reserved.
+
+Everything else this record decides — bounded supply-threshold emission, epoch-level minting,
+uniform active-block allocation, carry-forward remainder, zero premine, the omission of
+`x/distribution` — is unchanged. The sections below are retained as the historical record of the
+V1 decision; read them as history, not as current behavior.
+:::
 
 ## Summary
 

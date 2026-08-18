@@ -8,7 +8,7 @@ title: Status & Validation
 
 Twilight Core is under active development. The current implementation provides the
 **CoreSlot** Proof-of-Authority validator lifecycle and a bounded **Rewards**
-emission and claims system denominated in `utwlt`. It is **not yet mainnet-ready**
+emission and settlement system denominated in `utwlt`. It is **not yet mainnet-ready**
 and has **not undergone an external security audit**.
 
 This page is a plain-language summary of what has been validated, and how — and,
@@ -27,13 +27,14 @@ Each behavior below is exercised by the evidence type named next to it.
 | Epoch finalization and active-block reward allocation (`amount = pool × blocks_active / Σ blocks_active`) | keeper tests and integration drills |
 | Carry-forward remainder accounting | keeper tests and branch-coverage drills |
 | Treasury split, when enabled | keeper tests and branch-coverage drills |
-| Claim replay rejection, claim-range atomicity, and snapshotted payout-address payment | keeper tests and integration drills |
-| Rewards accounting identity — treasury, claimed rewards, unclaimed rewards, and carry-forward reconcile to cumulative emitted supply | invariant tests checked against real module, treasury, and payout balances |
+| Entitlement release — over-release rejection, release against a missing entitlement, and payment to the snapshotted payout address | keeper tests and integration drills |
+| Settlement end to end — an epoch's entitlement released to participants by chunk, then finalized with the remainder returned to the operator | application-level end-to-end test with exact economics |
+| Rewards accounting identity — treasury, released rewards, unreleased entitlements, and carry-forward reconcile to cumulative emitted supply | invariant tests checked against real module, treasury, and payout balances |
 | Export / import determinism of full application state | application-level round-trip test |
-| Local multi-node finalization and claim, with cross-node app-hash agreement | four-node localnet validation |
+| Local multi-node epoch finalization, with cross-node app-hash agreement | four-node localnet validation |
 | Long-run determinism and exact accounting over many epochs on a zero-premine chain | endurance soak testing |
 | Cross-host fault tolerance — peer loss, network partition, and quorum-loss safe-halt, each with recovery | fault-tolerance drills on a live multi-host network |
-| Off-happy-path economic branches (halving crossing, non-zero carry, non-uniform participation, treasury, active-set churn, claim-range cap) | branch-coverage drills |
+| Off-happy-path economic branches (halving crossing, non-zero carry, non-uniform participation, treasury, active-set churn) | branch-coverage drills |
 | Module invariants across long, random operation sequences | randomized state-machine simulations |
 
 ## Known limitations
@@ -47,7 +48,7 @@ Each behavior below is exercised by the evidence type named next to it.
 - **The production on-chain upgrade procedure is not yet exercised** (upgrade
   handlers and store migrations).
 - **Weighted rewards and fee-funded rewards are not active.** They are code-gated
-  and rejected until implemented. The reward weight recorded on a claim record is
+  and rejected until implemented. The reward weight recorded on an entitlement is
   metadata only and has no payout effect — payout is by
   [active-block participation](../rewards/economics.mdx).
 - **Code-gated behavior is not user-facing functionality.** Anything not enabled

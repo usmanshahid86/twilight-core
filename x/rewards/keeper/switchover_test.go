@@ -37,35 +37,9 @@ func TestFinalizationCreatesExactlyOnePayableRepresentation(t *testing.T) {
 		require.Truef(t, found, "slot %d must have an entitlement", slotID)
 		require.Equal(t, "0", entitlement.ReleasedAmount)
 
-		_, found, err = k.GetClaimRecord(ctx, slotID, 1)
-		require.NoError(t, err)
-		require.Falsef(t, found, "slot %d must have no claim record for a V2 epoch", slotID)
+		// There is no second payable representation left to exclude: the claim store
+		// was retired, so an entitlement is the only form by construction.
 	}
-}
-
-// TestLegacyClaimCannotPayANewObligation closes the economic bypass.
-//
-// ClaimRewards is deliberately still reachable — retiring it belongs to a later
-// work package — so what matters is that it has nothing to act on. A claim for a
-// V2 epoch fails because no record exists for it, not because the surface was
-// removed.
-func TestLegacyClaimCannotPayANewObligation(t *testing.T) {
-	k, ctx, bank, _ := setupFinalization(t, false)
-	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
-	sendsAfterFinalization := bank.sendCalls
-
-	err := k.ClaimRewards(ctx, &types.MsgClaimRewards{
-		Signer: addr(1), SlotId: 1, StartEpoch: 1, EndEpoch: 1,
-	})
-	require.ErrorIs(t, err, types.ErrInvalidState)
-	require.Equal(t, sendsAfterFinalization, bank.sendCalls,
-		"the legacy path must move no value for a V2 obligation")
-
-	// And the entitlement is untouched by the attempt.
-	entitlement, found, err := k.GetSlotEntitlement(ctx, 1, 1)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, "0", entitlement.ReleasedAmount)
 }
 
 // TestFinalizationBindsTheTargetRewardConfig proves the economics come from the
@@ -446,53 +420,4 @@ func slotWithID(slot coreslottypes.CoreSlot, slotID uint64) coreslottypes.CoreSl
 	slot.PayoutAddress = addr(byte(50 + slotID))
 	slot.OperatorAddress = addr(byte(60 + slotID))
 	return slot
-}
-
-// TestLegacyClaimStateAndSolvencyDoNotMix is an EXPLICITLY LEGACY-ONLY fixture.
-//
-// The state it builds is unreachable on a conforming POC1 chain, and the test
-// exists to keep it that way by showing what it would cost.
-//
-// The solvency assertion states that escrow holds exactly what the module
-// believes it owes: outstanding entitlement liability plus carry. A legacy claim
-// record is an obligation the accumulator does not count, so escrow drained by
-// paying one no longer matches, and the chain reports itself insolvent.
-//
-// # Why a conforming chain cannot reach this
-//
-// Two sources, both now closed. V2 finalization creates entitlements and nothing
-// else, so no running chain produces a claim record. And fresh genesis refuses a
-// non-empty claim collection outright, so no chain can start holding one. The only
-// remaining way in is the direct keeper write below, which is what makes this
-// fixture legacy-only rather than a scenario an operator could encounter.
-//
-// This is deliberately NOT the legacy retirement work package. ClaimRewards, its
-// queries and its CLI all remain reachable, and this test is part of why they can
-// remain reachable safely: the mixed state they would need is unconstructible
-// through any admitted path, and fail-closed if it somehow arose.
-func TestLegacyClaimStateAndSolvencyDoNotMix(t *testing.T) {
-	k, ctx, bank, _ := setupFinalization(t, false)
-	require.NoError(t, k.EndBlock(ctx.WithBlockHeight(finalizationEndHeight)))
-
-	// A legacy obligation the accumulator does not know about, written straight to
-	// the store because no admitted path produces one, and paid out of the escrow
-	// the entitlements are relying on.
-	params, err := k.GetParams(ctx)
-	require.NoError(t, err)
-	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 1)))
-	require.NoError(t, k.ClaimRewards(ctx, &types.MsgClaimRewards{
-		Signer: addr(1), SlotId: 1, StartEpoch: 1, EndEpoch: 1,
-	}))
-
-	// Escrow has now fallen below what the entitlements still claim.
-	liability, err := k.GetOutstandingEntitlementLiability(ctx)
-	require.NoError(t, err)
-	balance := bank.GetBalance(ctx, moduleAccountAddress(), params.NativeDenom).Amount
-	require.True(t, balance.LT(liability),
-		"the legacy payment left escrow short of the entitlements it still owes")
-
-	// The coverage invariant reports it, which is what an operator would see.
-	_, broken := k.ModuleBalanceCoverageInvariant()(ctx)
-	require.True(t, broken,
-		"paying a legacy claim beside live entitlements is a solvency defect the chain reports")
 }

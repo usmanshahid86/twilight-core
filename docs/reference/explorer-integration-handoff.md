@@ -60,8 +60,8 @@ Type URLs are correct and registered as `sdk.Msg`:
 - coreslot (9): `/twilight.coreslot.v1.{MsgRegisterCoreSlot, MsgActivateCoreSlot,
   MsgInactivateCoreSlot, MsgSuspendCoreSlot, MsgRemoveCoreSlot, MsgRotateConsensusKey,
   MsgUpdatePayoutAddress, MsgUpdateOperatorMetadata, MsgUpdateParams}`
-- rewards (4): `/twilight.rewards.v1.{MsgClaimRewards, MsgUpdateRewardsParams,
-  MsgPauseRewards, MsgResumeRewards}`
+- rewards (3): `/twilight.rewards.v1.{MsgUpdateRewardsParams, MsgPauseRewards,
+  MsgResumeRewards}`
 
 Two supported decode paths:
 1. **Server-side (easy):** REST `GET /cosmos/tx/v1beta1/txs/{hash}` — the chain decodes
@@ -82,9 +82,8 @@ Two supported decode paths:
 Full inventory: `docs/reference/rest-routes.md`. Highlights an indexer relies on:
 
 **x/rewards** (`twilight.rewards.v1.Query`, base `/twilight/rewards/v1`): `params`,
-`epoch-info`, `next-halving`, `epochs/{epoch_number}`, `slots/{slot_id}/rewards`,
-`slots/{slot_id}/claimable`, `cumulative-emitted`, `supply-schedule`,
-`current-epoch/active-blocks`, `module-balances`.
+`epoch-info`, `next-halving`, `epochs/{epoch_number}`, `cumulative-emitted`,
+`supply-schedule`, `current-epoch/active-blocks`, `module-balances`.
 
 **x/coreslot** (`twilight.coreslot.v1.Query`, base `/twilight/coreslot/v1`): `params`,
 `slots/{slot_id}`, `slots`, **`active-slots`**, `operators/{operator_address}`,
@@ -94,15 +93,9 @@ Full inventory: `docs/reference/rest-routes.md`. Highlights an indexer relies on
 Query footguns the design MUST account for:
 - **`active-slots` not `slots/active`** — the latter collides with `slots/{slot_id}` and
   returns 400 (parsed as `slot_id="active"`).
-- **`slot-rewards` / `SlotRewards` paginates ascending by epoch.** A fixed `--limit` page
-  drops the most recent epochs once the chain exceeds one page — do NOT use it to find a
-  recent epoch's claim status. (This exact bug produced false failures in the soak.) Use
-  `ClaimableRewards` (targeted epoch range) or page to the key.
-- **`ClaimableRewards` requires `start_epoch` & `end_epoch`** (query params) and returns
-  **only UNCLAIMED** records (claimed ones are filtered out). Empty ⇒ claimed (or none).
 - **`EpochReward` (`epochs/{n}`) returns 404** for an epoch that isn't finalized yet.
-- Authoritative "is this slot-epoch claimed?" lives in **ClaimRecords** (via
-  `slot-rewards`/`claimable`), NOT in the `EpochReward` snapshot's embedded rewards.
+- **`EpochReward.rewards[]` is empty** and is not the per-slot obligation. The obligation a
+  finalized epoch creates is a `SlotEntitlement`; see the retirement note in §6.
 - Rewards **amounts are strings** (not `cosmos.base.v1beta1.Coin`); denom is `utwlt`.
 
 ## 6. Events (exact emitted strings — for event projections)
@@ -114,7 +107,6 @@ Verified from `x/{rewards,coreslot}/keeper/events.go` + the `types` constants. E
 - `epoch_finalized` — `epoch`, `start_height`, `end_height`, `minted_emission`,
   `cumulative_emitted`, `reward_pool`, `allocated`, `carry_out`, `eligible_slots`,
   `distribution_method`
-- `reward_claimed` — `signer`, `slot_id`, `start_epoch`, `end_epoch`, `amount`, `payout_count`
 - `treasury_paid` — `payout_address`, `amount`
 - `params_update_queued`, `params_activated` — params governance (authority)
 - `rewards_paused`, `rewards_resumed` — emergency pause state
@@ -156,6 +148,31 @@ An indexer that must ingest history from a pre-V2 chain is the one case that nee
 both spellings, and that belongs in the indexer's own decoding layer rather than in
 the node.
 
+### V2 breaking change — the legacy claim surface is retired
+
+The claim path is gone from the chain. Nothing about it is deprecated-but-present:
+the message, its queries, its REST routes, its event and its store prefix were all
+removed, and the prefix is permanently reserved.
+
+| Surface | Status |
+|---|---|
+| `/twilight.rewards.v1.MsgClaimRewards` | removed — no longer registered, no longer decodable |
+| `SlotRewards` / `slots/{slot_id}/rewards` | removed — the gateway answers **501** |
+| `ClaimableRewards` / `slots/{slot_id}/claimable` | removed — the gateway answers **501** |
+| `reward_claimed` event | never emitted again |
+| `GenesisState.claim_records` (field 4) | removed; the field number is reserved |
+| `ClaimRecord` store prefix `0x07` | retired permanently and never reused |
+
+What replaced it: a finalized epoch creates one **`SlotEntitlement`** per eligible
+slot, held in the rewards module account. Value leaves escrow only through
+**settlement** in `x/mining` — `MsgSubmitSettlementChunk` pays participants and
+`MsgFinalizeSettlement` returns the remainder to the operator's snapshotted payout
+address. An indexer that models payouts must project settlement, not claims.
+
+An indexer ingesting pre-V2 history still needs the old decoders for those historical
+blocks; as with the rotation rename, that belongs in the indexer's decoding layer, not
+in the node.
+
 ## 7. Rewards economics (so rewards pages match the chain)
 
 - Epoch-based emission: each epoch finalizes and mints `minted_emission` into the rewards
@@ -163,7 +180,8 @@ the node.
 - **Halving is by supply threshold**, not block height (see `supply-schedule` /
   `next-halving`). Don't model it as a fixed block-height halving.
 - Per-slot distribution: each epoch's emission is split across eligible active slots by
-  reward weight; claimable per (slot, epoch) until claimed. Claims can span an epoch range.
+  active-block participation, creating one `SlotEntitlement` per (slot, epoch) that is
+  held until settlement releases it.
 - Module accounting is queryable via `module-balances` (rewards + fee-pool balances).
 - Premine is configurable (devnet may have funded accounts; the soak ran zero-premine).
 
@@ -186,12 +204,11 @@ the node.
 2. Does it decode custom Msgs via the descriptor set or the REST tx service (not hand-rolled
    or assuming upstream TS bindings)?
 3. Does it use hex (not bech32 valcons) for CoreSlot consensus-address lookups?
-4. Does it avoid the `slot-rewards` fixed-`limit` pagination trap for recent-epoch state?
-5. Do its event projections match exactly the event names in §6 (no invented events)?
-6. Does it model halving by supply threshold, amounts as strings/`utwlt`, claims as epoch
-   ranges, and "claimed" from ClaimRecords?
-7. Does it treat 501 on absent modules as expected, and `active-slots` (not `slots/active`)?
-8. Does it track validator-set changes via CoreSlot events + CometBFT validators, and
+4. Do its event projections match exactly the event names in §6 (no invented events)?
+5. Does it model halving by supply threshold, amounts as strings/`utwlt`, and per-(slot,
+   epoch) obligations as `SlotEntitlement`s released by settlement — not as claims?
+6. Does it treat 501 on absent modules as expected, and `active-slots` (not `slots/active`)?
+7. Does it track validator-set changes via CoreSlot events + CometBFT validators, and
    reflect the N-of-N PoA liveness model?
 
 ## 10. Source-of-truth files in the chain repo (for the agent to cite)

@@ -495,15 +495,19 @@ func TestReleaseHasNoPublicMessageOrCLISurface(t *testing.T) {
 	remainder = k.PayEntitlementRemainderToOperator
 	require.NotNil(t, remainder)
 
-	// The rewards Msg service exposes exactly the four pre-existing methods; no
-	// payout message was added beside them.
+	// The rewards Msg service exposes exactly three methods. No payout message was
+	// ever added beside them, and the claim message that used to sit here was
+	// retired once Settlement became the only way entitlement value leaves escrow —
+	// so this now proves both that nothing was added and that the legacy path is
+	// genuinely gone rather than merely unused.
 	msgServer := reflect.TypeOf((*types.MsgServer)(nil)).Elem()
 	methods := make([]string, 0, msgServer.NumMethod())
 	for i := range msgServer.NumMethod() {
 		methods = append(methods, msgServer.Method(i).Name)
 	}
 	require.ElementsMatch(t,
-		[]string{"ClaimRewards", "UpdateRewardsParams", "PauseRewards", "ResumeRewards"},
+		[]string{"UpdateRewardsParams", "PauseRewards", "ResumeRewards"},
 		methods,
-		"release is keeper-only: no payout message may exist")
+		"release is keeper-only: no payout message may exist, and the retired claim "+
+			"message must not have survived")
 }

@@ -97,20 +97,6 @@ func (g GenesisState) Validate() error {
 		epochs[epoch.EpochNumber] = struct{}{}
 	}
 
-	claims := make(map[string]struct{}, len(g.ClaimRecords))
-	for _, reward := range g.ClaimRecords {
-		if err := validateEligibleReward(reward); err != nil {
-			return err
-		}
-		key := claimKey(reward.SlotId, reward.EpochNumber)
-		if _, exists := claims[key]; exists {
-			return ErrInvalidGenesis.Wrapf("duplicate claim record %s", key)
-		}
-		if _, exists := epochs[reward.EpochNumber]; !exists {
-			return ErrInvalidGenesis.Wrapf("claim record %s references non-finalized epoch", key)
-		}
-		claims[key] = struct{}{}
-	}
 	return nil
 }
 
@@ -259,27 +245,17 @@ func (g GenesisState) validateRewardConfigTimeline() error {
 }
 
 // validateFreshLedgerState checks the fresh-genesis shape of everything a closed
-// epoch leaves behind: the finalized-epoch archive, the legacy claim collection,
-// canonical entitlements, and the liability accumulator.
+// epoch leaves behind: the finalized-epoch archive, the canonical entitlements,
+// and the liability accumulator.
 //
 // A fresh chain has finalized no epoch. It therefore has no archive, no
-// obligations in either representation, and owes nothing — and this is a single
-// rule rather than four, because they are four consequences of the same fact.
+// obligations, and owes nothing — and this is a single rule rather than three,
+// because they are three consequences of the same fact.
 //
 // Each is a canonical CONTENT rule, about which entries may exist at all rather
-// than about how a malformed collection is treated, so all four are enforceable
+// than about how a malformed collection is treated, so all three are enforceable
 // without settling the open duplicate/ordering question.
-//
-// # Legacy claim records
-//
-// Refusing them here is not the legacy retirement work package. ClaimRewards, its
-// query surface and its CLI all remain, and continue to serve state seeded
-// directly for explicitly legacy regression coverage. What this closes is the one
-// path by which a conforming POC1 chain could ever hold a claim record at all:
-// V2 finalization creates entitlements and nothing else, so genesis was the only
-// remaining source. With it closed, a payable claim record and a payable
-// entitlement can no longer coexist over one escrow on a conforming chain.
-//
+
 // # Why the liability must be the exact string
 //
 // It is required to be the literal "0" rather than merely to parse as zero. The
@@ -292,12 +268,6 @@ func (g GenesisState) validateFreshLedgerState() error {
 		return ErrInvalidGenesis.Wrapf(
 			"fresh genesis carries %d finalized epochs; a fresh chain has closed none",
 			len(g.FinalizedEpochs))
-	}
-	if len(g.ClaimRecords) != 0 {
-		return ErrInvalidGenesis.Wrapf(
-			"fresh genesis carries %d legacy claim records; canonical obligations are slot entitlements, "+
-				"created only by finalization",
-			len(g.ClaimRecords))
 	}
 	if len(g.SlotEntitlements) != 0 {
 		return ErrInvalidGenesis.Wrapf(

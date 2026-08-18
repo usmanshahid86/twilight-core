@@ -11,8 +11,8 @@ see [Monitoring](monitoring.md).
 ## What you are watching
 
 Each epoch, the chain mints a `utwlt` pool and allocates it to active operators;
-operators (or anyone) then claim to the snapshotted payout addresses. Your job is
-to confirm this happens correctly and to respond to pauses or faults.
+operators, which is held as a per-slot entitlement until settlement releases it.
+Your job is to confirm this happens correctly and to respond to pauses or faults.
 
 ## Per-epoch health check
 
@@ -24,7 +24,7 @@ After each epoch boundary:
    amount.
 3. **Allocation balances** — operator allocation plus carry-out reconciles to the
    finalized reward pool.
-4. **Coverage** — `module-balances.rewards_balance` ≥ unclaimed + carry.
+4. **Coverage** — `module-balances.rewards_balance` ≥ unreleased entitlements + carry.
 5. **Agreement** (multi-node) — all nodes agree on app hash (`agree.sh`).
 
 ```bash
@@ -34,18 +34,12 @@ twilightd rewards-query cumulative-emitted --node <rpc>
 twilightd rewards-query module-balances --node <rpc>
 ```
 
-## Claiming
+## How rewards are released
 
-Anyone can trigger a claim; funds go to the snapshotted payout. Operators
-typically claim their own slot:
-
-```bash
-twilightd rewards-query claimable <slot-id> <start> <end> --node <rpc>
-twilightd rewards claim <slot-id> <start> <end> --from <signer> \
-  --chain-id <chain-id> --node <rpc> --gas 600000 --fees 0utwlt --yes
-```
-
-See [Claims](../rewards/claims.md).
+Rewards accrue at finalization as a per-slot **entitlement** held in the rewards
+module account. There is no claim transaction: entitlements are released by
+settlement in `x/mining`, which pays participants and returns the remainder to
+the operator. See [Epoch Lifecycle](../rewards/epoch-lifecycle.md).
 
 ## Halving awareness
 
@@ -63,7 +57,7 @@ legitimately becomes zero while cumulative stays below the cap. This is expected
 
 ## When things pause
 
-If emissions/settlement/claims are paused (by the emergency authority), behavior
+If emission and settlement are paused (by the emergency authority), behavior
 changes predictably — see [Epoch Lifecycle → pause interactions](../rewards/epoch-lifecycle.md#pause-interactions)
 and [Authority & Emergency Guide](authority-and-emergency-guide.md). Use
 [Troubleshooting](../rewards/troubleshooting.md) to diagnose.

@@ -104,8 +104,7 @@ is the machine-readable copy:
 - `coreslot`: `MsgRegisterCoreSlot`, `MsgActivateCoreSlot`, `MsgInactivateCoreSlot`,
   `MsgSuspendCoreSlot`, `MsgRemoveCoreSlot`, `MsgRotateConsensusKey`,
   `MsgUpdatePayoutAddress`, `MsgUpdateOperatorMetadata`, `MsgUpdateParams`
-- `rewards`: `MsgClaimRewards`, `MsgUpdateRewardsParams`, `MsgPauseRewards`,
-  `MsgResumeRewards`
+- `rewards`: `MsgUpdateRewardsParams`, `MsgPauseRewards`, `MsgResumeRewards`
 
 ## Note
 

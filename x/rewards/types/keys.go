@@ -24,7 +24,11 @@ var (
 	CurrentEpochConfigKey = collections.NewPrefix(0x04)
 	ActiveBlocksPrefix    = collections.NewPrefix(0x05)
 	FinalizedEpochsPrefix = collections.NewPrefix(0x06)
-	ClaimRecordsPrefix    = collections.NewPrefix(0x07)
+	// 0x07 held the retired claim-record collection and is PERMANENTLY RESERVED.
+	// Never reuse it: a store this prefix once addressed may still hold bytes on a
+	// pre-retirement node, and a new collection here would decode them as its own.
+	// The legacy claim path was removed once Settlement became the only way
+	// entitlement value is released.
 
 	// EpochConfigVersionsPrefix holds the immutable epoch-configuration history
 	// keyed by effective epoch. This is the sole authority for epoch geometry.

@@ -10,7 +10,6 @@ import (
 func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	registry.RegisterImplementations(
 		(*sdk.Msg)(nil),
-		&MsgClaimRewards{},
 		&MsgUpdateRewardsParams{},
 		&MsgPauseRewards{},
 		&MsgResumeRewards{},
@@ -19,7 +18,6 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 }
 
 func RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
-	cdc.RegisterConcrete(&MsgClaimRewards{}, "twilight/rewards/MsgClaimRewards", nil)
 	cdc.RegisterConcrete(&MsgUpdateRewardsParams{}, "twilight/rewards/MsgUpdateRewardsParams", nil)
 	cdc.RegisterConcrete(&MsgPauseRewards{}, "twilight/rewards/MsgPauseRewards", nil)
 	cdc.RegisterConcrete(&MsgResumeRewards{}, "twilight/rewards/MsgResumeRewards", nil)

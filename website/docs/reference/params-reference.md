@@ -13,7 +13,7 @@ guard** reference — the machine view a reviewer, integrator, or tooling author
 | Class | Fields | Changed by | Timing |
 |---|---|---|---|
 | **Immutable** | `native_denom`, `max_supply` | nobody (rejected) | — |
-| **Immediate** | `emissions_enabled`, `epoch_settlement_enabled`, `claims_enabled` | CoreSlot **emergency authority** | immediate |
+| **Immediate** | the canonical pause state (not a param; set by `rewards pause` / `rewards resume`) | CoreSlot **emergency authority** | next block (H+1) |
 | **Queued** | all other fields | CoreSlot **authority** | next epoch boundary |
 
 Rewards `Params` store **no** authority field (proto reserves field 1); both
@@ -27,7 +27,8 @@ authorities are read from CoreSlot.
 - `fee_denom` ≠ `native_denom`;
 - `max_supply` or `initial_block_subsidy` not positive;
 - `epoch_length_blocks`, `target_block_time_seconds`, or `max_claim_epochs_per_tx`
-  zero;
+  zero (the first and last are deprecated but still validated, so existing genesis
+  files keep round-tripping);
 - `halving_mode` ≠ `HALVING_MODE_SUPPLY_THRESHOLD`;
 - `distribution_method` ≠ `DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS`;
 - `remainder_policy` ≠ `REMAINDER_POLICY_CARRY_FORWARD`;

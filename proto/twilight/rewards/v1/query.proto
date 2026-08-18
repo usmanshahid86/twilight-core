@@ -21,12 +21,6 @@ service Query {
   rpc EpochReward(QueryEpochRewardRequest) returns (QueryEpochRewardResponse) {
     option (google.api.http).get = "/twilight/rewards/v1/epochs/{epoch_number}";
   }
-  rpc SlotRewards(QuerySlotRewardsRequest) returns (QuerySlotRewardsResponse) {
-    option (google.api.http).get = "/twilight/rewards/v1/slots/{slot_id}/rewards";
-  }
-  rpc ClaimableRewards(QueryClaimableRewardsRequest) returns (QueryClaimableRewardsResponse) {
-    option (google.api.http).get = "/twilight/rewards/v1/slots/{slot_id}/claimable";
-  }
   rpc CumulativeEmitted(QueryCumulativeEmittedRequest) returns (QueryCumulativeEmittedResponse) {
     option (google.api.http).get = "/twilight/rewards/v1/cumulative-emitted";
   }
@@ -85,25 +79,6 @@ message QueryNextHalvingResponse { NextHalvingInfo info = 1; }
 
 message QueryEpochRewardRequest { uint64 epoch_number = 1; }
 message QueryEpochRewardResponse { EpochReward epoch_reward = 1; }
-
-message QuerySlotRewardsRequest {
-  uint64 slot_id = 1;
-  cosmos.base.query.v1beta1.PageRequest pagination = 2;
-}
-message QuerySlotRewardsResponse {
-  repeated EligibleSlotReward rewards = 1;
-  cosmos.base.query.v1beta1.PageResponse pagination = 2;
-}
-
-message QueryClaimableRewardsRequest {
-  uint64 slot_id = 1;
-  uint64 start_epoch = 2;
-  uint64 end_epoch = 3;
-}
-message QueryClaimableRewardsResponse {
-  repeated EligibleSlotReward rewards = 1;
-  string total_amount = 2;
-}
 
 message QueryCumulativeEmittedRequest {}
 message QueryCumulativeEmittedResponse {

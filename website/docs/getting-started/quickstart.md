@@ -20,10 +20,10 @@ make localnet-rewards-smoke
 ```
 
 This starts a four-node network with a short rewards epoch, drives it through
-epoch finalization and a claim transaction, and asserts cross-node app-hash agreement.
-It prints a `PASS` summary with the minted emission, per-slot reward, and claim
-transaction hash. See [Localnet](../chain/localnet.md) for what it covers (and
-the funded-fixture caveat).
+epoch finalization, and asserts cross-node app-hash agreement. It prints a `PASS`
+summary with the minted emission, the per-slot reward, and the entitlements the
+epoch created. See [Localnet](../chain/localnet.md) for what it covers (and the
+funded-fixture caveat).
 
 ## 3. Query rewards state
 
@@ -40,16 +40,12 @@ twilightd rewards-query cumulative-emitted --node tcp://127.0.0.1:26657
 
 See [Queries](../rewards/queries.md) for all commands and output fields.
 
-## 4. Claim a reward
+## 4. How rewards are released
 
-```bash
-twilightd rewards claim 1 1 1 --from <signer> \
-  --chain-id <chain-id> --node tcp://127.0.0.1:26657 \
-  --gas 600000 --fees 0utwlt --yes
-```
-
-Funds go to slot 1's **snapshotted payout address**, not necessarily the signer.
-See [Claims](../rewards/claims.md).
+Rewards accrue at finalization as a per-slot **entitlement** held in the rewards
+module account. There is no claim transaction: entitlements are released by
+settlement in `x/mining`, which pays participants and returns the remainder to
+the operator. See [Epoch Lifecycle](../rewards/epoch-lifecycle.md).
 
 ## 5. Default localnet (startup only)
 

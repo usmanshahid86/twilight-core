@@ -36,7 +36,8 @@ symbol. There is no inflation, staking, or `x/distribution` reward flow.
 
 Operator rewards are owned by the shipped [`x/rewards`](../../x/rewards) module — a
 bounded, deterministic block subsidy with supply-threshold halving, allocated to
-active operators and paid out by claim (see [ADR-0002](adr/0002-rewards-emission.md)).
+active operators as entitlements and released by settlement (see
+[ADR-0002](adr/0002-rewards-emission.md)).
 `OperatorRewardWeight` is stored on the slot, separate from consensus power, so it
 never affects validator selection; in v1 it is metadata only (see the interface
 below).

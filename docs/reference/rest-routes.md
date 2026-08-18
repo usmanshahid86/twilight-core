@@ -21,8 +21,6 @@ Base URL in examples: `REST=http://localhost:1317`.
 | `EpochInfo` | `/twilight/rewards/v1/epoch-info` | — | `QueryEpochInfoResponse` | `curl $REST/twilight/rewards/v1/epoch-info` | 200 |
 | `NextHalving` | `/twilight/rewards/v1/next-halving` | — | `QueryNextHalvingResponse` | `curl $REST/twilight/rewards/v1/next-halving` | 200 |
 | `EpochReward` | `/twilight/rewards/v1/epochs/{epoch_number}` | `epoch_number` (path, uint64) | `QueryEpochRewardResponse` | `curl $REST/twilight/rewards/v1/epochs/5` | 200; 404 if epoch not finalized |
-| `SlotRewards` | `/twilight/rewards/v1/slots/{slot_id}/rewards` | `slot_id` (path, uint64); `pagination.*` (query) | `QuerySlotRewardsResponse` | `curl $REST/twilight/rewards/v1/slots/1/rewards` | 200 |
-| `ClaimableRewards` | `/twilight/rewards/v1/slots/{slot_id}/claimable` | `slot_id` (path); `start_epoch`,`end_epoch` (query, **required**, uint64) | `QueryClaimableRewardsResponse` | `curl "$REST/twilight/rewards/v1/slots/1/claimable?start_epoch=1&end_epoch=10"` | 200; 400 if range missing/invalid |
 | `CumulativeEmitted` | `/twilight/rewards/v1/cumulative-emitted` | — | `QueryCumulativeEmittedResponse` | `curl $REST/twilight/rewards/v1/cumulative-emitted` | 200 |
 | `SupplySchedule` | `/twilight/rewards/v1/supply-schedule` | — | `QuerySupplyScheduleResponse` | `curl $REST/twilight/rewards/v1/supply-schedule` | 200 |
 | `CurrentEpochActiveBlocks` | `/twilight/rewards/v1/current-epoch/active-blocks` | `pagination.*` (query) | `QueryCurrentEpochActiveBlocksResponse` | `curl $REST/twilight/rewards/v1/current-epoch/active-blocks` | 200 |

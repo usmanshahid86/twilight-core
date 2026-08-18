@@ -15,8 +15,8 @@ CoreSlot has no BeginBlocker. The rewards `BeginBlock`:
 3. validates every returned slot is active (fail-closed on a contract violation);
 4. increments the `(current_epoch, slot)` active-block counter for each.
 
-Pause flags do not stop active-block counting — even with settlement, emissions,
-or claims paused, counting continues.
+Pausing does not stop epoch time: numbering advances and epochs still finalize. A
+paused block is not reward-enabled, so it credits nothing.
 
 ## Transaction processing
 
@@ -30,12 +30,12 @@ CoreSlot runs first and is the **sole validator-update emitter**; it resolves th
 validator set for the block. Then rewards `EndBlock`:
 
 1. loads state, current epoch config, and params;
-2. checks whether the configured epoch boundary is reached and settlement is
-   enabled — if not, returns without finalizing;
+2. checks whether the canonical epoch boundary is reached — if not, returns
+   without finalizing;
 3. otherwise **finalizes the epoch** in an atomic cache context: mint → pool →
-   allocate → write epoch aggregate + claim records → advance carry, cumulative
-   emitted, epoch number, and the next epoch config (activating any pending
-   params).
+   allocate → write epoch aggregate + slot entitlements → advance carry,
+   cumulative emitted, epoch number, and the next epoch config (activating any
+   pending params).
 
 ```mermaid
 sequenceDiagram
@@ -47,7 +47,7 @@ sequenceDiagram
     Runtime->>CoreSlot: EndBlock (validator updates)
     Runtime->>Rewards: EndBlock (finalize if at boundary)
     Rewards->>Bank: MintCoins (utwlt) [finalize only]
-    Rewards->>Rewards: epoch aggregate + claim records
+    Rewards->>Rewards: epoch aggregate + slot entitlements
 ```
 
 ## Fail-closed

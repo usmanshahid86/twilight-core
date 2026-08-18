@@ -55,17 +55,17 @@ func (k Keeper) CumulativeEmittedInvariant() sdk.Invariant {
 
 // ModuleBalanceCoverageInvariant proves the escrow covers what the module owes.
 //
-// Rewritten from the claim-shaped model. It used to sum every unclaimed
-// ClaimRecord through a full walk; the obligation is now the O(1) outstanding
-// entitlement liability plus carry, which is the same quantity finalization
-// asserts and costs two reads instead of a scan.
+// Rewritten from the claim-shaped model that this chain no longer has. That model
+// summed every unclaimed record through a full walk; the obligation is now the O(1)
+// outstanding entitlement liability plus carry, which is the same quantity
+// finalization asserts and costs two reads instead of a scan.
 //
 // Coverage (>=) rather than the equality finalization asserts. The two differ
-// deliberately: finalization checks the invariant at the one moment it must hold
-// exactly, immediately after a complete monetary transition. This runs at
-// arbitrary times, including while historical claim-shaped state from before the
-// switchover is still outstanding, so a strict equality here would report a
-// legitimate chain as broken.
+// deliberately: finalization checks the stronger statement at the single instant
+// it is entitled to, immediately after a complete monetary transition. This is a
+// general backstop callable at any height, where what the chain owes is solvency
+// rather than exactness — a surplus in escrow is not a solvency failure and must
+// not be reported as one.
 func (k Keeper) ModuleBalanceCoverageInvariant() sdk.Invariant {
 	return func(ctx sdk.Context) (string, bool) {
 		params, err := k.GetParams(ctx)
