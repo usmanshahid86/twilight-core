@@ -97,11 +97,33 @@ func (k Keeper) materializeFinalizedEpoch(ctx context.Context) (materialized uin
 	if err != nil {
 		return 0, types.ErrInvalidState.Wrap("the processed reward epoch cursor is exhausted")
 	}
-	if _, found, err := k.rewardsKeeper.GetFinalizedEpoch(ctx, target); err != nil {
+	finalized, found, err := k.rewardsKeeper.GetFinalizedEpoch(ctx, target)
+	if err != nil {
 		return 0, types.ErrInvalidState.Wrapf(
 			"finalized reward epoch %d could not be read: %v", target, err)
-	} else if !found {
+	}
+	if !found {
+		// Absence is the ordinary answer, but it is only ordinary if nothing LATER
+		// is finalized. A gap — target absent while its immediate successor exists —
+		// means the finalized history and this cursor have come apart, and a
+		// later-materialized epoch would be anchored to the wrong settlement clock.
+		//
+		// The probe is bounded to exactly one epoch. It is not a search for how far
+		// behind the cursor is: any gap at all is corruption, so one lookup either
+		// proves there is none or proves there is.
+		if err := k.requireNoFinalizedSuccessor(ctx, target); err != nil {
+			return 0, err
+		}
 		return 0, nil
+	}
+	// The row must be the row it was filed under. A record stored at key N that
+	// declares a different epoch is not proof that N finalized, and every quantity
+	// below — the entitlement set, the anchor, the cursor — would be attributed to
+	// an epoch that never closed.
+	if finalized.EpochNumber != target {
+		return 0, types.ErrInvalidState.Wrapf(
+			"the finalized reward epoch stored at epoch %d declares epoch %d",
+			target, finalized.EpochNumber)
 	}
 
 	entitlements, err := k.rewardsKeeper.IterateEntitlementsForEpoch(ctx, target)
@@ -170,20 +192,59 @@ func (k Keeper) materializeFinalizedEpoch(ctx context.Context) (materialized uin
 	}
 
 	// Having caught up, nothing further may be waiting.
-	successor, err := checked.AddUint64(target, 1)
-	if err != nil {
-		return 0, types.ErrInvalidState.Wrap("the processed reward epoch cursor is exhausted")
-	}
-	if _, found, err := k.rewardsKeeper.GetFinalizedEpoch(ctx, successor); err != nil {
-		return 0, types.ErrInvalidState.Wrapf(
-			"finalized reward epoch %d could not be read: %v", successor, err)
-	} else if found {
-		return 0, types.ErrInvalidState.Wrapf(
-			"reward epoch %d is finalized while epoch %d was only now materialized; "+
-				"materialization has fallen behind and later anchors would carry the wrong settlement clock",
-			successor, target)
+	if err := k.requireNoFinalizedSuccessor(ctx, target); err != nil {
+		return 0, err
 	}
 	return target, nil
+}
+
+// requireNoFinalizedSuccessor proves nothing is finalized immediately past an
+// epoch, in exactly one lookup.
+//
+// Both callers need the same guarantee for the same reason, and the reason is not
+// tidiness: an epoch materialized in a later block than the one that closed it
+// would be anchored to that later block's settlement clock, silently moving every
+// deadline derived from it. Falling behind is corruption, not a backlog to drain —
+// which is why this probes one epoch and never scans.
+func (k Keeper) requireNoFinalizedSuccessor(ctx context.Context, epoch uint64) error {
+	successor, err := checked.AddUint64(epoch, 1)
+	if err != nil {
+		return types.ErrInvalidState.Wrap("the processed reward epoch cursor is exhausted")
+	}
+	found, err := k.finalizedEpochExists(ctx, successor)
+	if err != nil {
+		return err
+	}
+	if found {
+		return types.ErrInvalidState.Wrapf(
+			"reward epoch %d is finalized while epoch %d is not yet materialized; "+
+				"materialization has fallen behind and later anchors would carry the wrong settlement clock",
+			successor, epoch)
+	}
+	return nil
+}
+
+// finalizedEpochExists reports whether an epoch is finalized, holding the stored
+// row to the key it was found under.
+//
+// The identity check is not redundant with the caller's: a successor probe that
+// accepted a mismatched row would let a misfiled record answer "yes, later work is
+// waiting" for an epoch that never closed, halting the chain on a lie.
+func (k Keeper) finalizedEpochExists(ctx context.Context, epoch uint64) (bool, error) {
+	finalized, found, err := k.rewardsKeeper.GetFinalizedEpoch(ctx, epoch)
+	if err != nil {
+		return false, types.ErrInvalidState.Wrapf(
+			"finalized reward epoch %d could not be read: %v", epoch, err)
+	}
+	if !found {
+		return false, nil
+	}
+	if finalized.EpochNumber != epoch {
+		return false, types.ErrInvalidState.Wrapf(
+			"the finalized reward epoch stored at epoch %d declares epoch %d",
+			epoch, finalized.EpochNumber)
+	}
+	return true, nil
 }
 
 // resolveSettlementMode is the single canonical rule mapping a target's bound

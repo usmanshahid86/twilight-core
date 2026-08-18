@@ -528,3 +528,106 @@ func TestAStoredRowMustAgreeWithTheKeyItLivesAt(t *testing.T) {
 	require.ErrorIs(t, err, types.ErrInvalidState)
 	require.Contains(t, err.Error(), "declares valid_from_epoch 3")
 }
+
+// TestPromotionRefusesAMalformedSelectionParamsPredecessor is the rule that new
+// canonical state is never built on an invalid predecessor.
+//
+// Promotion derives the successor's version number from the predecessor's and
+// orders itself against the predecessor's effective epoch. A malformed
+// predecessor would therefore be EXTENDED by a successful promotion — the history
+// would gain a well-formed row descending from a broken one, which is harder to
+// detect afterwards than the broken row alone.
+//
+// SelectionParams is not consequential to payout authorization in this profile and
+// has no update transaction, so this is not a live money path. It is canonical
+// consensus state all the same, and the promotion primitive is production-shaped.
+func TestPromotionRefusesAMalformedSelectionParamsPredecessor(t *testing.T) {
+	k, ctx, rewards := initialized(t)
+
+	// Corrupt the canonical row in a way the key relationship cannot see: the row
+	// still lives at, and declares, epoch 1 — only its contents are invalid.
+	anchor, err := k.SelectionParamsVersions.Get(ctx, 1)
+	require.NoError(t, err)
+	anchor.MaxSelectedParticipantsPerSelection = 0
+	require.NoError(t, k.SelectionParamsVersions.Set(ctx, 1, anchor))
+
+	require.NoError(t, k.ScheduledSelectionParams.Set(ctx, 2, types.ScheduledSelectionParams{
+		EffectiveEpoch:                      2,
+		MaxSelectionRateBps:                 1_000,
+		MaxSelectedParticipantsPerSelection: 32,
+		MaxCandidatesPerSelection:           512,
+		BeaconStartOffsetBlocks:             48,
+		BeaconWindowBlocks:                  24,
+		MinExternalBeaconBlocks:             12,
+		MinDistinctExternalProposers:        3,
+	}))
+	rewards.finalize(1)
+
+	err = k.EndBlock(ctx)
+	require.ErrorIs(t, err, types.ErrInvalidState)
+
+	// No successor, no index entry, and the schedule is unconsumed.
+	has, err := k.SelectionParamsVersions.Has(ctx, 2)
+	require.NoError(t, err)
+	require.False(t, has, "no successor is appended on top of a broken predecessor")
+	_, found, err := keeper.LookupVersionEpochKey(ctx, k.SelectionParamsVersionIndex, 2)
+	require.NoError(t, err)
+	require.False(t, found, "no version index entry is written")
+	pending, err := k.ScheduledSelectionParams.Has(ctx, 2)
+	require.NoError(t, err)
+	require.True(t, pending, "the schedule is not consumed")
+
+	// And every earlier part of the same EndBlock is unapplied.
+	cursor, err := k.GetLastProcessedRewardEpoch(ctx)
+	require.NoError(t, err)
+	require.Zero(t, cursor, "the materialization in this block is discarded too")
+	clock, err := k.GetSettlementClock(ctx)
+	require.NoError(t, err)
+	require.Zero(t, clock, "the clock tick is discarded with the rest of the transition")
+}
+
+// TestPromotionRefusesAMalformedPredecessorInEveryFamily is the symmetry evidence.
+//
+// The mode and settlement-parameter families already validated their predecessor
+// in full — mode through validateModeRecord, settlement parameters through
+// validateSettlementParamsRecord — and SelectionParams was the one that did not.
+// Rather than assert that from reading the code, all three are exercised the same
+// way here so the property cannot regress in any of them.
+func TestPromotionRefusesAMalformedPredecessorInEveryFamily(t *testing.T) {
+	t.Run("distribution mode", func(t *testing.T) {
+		k, ctx, rewards := initialized(t)
+		row, err := k.DistributionModeVersions.Get(ctx, 1)
+		require.NoError(t, err)
+		row.Mode = types.MiningDistributionMode_MINING_DISTRIBUTION_MODE_UNSPECIFIED
+		require.NoError(t, k.DistributionModeVersions.Set(ctx, 1, row))
+		require.NoError(t, k.ScheduledDistributionMode.Set(ctx, 2,
+			types.ScheduledMiningDistributionMode{EffectiveEpoch: 2, Mode: protocolSelection}))
+		rewards.finalize(1)
+
+		require.ErrorIs(t, k.EndBlock(ctx), types.ErrInvalidState)
+		has, err := k.DistributionModeVersions.Has(ctx, 2)
+		require.NoError(t, err)
+		require.False(t, has)
+	})
+
+	t.Run("settlement params", func(t *testing.T) {
+		k, ctx, rewards := initialized(t)
+		row, err := k.SettlementParamsVersions.Get(ctx, 1)
+		require.NoError(t, err)
+		row.MaxChunksPerSettlement = 0
+		require.NoError(t, k.SettlementParamsVersions.Set(ctx, 1, row))
+		require.NoError(t, k.ScheduledSettlementParams.Set(ctx, 2, types.ScheduledSettlementParams{
+			EffectiveEpoch:           2,
+			SettlementWindowEpochs:   3,
+			MaxRecipientsPerChunk:    16,
+			MaxChunksPerSettlement:   2,
+			MinRecipientPayoutAmount: "20000",
+		}))
+		rewards.finalize(1)
+
+		require.ErrorIs(t, k.EndBlock(ctx), types.ErrInvalidState)
+		has, err := k.SettlementParamsVersions.Has(ctx, 2)
+		require.NoError(t, err)
+		require.False(t, has)
+	})
+}
