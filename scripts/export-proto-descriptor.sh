@@ -173,7 +173,8 @@ cat > "$MANIFEST" <<'JSON'
       "/twilight.rewards.v1.MsgResumeRewards"
     ],
     "mining": [
-      "/twilight.mining.v1.MsgSubmitSettlementChunk"
+      "/twilight.mining.v1.MsgSubmitSettlementChunk",
+      "/twilight.mining.v1.MsgFinalizeSettlement"
     ]
   }
 }

@@ -16,10 +16,12 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	registry.RegisterImplementations(
 		(*sdk.Msg)(nil),
 		&MsgSubmitSettlementChunk{},
+		&MsgFinalizeSettlement{},
 	)
 	msgservice.RegisterMsgServiceDesc(registry, &_Msg_serviceDesc)
 }
 
 func RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
 	cdc.RegisterConcrete(&MsgSubmitSettlementChunk{}, "twilight/mining/MsgSubmitSettlementChunk", nil)
+	cdc.RegisterConcrete(&MsgFinalizeSettlement{}, "twilight/mining/MsgFinalizeSettlement", nil)
 }

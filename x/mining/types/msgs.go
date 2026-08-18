@@ -82,3 +82,30 @@ func (m MsgSubmitSettlementChunk) Validate() error {
 func ChunkPayoutLabel(slotID, epoch uint64, index int) string {
 	return fmt.Sprintf("chunk payout line %d for slot %d in epoch %d", index, slotID, epoch)
 }
+
+var _ sdk.Msg = &MsgFinalizeSettlement{}
+
+// Validate performs the stateless part of finalization admission.
+//
+// Almost nothing can be decided here, and that is a property of the message
+// rather than a gap: it names an obligation and a signer, so every consequential
+// question — whether the settlement exists, whether it is already terminal, which
+// authorization arm applies, what remains to be released and where it goes — needs
+// canonical state.
+//
+// The signer is checked for presence only. WHICH signers are acceptable depends on
+// the settlement's mode and on whether its deadline has passed, so the handler
+// decides it; rejecting a non-empty string here on any stricter basis would be
+// guessing at an arm this layer cannot resolve.
+func (m MsgFinalizeSettlement) Validate() error {
+	if m.SlotId == 0 {
+		return ErrInvalidState.Wrap("slot identifiers start at 1")
+	}
+	if m.Epoch == 0 {
+		return ErrInvalidState.Wrap("epoch numbers start at 1")
+	}
+	if m.Signer == "" {
+		return ErrInvalidAddress.Wrap("a settlement finalization requires a signer")
+	}
+	return nil
+}
