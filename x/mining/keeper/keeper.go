@@ -76,15 +76,21 @@ type Keeper struct {
 	// is canonical and is not flattened into an effective-epoch record: resolution
 	// helpers are generic over the key so each family keeps its own semantics.
 	DistributionModeVersions collections.Map[uint64, types.MiningDistributionModeVersion]
-	// ScheduledDistributionMode holds the single pending mode change. This profile
-	// has no writer, so it is permanently empty.
+	// ScheduledDistributionMode holds the single pending mode change, keyed by its
+	// effective epoch. This profile exposes no update transaction, so ordinary
+	// execution never writes it; the promotion primitive that consumes it is
+	// production-shaped and fully implemented regardless.
 	ScheduledDistributionMode collections.Map[uint64, types.ScheduledMiningDistributionMode]
+	// DistributionModeVersionIndex is DERIVED: version -> valid_from_epoch.
+	DistributionModeVersionIndex collections.Map[uint64, uint64]
 
 	// SelectionParamsVersions is the immutable global Selection-parameter history
 	// keyed by effective epoch.
 	SelectionParamsVersions collections.Map[uint64, types.SelectionParamsVersion]
 	// ScheduledSelectionParams holds the single pending change. No writer here.
 	ScheduledSelectionParams collections.Map[uint64, types.ScheduledSelectionParams]
+	// SelectionParamsVersionIndex is DERIVED: version -> effective_epoch.
+	SelectionParamsVersionIndex collections.Map[uint64, uint64]
 
 	// SettlementParamsVersions is the immutable settlement-validity parameter
 	// history keyed by effective epoch, and the sole authority for what a target
@@ -92,6 +98,8 @@ type Keeper struct {
 	SettlementParamsVersions collections.Map[uint64, types.SettlementParamsVersion]
 	// ScheduledSettlementParams holds the single pending change. No writer here.
 	ScheduledSettlementParams collections.Map[uint64, types.ScheduledSettlementParams]
+	// SettlementParamsVersionIndex is DERIVED: version -> effective_epoch.
+	SettlementParamsVersionIndex collections.Map[uint64, uint64]
 
 	// SettlementClock is the canonical monotonic settlement clock. It is not a
 	// block height: it advances only on blocks whose beginning-of-block pause
@@ -138,6 +146,12 @@ func NewKeeper(
 		SelectionParamsVersions: collections.NewMap(sb, types.SelectionParamsVersionsPrefix,
 			"selection_params_versions", collections.Uint64Key,
 			codec.CollValue[types.SelectionParamsVersion](cdc)),
+		DistributionModeVersionIndex: collections.NewMap(sb, types.DistributionModeVersionIndexPrefix,
+			"distribution_mode_version_index", collections.Uint64Key, collections.Uint64Value),
+		SelectionParamsVersionIndex: collections.NewMap(sb, types.SelectionParamsVersionIndexPrefix,
+			"selection_params_version_index", collections.Uint64Key, collections.Uint64Value),
+		SettlementParamsVersionIndex: collections.NewMap(sb, types.SettlementParamsVersionIndexPrefix,
+			"settlement_params_version_index", collections.Uint64Key, collections.Uint64Value),
 		ScheduledSelectionParams: collections.NewMap(sb, types.ScheduledSelectionParamsPrefix,
 			"scheduled_selection_params", collections.Uint64Key,
 			codec.CollValue[types.ScheduledSelectionParams](cdc)),

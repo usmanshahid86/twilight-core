@@ -84,4 +84,27 @@ var (
 	// canonical rows on import, and is cross-checked against the row it points at
 	// on every read. A divergence between the two is corruption, never an answer.
 	OpenSettlementsBySlotPrefix = collections.NewPrefix(0x0B)
+
+	// The three version indexes below are DERIVED, rebuildable state mapping a
+	// version number to the epoch key its canonical row lives at.
+	//
+	// They exist because each history is keyed by its epoch boundary while the
+	// public surface also supports point lookup by version number, and resolving a
+	// bare version number without an index means walking a history that grows for
+	// the life of the chain.
+	//
+	// They are never authority. Each carries no history content — only the key
+	// needed to reach the row that does — is absent from the genesis document, is
+	// rebuilt from canonical rows on import, and is cross-checked against the row
+	// it points at on every read.
+	//
+	// Note the deliberate difference from the reward-configuration index: version
+	// numbers here are unique and monotonically increasing but NOT contiguous, so a
+	// missing index entry cannot be distinguished arithmetically from a version
+	// that was never assigned. A missing entry is therefore ordinary absence here,
+	// where the same condition is corruption for reward configuration. What keeps
+	// the index honest is the cross-check on every entry it does resolve.
+	DistributionModeVersionIndexPrefix = collections.NewPrefix(0x0C)
+	SelectionParamsVersionIndexPrefix  = collections.NewPrefix(0x0D)
+	SettlementParamsVersionIndexPrefix = collections.NewPrefix(0x0E)
 )

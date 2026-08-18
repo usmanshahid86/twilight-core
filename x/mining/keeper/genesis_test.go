@@ -62,48 +62,108 @@ func (m *coreSlotKeeperMock) SelectionPolicyAtHeight(
 	return policy, nil
 }
 
-// rewardsKeeperMock is deliberately inert. This gate consumes none of the rewards
-// reads; the interface exists so the dependency is declared where review can see
-// it, and every method panics so a premature caller is loud rather than silent.
-type rewardsKeeperMock struct{}
+// rewardsKeeperMock stands in for the only module x/mining reads money state from.
+//
+// Every method that moves value is present and records that it was called, because
+// the most important assertions in this gate are about calls that must NOT happen:
+// materialization performs no bank operation, and proving that means proving the
+// release methods were never reached, which a balance comparison cannot show.
+type rewardsKeeperMock struct {
+	releaseEnabled bool
+	finalized      map[uint64]bool
+	entitlements   map[uint64][]rewardstypes.SlotEntitlement
+	epochLength    uint64
 
-func (rewardsKeeperMock) GetFinalizedEpoch(context.Context, uint64) (rewardstypes.EpochReward, bool, error) {
-	panic("mining does not read finalized epochs in this gate")
+	payCalls       int
+	remainderCalls int
+
+	// finalizedRows supplies the EXACT stored row for an epoch, including one whose
+	// EpochNumber disagrees with the key it is filed under. Without it the double
+	// would synthesize identity from the lookup key, which makes the key/value
+	// agreement check in materialization unfalsifiable — the double would be
+	// asserting the very property under test.
+	finalizedRows map[uint64]rewardstypes.EpochReward
 }
 
-func (rewardsKeeperMock) IterateEntitlementsForEpoch(context.Context, uint64) ([]rewardstypes.SlotEntitlement, error) {
-	panic("mining does not enumerate entitlements in this gate")
+func newRewardsMock() *rewardsKeeperMock {
+	return &rewardsKeeperMock{
+		releaseEnabled: true,
+		finalized:      map[uint64]bool{},
+		finalizedRows:  map[uint64]rewardstypes.EpochReward{},
+		entitlements:   map[uint64][]rewardstypes.SlotEntitlement{},
+		epochLength:    360,
+	}
 }
 
-func (rewardsKeeperMock) GetSlotEntitlement(context.Context, uint64, uint64) (rewardstypes.SlotEntitlement, bool, error) {
-	panic("mining does not read entitlements in this gate")
+// finalize marks an epoch closed and supplies the entitlements it produced.
+func (m *rewardsKeeperMock) finalize(epoch uint64, entitlements ...rewardstypes.SlotEntitlement) {
+	m.finalized[epoch] = true
+	m.entitlements[epoch] = entitlements
 }
 
-func (rewardsKeeperMock) EpochStartHeight(context.Context, uint64) (uint64, error) {
-	panic("mining does not derive epoch geometry in this gate")
+func (m *rewardsKeeperMock) GetFinalizedEpoch(_ context.Context, epoch uint64) (rewardstypes.EpochReward, bool, error) {
+	if row, ok := m.finalizedRows[epoch]; ok {
+		return row, true, nil
+	}
+	if !m.finalized[epoch] {
+		return rewardstypes.EpochReward{}, false, nil
+	}
+	return rewardstypes.EpochReward{EpochNumber: epoch}, true, nil
 }
 
-func (rewardsKeeperMock) EpochEndHeight(context.Context, uint64) (uint64, error) {
-	panic("mining does not derive epoch geometry in this gate")
+// finalizeAs files a finalized row under one key while the row declares another.
+// The only way to reach the key/value agreement check.
+func (m *rewardsKeeperMock) finalizeAs(key, declared uint64) {
+	m.finalizedRows[key] = rewardstypes.EpochReward{EpochNumber: declared}
 }
 
-func (rewardsKeeperMock) EpochLengthForEpoch(context.Context, uint64) (uint64, error) {
-	panic("mining does not derive epoch geometry in this gate")
+func (m *rewardsKeeperMock) IterateEntitlementsForEpoch(_ context.Context, epoch uint64) ([]rewardstypes.SlotEntitlement, error) {
+	return append([]rewardstypes.SlotEntitlement(nil), m.entitlements[epoch]...), nil
 }
 
-func (rewardsKeeperMock) SettlementReleaseEnabled(context.Context) (bool, error) {
-	panic("mining does not read the pause state in this gate")
+func (m *rewardsKeeperMock) GetSlotEntitlement(_ context.Context, slotID, epoch uint64) (rewardstypes.SlotEntitlement, bool, error) {
+	for _, entitlement := range m.entitlements[epoch] {
+		if entitlement.SlotId == slotID {
+			return entitlement, true, nil
+		}
+	}
+	return rewardstypes.SlotEntitlement{}, false, nil
 }
 
-func (rewardsKeeperMock) PayEntitlement(context.Context, uint64, uint64, []rewardstypes.EntitlementPayout) error {
-	panic("mining moves no value in this gate")
+func (m *rewardsKeeperMock) EpochStartHeight(_ context.Context, epoch uint64) (uint64, error) {
+	return (epoch-1)*m.epochLength + 1, nil
 }
 
-func (rewardsKeeperMock) PayEntitlementRemainderToOperator(context.Context, uint64, uint64) error {
-	panic("mining moves no value in this gate")
+func (m *rewardsKeeperMock) EpochEndHeight(_ context.Context, epoch uint64) (uint64, error) {
+	return epoch * m.epochLength, nil
+}
+
+func (m *rewardsKeeperMock) EpochLengthForEpoch(_ context.Context, _ uint64) (uint64, error) {
+	return m.epochLength, nil
+}
+
+func (m *rewardsKeeperMock) SettlementReleaseEnabled(context.Context) (bool, error) {
+	return m.releaseEnabled, nil
+}
+
+func (m *rewardsKeeperMock) PayEntitlement(context.Context, uint64, uint64, []rewardstypes.EntitlementPayout) error {
+	m.payCalls++
+	return nil
+}
+
+func (m *rewardsKeeperMock) PayEntitlementRemainderToOperator(context.Context, uint64, uint64) error {
+	m.remainderCalls++
+	return nil
 }
 
 func setupKeeper(t *testing.T, core keeper.CoreSlotKeeper) (keeper.Keeper, sdk.Context) {
+	k, ctx, _ := setupKeeperWithRewards(t, core, newRewardsMock())
+	return k, ctx
+}
+
+func setupKeeperWithRewards(
+	t *testing.T, core keeper.CoreSlotKeeper, rewards *rewardsKeeperMock,
+) (keeper.Keeper, sdk.Context, *rewardsKeeperMock) {
 	t.Helper()
 	registry := codectypes.NewInterfaceRegistry()
 	types.RegisterInterfaces(registry)
@@ -125,10 +185,10 @@ func setupKeeper(t *testing.T, core keeper.CoreSlotKeeper) (keeper.Keeper, sdk.C
 		codec.NewProtoCodec(registry),
 		runtime.NewKVStoreService(keys[types.StoreKey]),
 		core,
-		rewardsKeeperMock{},
+		rewards,
 		validator,
 	)
-	return k, ctx
+	return k, ctx, rewards
 }
 
 func activeSlot(slotID uint64) coreslottypes.CoreSlot {
@@ -271,17 +331,4 @@ func TestOpenIndexIsRebuiltRatherThanImported(t *testing.T) {
 		return false, nil
 	}))
 	require.Zero(t, count, "a fresh chain has materialized nothing to index")
-}
-
-// TestMiningEndBlockIsAConsensusNoOpInThisGate pins that the hook is wired and
-// does nothing yet, so a later gate adds behavior to a live seam rather than
-// discovering the module was never end-blocked.
-func TestMiningEndBlockIsAConsensusNoOpInThisGate(t *testing.T) {
-	k, ctx := setupKeeper(t, &coreSlotKeeperMock{})
-	require.NoError(t, k.InitGenesis(ctx, *types.DefaultGenesis()))
-	require.NoError(t, k.EndBlock(ctx))
-
-	clock, err := k.SettlementClock.Get(ctx)
-	require.NoError(t, err)
-	require.Zero(t, clock, "the clock does not advance until the settlement gate lands")
 }

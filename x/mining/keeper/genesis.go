@@ -101,7 +101,60 @@ func (k Keeper) InitGenesis(ctx context.Context, genState types.GenesisState) er
 		return err
 	}
 
+	if err := k.rebuildVersionIndexes(ctx); err != nil {
+		return err
+	}
 	return k.rebuildOpenSettlementIndex(ctx)
+}
+
+// rebuildVersionIndexes derives the three version indexes from the histories that
+// were just imported.
+//
+// Rebuilt rather than imported, exactly as the OPEN index is: a genesis document
+// carries no index, so it cannot ship one that disagrees with its own history.
+// There is no second value to disagree with.
+//
+// A duplicate version number within a family is refused here rather than resolved.
+// These histories require unique version numbers but NOT contiguous ones, so two
+// rows claiming one number leave "the row for version N" permanently unanswerable
+// — there is no arithmetic that could pick between them afterwards.
+//
+// That refusal is unreachable from fresh genesis, which admits exactly one version
+// per family, and no test asserts it there: it is the seam a continuation importer
+// reuses, written now for the same reason the OPEN index rebuild is. The write-once
+// rule it rests on is exercised where promotion depends on it.
+func (k Keeper) rebuildVersionIndexes(ctx context.Context) error {
+	if err := k.DistributionModeVersions.Walk(ctx, nil,
+		func(key uint64, version types.MiningDistributionModeVersion) (bool, error) {
+			if err := setVersionIndexEntry(
+				ctx, k.DistributionModeVersionIndex, version.Version, key,
+			); err != nil {
+				return true, types.ErrInvalidGenesis.Wrap(err.Error())
+			}
+			return false, nil
+		}); err != nil {
+		return err
+	}
+	if err := k.SelectionParamsVersions.Walk(ctx, nil,
+		func(key uint64, version types.SelectionParamsVersion) (bool, error) {
+			if err := setVersionIndexEntry(
+				ctx, k.SelectionParamsVersionIndex, version.Version, key,
+			); err != nil {
+				return true, types.ErrInvalidGenesis.Wrap(err.Error())
+			}
+			return false, nil
+		}); err != nil {
+		return err
+	}
+	return k.SettlementParamsVersions.Walk(ctx, nil,
+		func(key uint64, version types.SettlementParamsVersion) (bool, error) {
+			if err := setVersionIndexEntry(
+				ctx, k.SettlementParamsVersionIndex, version.Version, key,
+			); err != nil {
+				return true, types.ErrInvalidGenesis.Wrap(err.Error())
+			}
+			return false, nil
+		})
 }
 
 // validateActiveSlotPolicies is the cross-module admission rule x/mining owns.
