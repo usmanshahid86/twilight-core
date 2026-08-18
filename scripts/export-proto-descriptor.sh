@@ -128,8 +128,8 @@ protoc "${INCLUDES[@]}" --include_imports --descriptor_set_out="$DESC" "${PROTOS
 echo "  wrote $DESC ($(wc -c < "$DESC" | tr -d ' ') bytes)"
 
 # --- 2) the Msg type-URL manifest ----------------------------------------------------
-# coreslot/rewards entries are the concrete sdk.Msg implementations registered in
-# x/coreslot/types/codec.go and x/rewards/types/codec.go; the bank entries are the
+# coreslot/rewards/mining entries are the concrete sdk.Msg implementations registered
+# in x/{coreslot,rewards,mining}/types/codec.go; the bank entries are the
 # SDK-native MsgSend/MsgMultiSend now reachable via `tx bank send`. Decode each tx
 # message's Any.value against the matching message in twilight-descriptors.pb.
 cat > "$MANIFEST" <<'JSON'

@@ -24,7 +24,7 @@ BIN="${BIN:-$ROOT/build/twilightd}"
 # FORCE the fixture's own home + chain-id. Do NOT read TWILIGHT_LOCALNET_HOME / CHAIN_ID here — if the
 # caller already exported those (e.g. a sourced localnet dev env, like a `localnet >` prompt), inheriting
 # them makes this run against the DEFAULT localnet (twilight-localnet-1 / /tmp/twilight-localnet) with the
-# default 17280-block epoch that never finalizes here. Override with the fixture-specific names if needed.
+# default 360-block epoch rather than this fixture's own. Override with the fixture-specific names if needed.
 NET="${REWARDS_FIXTURE_HOME:-/tmp/twilight-rewards-fixture}"
 CHAIN_ID="${REWARDS_FIXTURE_CHAIN_ID:-twilight-rewards-fixture-1}"
 # The epoch length must sit inside the ratified immutable interval

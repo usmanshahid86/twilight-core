@@ -6,7 +6,7 @@ title: Security & Failure Modes
 
 ## Invariants
 
-The module defines five callable invariants (`x/rewards/keeper/invariants.go`).
+The module defines six callable invariants (`x/rewards/keeper/invariants.go`).
 They are callable backstops; the chain does not run the `crisis` module, so they
 are exercised in tests rather than auto-run on-chain.
 
@@ -32,9 +32,23 @@ returns an error rather than degrading silently. Under the runtime,
 the fault **halts the block rather than half-committing**.
 
 This is the intended safety posture for a monetary module: a halt is recoverable
-(the emergency authority can pause settlement; operators can patch), but a
-half-committed or silently-wrong mint is not. App-level validation covers this behavior: a forced finalization fault makes `FinalizeBlock` return an error and
-leaves the committed height unchanged with no finalized epoch written.
+(the emergency authority can pause rewards to stop value moving while operators
+patch), but a half-committed or silently-wrong mint is not. App-level validation
+covers this behavior: a forced finalization fault makes `FinalizeBlock` return an
+error and leaves the committed height unchanged with no finalized epoch written.
+
+Be precise about what pausing buys you, because it is **not** a way to stop the
+epoch lifecycle:
+
+| While paused | Behavior |
+|---|---|
+| Epoch finalization | **still runs.** The boundary is unconditional — a paused epoch closes, having counted zero reward-enabled blocks, and so emits nothing |
+| Settlement materialization | **still runs.** The settlements for whichever epoch just closed are created as usual |
+| Settlement clock | **frozen.** A paused chain produces blocks but no settlement time, and paused blocks are not repaid on resume — so settlement deadlines are held, not consumed |
+| Monetary release | **stopped.** Chunk submission and settlement finalization are both refused |
+
+The clock freeze is the operationally important half: it means a pause does not
+silently burn a settlement's remaining window while an incident is being worked.
 
 :::warning Operator implication
 Because rewards is fail-closed, a genuine finalization fault stops block

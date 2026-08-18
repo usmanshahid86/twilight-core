@@ -11,7 +11,7 @@ have no effect on consensus, modules, genesis, or app behaviour.
 
 | File | What it is |
 |---|---|
-| `twilight-descriptors.pb` | A self-contained binary `FileDescriptorSet` (protoc `--include_imports`) covering: the **Cosmos SDK tx envelope** (`cosmos.tx.v1beta1.{TxRaw,Tx,TxBody,AuthInfo,SignerInfo,Fee}`, `cosmos.tx.signing.v1beta1.SignMode`), signer pubkey types (`cosmos.crypto.{secp256k1,ed25519,multisig}`), auth/bank/coin/pagination, the Twilight `coreslot` + `rewards` protos, **and all transitive deps**. One file resolves a raw tx end-to-end. |
+| `twilight-descriptors.pb` | A self-contained binary `FileDescriptorSet` (protoc `--include_imports`) covering: the **Cosmos SDK tx envelope** (`cosmos.tx.v1beta1.{TxRaw,Tx,TxBody,AuthInfo,SignerInfo,Fee}`, `cosmos.tx.signing.v1beta1.SignMode`), signer pubkey types (`cosmos.crypto.{secp256k1,ed25519,multisig}`), auth/bank/coin/pagination, the Twilight `coreslot` + `rewards` + `mining` protos, **and all transitive deps**. One file resolves a raw tx end-to-end. |
 | `twilight-msg-type-urls.json` | Manifest of the registered SDK `Msg` type URLs (the concrete `sdk.Msg` implementations the chain accepts). |
 
 ## Regenerate
@@ -32,8 +32,8 @@ the Cosmos tx envelope **and** the twilight `Msg`s. The raw-tx decode flow:
 1. `cosmos.tx.v1beta1.TxRaw` ← the raw CometBFT tx bytes
 2. `cosmos.tx.v1beta1.TxBody` ← decode `TxRaw.body_bytes`
 3. for each `TxBody.messages[]` (an `Any`): look up `Any.type_url`, decode `Any.value`
-   against that message — including `/twilight.coreslot.v1.Msg…` and
-   `/twilight.rewards.v1.Msg…`
+   against that message — including `/twilight.coreslot.v1.Msg…`,
+   `/twilight.rewards.v1.Msg…` and `/twilight.mining.v1.Msg…`
 
 **TypeScript (protobufjs)** — load the descriptor once, then decode a raw tx:
 
@@ -98,13 +98,15 @@ message and query types resolve from the same root.
 ## Type URLs (authoritative)
 
 The chain registers these `sdk.Msg` implementations (see
-`x/coreslot/types/codec.go`, `x/rewards/types/codec.go`); `twilight-msg-type-urls.json`
-is the machine-readable copy:
+`x/coreslot/types/codec.go`, `x/rewards/types/codec.go`, `x/mining/types/codec.go`);
+`twilight-msg-type-urls.json` is the machine-readable copy:
 
 - `coreslot`: `MsgRegisterCoreSlot`, `MsgActivateCoreSlot`, `MsgInactivateCoreSlot`,
   `MsgSuspendCoreSlot`, `MsgRemoveCoreSlot`, `MsgRotateConsensusKey`,
-  `MsgUpdatePayoutAddress`, `MsgUpdateOperatorMetadata`, `MsgUpdateParams`
+  `MsgUpdatePayoutAddress`, `MsgUpdateOperatorMetadata`, `MsgUpdateSettlementAddress`,
+  `MsgUpdateSelectionPolicy`, `MsgUpdateParams`
 - `rewards`: `MsgUpdateRewardsParams`, `MsgPauseRewards`, `MsgResumeRewards`
+- `mining`: `MsgSubmitSettlementChunk`, `MsgFinalizeSettlement`
 
 ## Note
 

@@ -6,8 +6,8 @@ Every claim here was verified against the code in `twilight-core` (Cosmos SDK v0
 CometBFT). Use it as the checklist a reviewer holds the explorer design up against.
 
 > The single biggest source of explorer bugs on this chain: **it is CoreSlot-PoA +
-> rewards only — there is NO staking/gov/mint/distribution.** Anything in the explorer
-> that assumes a standard Cosmos validator/staking/gov model is wrong here.
+> rewards + mining only — there is NO staking/gov/mint/distribution.** Anything in the
+> explorer that assumes a standard Cosmos validator/staking/gov model is wrong here.
 
 ---
 
@@ -16,7 +16,7 @@ CometBFT). Use it as the checklist a reviewer holds the explorer design up again
 - SDK **v0.53.7**, CometBFT. App is a depinject `runtime.App`.
 - Native denom: **`utwlt`** (base, the only denom in stateful accounting); display `twlt`;
   symbol `TWLT`. Bech32 prefixes: accounts `twilight…`, consensus `twilightvalcons…`.
-- Registered modules: **auth, bank, consensus, tx, x/coreslot, x/rewards** (+ genutil/params via runtime).
+- Registered modules: **auth, bank, consensus, tx, x/coreslot, x/rewards, x/mining** (+ genutil/params via runtime).
 - **NOT present:** staking, gov, mint, distribution, slashing, IBC, group, feegrant,
   authz. Their REST/gRPC routes return **501 Not Implemented** — this is by design, not an
   outage. An explorer must not treat 501 on those as an error or a chain it can't index.
@@ -57,11 +57,20 @@ binary; the current binary serves them.
 ## 4. Decoding transactions (the explorer's raw-tx fallback)
 
 Type URLs are correct and registered as `sdk.Msg`:
-- coreslot (9): `/twilight.coreslot.v1.{MsgRegisterCoreSlot, MsgActivateCoreSlot,
+- coreslot (11): `/twilight.coreslot.v1.{MsgRegisterCoreSlot, MsgActivateCoreSlot,
   MsgInactivateCoreSlot, MsgSuspendCoreSlot, MsgRemoveCoreSlot, MsgRotateConsensusKey,
-  MsgUpdatePayoutAddress, MsgUpdateOperatorMetadata, MsgUpdateParams}`
+  MsgUpdatePayoutAddress, MsgUpdateOperatorMetadata, MsgUpdateSettlementAddress,
+  MsgUpdateSelectionPolicy, MsgUpdateParams}`
 - rewards (3): `/twilight.rewards.v1.{MsgUpdateRewardsParams, MsgPauseRewards,
   MsgResumeRewards}`
+- mining (2): `/twilight.mining.v1.{MsgSubmitSettlementChunk, MsgFinalizeSettlement}`
+
+`twilight-msg-type-urls.json` is the machine-readable copy of exactly this list; treat it
+as the authority over this prose.
+
+> **No mining tx CLI exists yet.** Both mining messages are registered and decodable, but
+> the node ships only `twilightd mining-query`. A client that submits settlement must build
+> the `Msg` itself. Do not model a `twilightd mining …` tx command; it is not there.
 
 Two supported decode paths:
 1. **Server-side (easy):** REST `GET /cosmos/tx/v1beta1/txs/{hash}` — the chain decodes
@@ -90,6 +99,12 @@ Full inventory: `docs/reference/rest-routes.md`. Highlights an indexer relies on
 `consensus/{consensus_address}` (hex), `pending-key-rotations`, `last-applied-validators`,
 `reserved-consensus-address/{consensus_address}` (hex), `slots/{slot_id}/reward-weight`.
 
+**x/mining** (`twilight.mining.v1.Query`, base `/twilight/mining/v1`):
+`settlements/{slot_id}/{epoch}`, `slots/{slot_id}/open-settlements`, `settlement-clock`,
+`distribution-mode-versions`, `distribution-mode-versions/{version}`,
+`selection-params-versions`, `selection-params-versions/{version}`,
+`settlement-params-versions`, `settlement-params-versions/{version}`.
+
 Query footguns the design MUST account for:
 - **`active-slots` not `slots/active`** — the latter collides with `slots/{slot_id}` and
   returns 400 (parsed as `slot_id="active"`).
@@ -115,12 +130,24 @@ Verified from `x/{rewards,coreslot}/keeper/events.go` + the `types` constants. E
 - `coreslot_registered`, `coreslot_activated`, `coreslot_inactivated`, `coreslot_suspended`,
   `coreslot_removed`, `coreslot_key_rotation_requested`, `coreslot_key_rotated`,
   `coreslot_rotation_canceled`, `coreslot_payout_updated`, `coreslot_metadata_updated`,
+  `coreslot_settlement_updated`, `coreslot_selection_policy_updated`,
   `coreslot_params_updated`, `coreslot_validator_update_emitted`
 - common attribute keys: `slot_id`, `operator_address`, `consensus_address`,
   `old_status`, `new_status`, `power`, `reason`, `old_consensus_address`,
   `new_consensus_address`, `effective_height`, `authority`, `height`
 
-If the indexer's event projections reference any event name NOT in these two lists (e.g.
+**x/mining:**
+- `mining_settlement_chunk_submitted` — `slot_id`, `epoch`, `chunk_index`,
+  `next_chunk_index`, `recipient_count`, `chunk_total`
+- `mining_settlement_finalized` — `slot_id`, `epoch`, `finalization_reason`,
+  `released_remainder`, `finalized_height`
+
+Mining events are an **accelerator, never a correctness requirement**: the settlement
+worker must be able to lose every event, restart, read committed state, and determine
+exactly what to do next. Every attribute above is also readable from state, so an indexer
+that misses events can rebuild from the queries in §5 rather than losing the settlement.
+
+If the indexer's event projections reference any event name NOT in these three lists (e.g.
 `reward_distributed`, `validator_jailed`, staking/gov events), that's a design error —
 those events do not exist.
 
@@ -216,7 +243,7 @@ in the node.
 - `docs/reference/rest-routes.md` — full REST route table
 - `docs/reference/swagger.md` + `app/openapi/twilight.swagger.json` — OpenAPI of the surface
 - `docs/proto/{twilight-descriptors.pb, twilight-msg-type-urls.json, README.md}` — tx decode
-- `proto/twilight/{coreslot,rewards}/v1/*.proto` — schema
-- `x/{coreslot,rewards}/types/codec.go` — registered Msg type URLs
-- `x/{coreslot,rewards}/keeper/events.go` + `types` consts — emitted events
-- `x/{coreslot,rewards}/keeper/query_server.go` — query semantics (pagination, not-found, hex keys)
+- `proto/twilight/{coreslot,rewards,mining}/v1/*.proto` — schema
+- `x/{coreslot,rewards,mining}/types/codec.go` — registered Msg type URLs
+- `x/{coreslot,rewards,mining}/types/events.go` — emitted events
+- `x/{coreslot,rewards,mining}/keeper/query_server.go` — query semantics (pagination, not-found, hex keys)
