@@ -423,3 +423,104 @@ func TestProtocolSelectionTargetIsRefusedRatherThanGuessed(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 }
+
+// TestAMisfiledFinalizedEpochIsNotProofThatItClosed is the key/value agreement
+// rule on the finalized history.
+//
+// A row stored at epoch N that declares some other epoch is not evidence that N
+// finalized. Accepting it would attribute an entitlement set, an anchor and a
+// cursor advance to an epoch that never closed — and every deadline derived from
+// that anchor would follow from a block that has nothing to do with it.
+func TestAMisfiledFinalizedEpochIsNotProofThatItClosed(t *testing.T) {
+	k, ctx, rewards := initialized(t)
+	rewards.finalizeAs(1, 7)
+	rewards.entitlements[1] = []rewardstypes.SlotEntitlement{entitlement(1, 1, "500")}
+
+	err := k.EndBlock(ctx)
+	require.ErrorIs(t, err, types.ErrInvalidState)
+	require.Contains(t, err.Error(), "stored at epoch 1 declares epoch 7")
+
+	// The whole EndBlock transition is discarded, clock tick included.
+	_, found, err := k.GetSettlement(ctx, 1, 1)
+	require.NoError(t, err)
+	require.False(t, found, "no settlement")
+	_, found, err = k.GetSettlementEpochAnchor(ctx, 1)
+	require.NoError(t, err)
+	require.False(t, found, "no epoch anchor")
+	cursor, err := k.GetLastProcessedRewardEpoch(ctx)
+	require.NoError(t, err)
+	require.Zero(t, cursor, "no cursor movement")
+	clock, err := k.GetSettlementClock(ctx)
+	require.NoError(t, err)
+	require.Zero(t, clock, "no partial EndBlock state survives the outer cache")
+}
+
+// TestAGapInFinalizedHistoryIsRefusedRatherThanSkipped closes the case where the
+// expected epoch is ABSENT but a later one exists.
+//
+// Before this check, absence returned "nothing to materialize" immediately, so a
+// gap — target missing, successor present — was silently tolerated forever: the
+// cursor could never advance past the hole, and the successor would eventually be
+// materialized against a settlement clock from the wrong block.
+//
+// The probe is exactly one epoch. Any gap at all is corruption, so one lookup
+// settles it; nothing scans and nothing drains a backlog.
+func TestAGapInFinalizedHistoryIsRefusedRatherThanSkipped(t *testing.T) {
+	k, ctx, rewards := initialized(t)
+	// Epoch 1 never finalized; epoch 2 did.
+	rewards.finalize(2, entitlement(1, 2, "500"))
+
+	err := k.EndBlock(ctx)
+	require.ErrorIs(t, err, types.ErrInvalidState)
+	require.Contains(t, err.Error(), "reward epoch 2 is finalized while epoch 1 is not yet materialized")
+
+	_, found, err := k.GetSettlement(ctx, 1, 2)
+	require.NoError(t, err)
+	require.False(t, found, "no settlement")
+	_, found, err = k.GetSettlementEpochAnchor(ctx, 2)
+	require.NoError(t, err)
+	require.False(t, found, "no epoch anchor")
+	cursor, err := k.GetLastProcessedRewardEpoch(ctx)
+	require.NoError(t, err)
+	require.Zero(t, cursor, "no cursor movement")
+	clock, err := k.GetSettlementClock(ctx)
+	require.NoError(t, err)
+	require.Zero(t, clock, "complete EndBlock cache rollback")
+}
+
+// TestAnOrdinaryUnfinalizedBlockStillAdvancesTheClock keeps the gap probe from
+// turning every quiet block into a failure.
+//
+// Neither the target nor its successor exists, which is what almost every block
+// looks like. That must stay an ordinary no-op with the clock still ticking.
+func TestAnOrdinaryUnfinalizedBlockStillAdvancesTheClock(t *testing.T) {
+	k, ctx, _ := initialized(t)
+
+	for i := 0; i < 3; i++ {
+		require.NoError(t, k.EndBlock(ctx))
+	}
+	clock, err := k.GetSettlementClock(ctx)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), clock)
+	cursor, err := k.GetLastProcessedRewardEpoch(ctx)
+	require.NoError(t, err)
+	require.Zero(t, cursor)
+}
+
+// TestAMisfiledSuccessorIsAlsoRefused covers the probe's own identity check.
+//
+// A misfiled row must not be able to answer "later work is waiting" either. If it
+// could, a record filed under the wrong key would halt the chain on a lie rather
+// than being reported as the corruption it is.
+func TestAMisfiledSuccessorIsAlsoRefused(t *testing.T) {
+	k, ctx, rewards := initialized(t)
+	rewards.finalizeAs(2, 9)
+
+	err := k.EndBlock(ctx)
+	require.ErrorIs(t, err, types.ErrInvalidState)
+	require.Contains(t, err.Error(), "stored at epoch 2 declares epoch 9")
+
+	clock, err := k.GetSettlementClock(ctx)
+	require.NoError(t, err)
+	require.Zero(t, clock)
+}

@@ -76,12 +76,20 @@ type rewardsKeeperMock struct {
 
 	payCalls       int
 	remainderCalls int
+
+	// finalizedRows supplies the EXACT stored row for an epoch, including one whose
+	// EpochNumber disagrees with the key it is filed under. Without it the double
+	// would synthesize identity from the lookup key, which makes the key/value
+	// agreement check in materialization unfalsifiable — the double would be
+	// asserting the very property under test.
+	finalizedRows map[uint64]rewardstypes.EpochReward
 }
 
 func newRewardsMock() *rewardsKeeperMock {
 	return &rewardsKeeperMock{
 		releaseEnabled: true,
 		finalized:      map[uint64]bool{},
+		finalizedRows:  map[uint64]rewardstypes.EpochReward{},
 		entitlements:   map[uint64][]rewardstypes.SlotEntitlement{},
 		epochLength:    360,
 	}
@@ -94,10 +102,19 @@ func (m *rewardsKeeperMock) finalize(epoch uint64, entitlements ...rewardstypes.
 }
 
 func (m *rewardsKeeperMock) GetFinalizedEpoch(_ context.Context, epoch uint64) (rewardstypes.EpochReward, bool, error) {
+	if row, ok := m.finalizedRows[epoch]; ok {
+		return row, true, nil
+	}
 	if !m.finalized[epoch] {
 		return rewardstypes.EpochReward{}, false, nil
 	}
 	return rewardstypes.EpochReward{EpochNumber: epoch}, true, nil
+}
+
+// finalizeAs files a finalized row under one key while the row declares another.
+// The only way to reach the key/value agreement check.
+func (m *rewardsKeeperMock) finalizeAs(key, declared uint64) {
+	m.finalizedRows[key] = rewardstypes.EpochReward{EpochNumber: declared}
 }
 
 func (m *rewardsKeeperMock) IterateEntitlementsForEpoch(_ context.Context, epoch uint64) ([]rewardstypes.SlotEntitlement, error) {
