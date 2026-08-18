@@ -37,6 +37,13 @@ protoc "${INCLUDES[@]}" "$GOCOSMOS_OUT" \
   proto/twilight/rewards/v1/tx.proto \
   proto/twilight/rewards/v1/query.proto
 
+# x/mining. The query and tx services arrive with the Settlement message gates;
+# until then this module generates state and genesis types only, so it has no
+# gateway or OpenAPI entry below.
+protoc "${INCLUDES[@]}" "$GOCOSMOS_OUT" \
+  proto/twilight/mining/v1/mining.proto \
+  proto/twilight/mining/v1/genesis.proto
+
 # REST gateway: generate *.pb.gw.go for the annotated query services only.
 protoc "${INCLUDES[@]}" "$GATEWAY_OUT" proto/twilight/coreslot/v1/query.proto
 protoc "${INCLUDES[@]}" "$GATEWAY_OUT" proto/twilight/rewards/v1/query.proto
@@ -64,15 +71,16 @@ protoc "${INCLUDES[@]}" \
   twilight/coreslot/v1/query.proto \
   twilight/rewards/v1/query.proto
 
-mkdir -p x/coreslot/types x/rewards/types
+mkdir -p x/coreslot/types x/rewards/types x/mining/types
 mv twilight/coreslot/v1/*.go x/coreslot/types/
 mv twilight/rewards/v1/*.go x/rewards/types/
+mv twilight/mining/v1/*.go x/mining/types/
 rm -rf twilight
-for types_dir in x/coreslot/types x/rewards/types; do
+for types_dir in x/coreslot/types x/rewards/types x/mining/types; do
   sed -i.bak 's#github.com/gogo/protobuf/grpc#github.com/cosmos/gogoproto/grpc#g' "$types_dir"/*.pb.go
   sed -i.bak 's#github.com/gogo/protobuf/proto#github.com/cosmos/gogoproto/proto#g' "$types_dir"/*.pb.go
   sed -i.bak 's#_ "google/api"#_ "google.golang.org/genproto/googleapis/api/annotations"#g' "$types_dir"/*.pb.go
   rm -f "$types_dir"/*.pb.go.bak
 done
-gofmt -w x/coreslot/types/*.pb.go x/rewards/types/*.pb.go
+gofmt -w x/coreslot/types/*.pb.go x/rewards/types/*.pb.go x/mining/types/*.pb.go
 gofmt -w x/coreslot/types/*.pb.gw.go x/rewards/types/*.pb.gw.go

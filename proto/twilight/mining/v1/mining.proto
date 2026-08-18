@@ -1,0 +1,174 @@
+syntax = "proto3";
+package twilight.mining.v1;
+
+option go_package = "github.com/twilight-project/twilight-core/x/mining/types";
+
+// Enum numeric values are permanent after release. Future upgrades may add
+// values but must not reuse, reorder, or change existing numeric values.
+//
+// The mode is chain-wide, authority-scheduled, historically versioned, effective
+// only at epoch boundaries, and non-retroactive. There is deliberately no
+// per-Slot opt-out and no boolean shorthand: POC 1 reaches only
+// TRUSTED_AS_DISTRIBUTION, but the value that makes protocol Selection reachable
+// exists from the first release so a later tranche adds a producer rather than a
+// state migration.
+enum MiningDistributionMode {
+  MINING_DISTRIBUTION_MODE_UNSPECIFIED = 0;
+  MINING_DISTRIBUTION_MODE_TRUSTED_AS_DISTRIBUTION = 1;
+  MINING_DISTRIBUTION_MODE_PROTOCOL_SELECTION = 2;
+}
+
+// Enum numeric values are permanent after release. Future upgrades may add
+// values but must not reuse, reorder, or change existing numeric values.
+//
+// The technical mode a materialized settlement was created under. It is immutable
+// once materialized and decides whether participant chunks are admissible at all:
+// OPERATOR_ONLY admits none. Only TRUSTED_AS is reachable in POC 1; the other two
+// exist as structure for the Selection tranche and must not acquire an
+// applicability rule here.
+enum SettlementMode {
+  SETTLEMENT_MODE_UNSPECIFIED = 0;
+  SETTLEMENT_MODE_TRUSTED_AS = 1;
+  SETTLEMENT_MODE_SELECTED_PARTICIPANTS = 2;
+  SETTLEMENT_MODE_OPERATOR_ONLY = 3;
+}
+
+// Enum numeric values are permanent after release. Future upgrades may add
+// values but must not reuse, reorder, or change existing numeric values.
+//
+// Records the authorization ARM through which a settlement reached FINALIZED,
+// never the identity of the caller. UNSPECIFIED is valid only while a settlement
+// is OPEN; a FINALIZED settlement carries exactly one other value.
+//
+// This is immutable audit metadata. Nothing may branch on it to decide who may
+// act or where value goes.
+enum SettlementFinalizationReason {
+  SETTLEMENT_FINALIZATION_REASON_UNSPECIFIED = 0;
+  SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY = 1;
+  SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_AFTER_DEADLINE = 2;
+  SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_OPERATOR_ONLY = 3;
+}
+
+// MiningDistributionModeVersion is one immutable entry of the chain-wide
+// distribution-mode history.
+//
+// It carries a validity INTERVAL rather than a single effective epoch, which is
+// what distinguishes it from the reward and settlement parameter families. The
+// interval shape is canonical and must not be flattened into the effective-epoch
+// record used by the other histories.
+message MiningDistributionModeVersion {
+  uint64 version = 1;
+  MiningDistributionMode mode = 2;
+  uint64 valid_from_epoch = 3;
+  // valid_until_epoch_exclusive is 0 for an open-ended current version.
+  uint64 valid_until_epoch_exclusive = 4;
+}
+
+// ScheduledMiningDistributionMode is the single pending mode change, keyed by the
+// epoch it becomes effective at.
+//
+// POC 1 defines the shape and provides no writer: there is no mode-update
+// transaction, so this collection is permanently empty and the promotion path is
+// unreachable.
+message ScheduledMiningDistributionMode {
+  uint64 effective_epoch = 1;
+  MiningDistributionMode mode = 2;
+}
+
+// SelectionParamsVersion is one immutable entry of the global Selection-parameter
+// history.
+//
+// POC 1 creates the genesis version because canonical fresh genesis requires the
+// history and requires every ACTIVE CoreSlot policy to satisfy it. Nothing in
+// POC 1 runs Selection, and no runtime update path exists.
+message SelectionParamsVersion {
+  uint64 version = 1;
+  uint64 effective_epoch = 2;
+  uint64 max_selection_rate_bps = 3;
+  uint64 max_selected_participants_per_selection = 4;
+  uint64 max_candidates_per_selection = 5;
+  uint64 beacon_start_offset_blocks = 6;
+  uint64 beacon_window_blocks = 7;
+  uint64 min_external_beacon_blocks = 8;
+  uint64 min_distinct_external_proposers = 9;
+}
+
+// ScheduledSelectionParams is the single pending Selection-parameter change.
+// POC 1 defines the shape and provides no writer.
+message ScheduledSelectionParams {
+  uint64 effective_epoch = 1;
+  uint64 max_selection_rate_bps = 2;
+  uint64 max_selected_participants_per_selection = 3;
+  uint64 max_candidates_per_selection = 4;
+  uint64 beacon_start_offset_blocks = 5;
+  uint64 beacon_window_blocks = 6;
+  uint64 min_external_beacon_blocks = 7;
+  uint64 min_distinct_external_proposers = 8;
+}
+
+// SettlementParamsVersion is one immutable entry of the settlement-validity
+// parameter history, bound to a target at its N-2 boundary before any Selection
+// outcome is knowable.
+//
+// A later update can never reduce or reinterpret the payout capacity or deadline
+// of an already-bound target.
+message SettlementParamsVersion {
+  uint64 version = 1;
+  uint64 effective_epoch = 2;
+  uint64 settlement_window_epochs = 3;
+  uint64 max_recipients_per_chunk = 4;
+  uint64 max_chunks_per_settlement = 5;
+  // min_recipient_payout_amount is a canonical base-denom integer as text. It is
+  // arbitrary precision and is never narrowed to a fixed-width type: a legitimate
+  // floor may exceed the range of a uint64.
+  string min_recipient_payout_amount = 6;
+}
+
+// ScheduledSettlementParams is the single pending settlement-parameter change.
+// POC 1 defines the shape and provides no writer.
+message ScheduledSettlementParams {
+  uint64 effective_epoch = 1;
+  uint64 settlement_window_epochs = 2;
+  uint64 max_recipients_per_chunk = 3;
+  uint64 max_chunks_per_settlement = 4;
+  string min_recipient_payout_amount = 5;
+}
+
+// SettlementEpochAnchor records, once per epoch, the canonical settlement clock
+// that epoch's settlements were created at.
+//
+// Exactly one exists for an epoch that contains at least one settlement, created
+// atomically with that epoch's complete set. An epoch with no settlements has no
+// anchor. The creation height is derived as the epoch's end height and is
+// deliberately not stored here.
+message SettlementEpochAnchor {
+  uint64 epoch = 1;
+  uint64 created_settlement_clock = 2;
+}
+
+// Settlement is the canonical per-Slot settlement workflow record, keyed
+// (slot_id, epoch), with stored lifecycle OPEN -> FINALIZED.
+//
+// # What this record deliberately does NOT contain
+//
+// released_amount is absent. Its canonical authority is the corresponding
+// x/rewards SlotEntitlement: a participant chunk increases the entitlement-side
+// value, and finalization derives the remainder from it. A copy here would be a
+// second monetary authority free to diverge from the one the release boundary
+// actually enforces.
+//
+// participant_distribution_ceiling, created_height, created_settlement_clock and
+// deadline_clock are absent for the same reason in a weaker form: each is derived
+// from the epoch anchor plus the target-bound settlement parameters, and a stored
+// copy would be a forgeable duplicate of something canonical.
+message Settlement {
+  uint64 slot_id = 1;
+  uint64 epoch = 2;
+  uint64 distribution_mode_version = 3;
+  SettlementMode settlement_mode = 4;
+  uint64 settlement_params_version = 5;
+  uint64 next_chunk_index = 6;
+  bool finalized = 7;
+  uint64 finalized_height = 8;
+  SettlementFinalizationReason finalization_reason = 9;
+}

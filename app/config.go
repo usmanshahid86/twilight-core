@@ -55,13 +55,18 @@ var AppConfig = depinject.Configs(
 					AppName: Name,
 					// auth and bank initialize module accounts before rewards
 					// genesis runs; coreslot precedes rewards by convention.
-					InitGenesis: []string{"auth", "bank", "consensus", "coreslot", "rewards"},
+					// mining initializes last: its genesis cross-checks already-imported
+					// CoreSlot policies against the initial Selection parameters, and
+					// x/coreslot must gain no dependency on x/mining for that check.
+					InitGenesis: []string{"auth", "bank", "consensus", "coreslot", "rewards", "mining"},
 					// rewards credits active blocks at BeginBlock; coreslot has no
 					// BeginBlocker.
 					BeginBlockers: []string{"rewards"},
 					// coreslot remains the sole validator-update emitter and runs
-					// first; rewards finalizes epoch accounting after.
-					EndBlockers:       []string{"coreslot", "rewards"},
+					// first; rewards finalizes epoch accounting after; mining then
+					// advances the settlement clock and materializes settlements for
+					// whatever epoch rewards just closed, so it must run last.
+					EndBlockers:       []string{"coreslot", "rewards", "mining"},
 					OverrideStoreKeys: []*runtimev1alpha1.StoreKeyConfig{{ModuleName: "auth", KvStoreKey: "acc"}},
 				}),
 			},

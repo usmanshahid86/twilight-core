@@ -154,7 +154,87 @@ const (
 	// bounds it is not final mainnet calibration: economic recalibration before
 	// the production-genesis freeze remains mandatory.
 	HardMaxEmissionTreasuryShareBps uint64 = 5_000
+
+	// Immutable Settlement bounds.
+	//
+	// Governance configures the settlement window, the chunk shape and the payout
+	// floor through versioned SettlementParams. These are the endpoints of the
+	// intervals it may configure within; moving an endpoint is a consensus-rule
+	// upgrade rather than a parameter change.
+	//
+	// The minimums are 1 rather than 0, and that is load-bearing in each case. A
+	// zero window would put a settlement past its deadline the instant it is
+	// created; a zero recipient ceiling would forbid every chunk; a zero chunk
+	// ceiling would forbid participant distribution outright. Each is a
+	// configuration that silently converts every settlement to operator-only, which
+	// is a distribution decision governance does not get to make through a resource
+	// limit.
+	//
+	// The maximums bound the work one authorized signer can require of consensus. A
+	// chunk is O(recipients) and a settlement admits at most max_chunks of them, so
+	// the pair closes the settlement side of the workload argument at
+	// 32 x 4 = 128 participant transfers per settlement.
+	//
+	// Ratified for the current V2 pre-production profile alongside the epoch-length
+	// and treasury-share bounds. Hostile-load confirmation of the settlement-window
+	// pairing — recipients x chunks x concurrent settlements inside one window —
+	// remains mandatory before the production-genesis freeze.
+	HardMinSettlementWindowEpochs uint64 = 1
+	HardMinRecipientsPerChunk     uint64 = 1
+	HardMaxRecipientsPerChunk     uint64 = 32
+	HardMinChunksPerSettlement    uint64 = 1
+	HardMaxChunksPerSettlement    uint64 = 4
 )
+
+// HardMinSettlementPayoutAmount is the immutable floor, in the native base denom,
+// beneath which a configured minimum recipient payout may not be set.
+//
+// It is not a rounding convenience. On a feeless chain a settlement fan-out is a
+// permanent-account-creation primitive: every distinct recipient receiving any
+// positive amount becomes an account the state carries forever, at no cost to the
+// sender. A dust floor makes the cost of creating those accounts scale with real
+// value distributed rather than with how many addresses a signer can enumerate.
+//
+// Returned as a value rather than exposed as a package variable so no caller can
+// retain a reference to a shared monetary amount. Pair it with the existing
+// ValidateMinRecipientPayoutAmount, which takes the floor as an argument:
+//
+//	ValidateMinRecipientPayoutAmount(configured, HardMinSettlementPayoutAmount())
+func HardMinSettlementPayoutAmount() sdkmath.Int {
+	return sdkmath.NewInt(10_000)
+}
+
+// ValidateSettlementWindowEpochs enforces
+//
+//	value >= HardMinSettlementWindowEpochs
+//
+// There is deliberately no upper bound. A long window delays only the moment
+// remainder finalization becomes permissionless; it cannot enlarge what may be
+// paid, because the participant ceiling is the already-fixed entitlement. An
+// upper bound here would be an invented protocol limit.
+func ValidateSettlementWindowEpochs(value uint64) error {
+	return requirePositiveAtLeast("settlement window epochs", value, HardMinSettlementWindowEpochs)
+}
+
+// ValidateMaxRecipientsPerChunk enforces
+//
+//	HardMinRecipientsPerChunk <= value <= HardMaxRecipientsPerChunk
+func ValidateMaxRecipientsPerChunk(value uint64) error {
+	if err := requirePositiveAtLeast("max recipients per chunk", value, HardMinRecipientsPerChunk); err != nil {
+		return err
+	}
+	return requirePositiveAtMost("max recipients per chunk", value, HardMaxRecipientsPerChunk)
+}
+
+// ValidateMaxChunksPerSettlement enforces
+//
+//	HardMinChunksPerSettlement <= value <= HardMaxChunksPerSettlement
+func ValidateMaxChunksPerSettlement(value uint64) error {
+	if err := requirePositiveAtLeast("max chunks per settlement", value, HardMinChunksPerSettlement); err != nil {
+		return err
+	}
+	return requirePositiveAtMost("max chunks per settlement", value, HardMaxChunksPerSettlement)
+}
 
 // ValidateMaxActiveSlots enforces
 //

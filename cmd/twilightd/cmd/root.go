@@ -35,9 +35,36 @@ import (
 	"github.com/twilight-project/twilight-core/app"
 	"github.com/twilight-project/twilight-core/x/coreslot"
 	coreslotcli "github.com/twilight-project/twilight-core/x/coreslot/client/cli"
+	"github.com/twilight-project/twilight-core/x/mining"
 	"github.com/twilight-project/twilight-core/x/rewards"
 	rewardscli "github.com/twilight-project/twilight-core/x/rewards/client/cli"
 )
+
+// BasicManager returns the module basics that `twilightd init` uses to write a
+// genesis document.
+//
+// Every module the app mounts a store for MUST appear here. A module that is
+// missing produces a genesis with no section for it, and the SDK's module manager
+// SKIPS InitGenesis for a module whose genesis data is absent rather than failing
+// — so the store is mounted, never written, and its IAVL tree ends up with no
+// versions at all. The chain then still produces blocks, but every historical
+// state read fails for EVERY module, because loading a version requires every
+// mounted store to have it.
+//
+// That failure is silent at startup and only appears as unservable queries, which
+// is why the correspondence is asserted by a test rather than left to review.
+func BasicManager() module.BasicManager {
+	return module.NewBasicManager(
+		auth.AppModuleBasic{},
+		bank.AppModuleBasic{},
+		consensus.AppModuleBasic{},
+		coreslot.NewAppModuleBasic(app.AuthorityAddress(), app.EmergencyAuthorityAddress()),
+		// rewards basic module: codec/genesis/interface registration for `init`.
+		// Tx/query CLI commands are deferred to Phase 9.
+		rewards.NewAppModuleBasic(),
+		mining.NewAppModuleBasic(),
+	)
+}
 
 func NewRootCmd() *cobra.Command {
 	encoding := app.MakeEncodingConfig()
@@ -51,15 +78,7 @@ func NewRootCmd() *cobra.Command {
 		WithHomeDir(app.DefaultNodeHome).
 		WithViper(app.Name)
 
-	basicManager := module.NewBasicManager(
-		auth.AppModuleBasic{},
-		bank.AppModuleBasic{},
-		consensus.AppModuleBasic{},
-		coreslot.NewAppModuleBasic(app.AuthorityAddress(), app.EmergencyAuthorityAddress()),
-		// rewards basic module: codec/genesis/interface registration for `init`.
-		// Tx/query CLI commands are deferred to Phase 9.
-		rewards.NewAppModuleBasic(),
-	)
+	basicManager := BasicManager()
 
 	root := &cobra.Command{
 		Use: app.Name + "d", Short: "Twilight Proof-of-Authority node", SilenceErrors: true,

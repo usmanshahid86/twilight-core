@@ -130,8 +130,14 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	a := bootApp(t)
 
 	// Resolved order is necessary but not sufficient; assert it, then prove dispatch.
-	require.Equal(t, []string{"coreslot", "rewards"}, a.ModuleManager.OrderEndBlockers)
+	require.Equal(t, []string{"coreslot", "rewards", "mining"}, a.ModuleManager.OrderEndBlockers)
 	require.Equal(t, []string{"rewards"}, a.ModuleManager.OrderBeginBlockers)
+	// mining materializes settlements for whatever epoch rewards just closed, so
+	// it must initialize and end-block after rewards. Its genesis additionally
+	// cross-checks already-imported CoreSlot policies, which is why it is last.
+	require.Equal(t,
+		[]string{"auth", "bank", "consensus", "coreslot", "rewards", "mining"},
+		a.ModuleManager.OrderInitGenesis)
 
 	rParams := rewardstypes.DefaultParams()
 	// The shortest admissible epoch, so it still closes within the test. Toy
