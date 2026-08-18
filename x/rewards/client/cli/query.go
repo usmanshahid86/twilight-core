@@ -47,10 +47,6 @@ func GetQueryCmd() *cobra.Command {
 		add("epoch-info", cobra.NoArgs, false, func(*cobra.Command, []string) (interface{}, error) { return &types.QueryEpochInfoRequest{}, nil }),
 		add("next-halving", cobra.NoArgs, false, func(*cobra.Command, []string) (interface{}, error) { return &types.QueryNextHalvingRequest{}, nil }),
 		add("epoch-reward [epoch]", cobra.ExactArgs(1), false, func(_ *cobra.Command, a []string) (interface{}, error) { return buildEpochRewardRequest(a) }),
-		add("slot-rewards [slot-id]", cobra.ExactArgs(1), true, func(cmd *cobra.Command, a []string) (interface{}, error) {
-			return buildSlotRewardsRequest(a, cmd.Flags())
-		}),
-		add("claimable [slot-id] [start-epoch] [end-epoch]", cobra.ExactArgs(3), false, func(_ *cobra.Command, a []string) (interface{}, error) { return buildClaimableRequest(a) }),
 		add("cumulative-emitted", cobra.NoArgs, false, func(*cobra.Command, []string) (interface{}, error) {
 			return &types.QueryCumulativeEmittedRequest{}, nil
 		}),
@@ -97,10 +93,6 @@ func dispatchQuery(ctx context.Context, qc types.QueryClient, req interface{}) (
 		return qc.NextHalving(ctx, v)
 	case *types.QueryEpochRewardRequest:
 		return qc.EpochReward(ctx, v)
-	case *types.QuerySlotRewardsRequest:
-		return qc.SlotRewards(ctx, v)
-	case *types.QueryClaimableRewardsRequest:
-		return qc.ClaimableRewards(ctx, v)
 	case *types.QuerySlotEntitlementRequest:
 		return qc.SlotEntitlement(ctx, v)
 	case *types.QuerySlotEntitlementsByEpochRequest:
@@ -127,34 +119,6 @@ func buildEpochRewardRequest(args []string) (*types.QueryEpochRewardRequest, err
 		return nil, err
 	}
 	return &types.QueryEpochRewardRequest{EpochNumber: epoch}, nil
-}
-
-func buildSlotRewardsRequest(args []string, fs *pflag.FlagSet) (*types.QuerySlotRewardsRequest, error) {
-	id, err := strconv.ParseUint(args[0], 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	page, err := client.ReadPageRequest(fs)
-	if err != nil {
-		return nil, err
-	}
-	return &types.QuerySlotRewardsRequest{SlotId: id, Pagination: page}, nil
-}
-
-func buildClaimableRequest(args []string) (*types.QueryClaimableRewardsRequest, error) {
-	id, err := strconv.ParseUint(args[0], 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	start, err := strconv.ParseUint(args[1], 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	end, err := strconv.ParseUint(args[2], 10, 64)
-	if err != nil {
-		return nil, err
-	}
-	return &types.QueryClaimableRewardsRequest{SlotId: id, StartEpoch: start, EndEpoch: end}, nil
 }
 
 func buildCurrentActiveBlocksRequest(fs *pflag.FlagSet) (*types.QueryCurrentEpochActiveBlocksRequest, error) {

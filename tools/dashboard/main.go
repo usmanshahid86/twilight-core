@@ -36,10 +36,9 @@ import (
 var webFS embed.FS
 
 var (
-	rpcAddr  = flag.String("rpc", "http://localhost:26657", "CometBFT RPC of the devnet node")
-	listen   = flag.String("listen", ":8080", "address to serve the dashboard on")
-	denom    = flag.String("denom", "utwlt", "accounting denom")
-	maxSlots = flag.Int("max-slots", 64, "max slots/claim-rows to scan")
+	rpcAddr = flag.String("rpc", "http://localhost:26657", "CometBFT RPC of the devnet node")
+	listen  = flag.String("listen", ":8080", "address to serve the dashboard on")
+	denom   = flag.String("denom", "utwlt", "accounting denom")
 )
 
 type server struct {
@@ -81,7 +80,6 @@ func main() {
 	mux.HandleFunc("/api/params", s.handle(s.params))
 	mux.HandleFunc("/api/epochs", s.handle(s.epochs))
 	mux.HandleFunc("/api/validators", s.handle(s.validators))
-	mux.HandleFunc("/api/claims", s.handle(s.claims))
 	mux.HandleFunc("/api/blocks", s.handleReq(s.blocks))
 	mux.HandleFunc("/api/block", s.handleReq(s.block))
 	mux.HandleFunc("/api/txs", s.handleReq(s.txs))
@@ -169,7 +167,7 @@ func qint(r *http.Request, key string, def, max int) int {
 // --- block / tx browsing ---------------------------------------------------
 
 type decodedMsg struct {
-	Type  string          `json:"type"`            // proto type URL, e.g. /twilight.rewards.v1.MsgClaimRewards
+	Type  string          `json:"type"`            // proto type URL, e.g. /twilight.mining.v1.MsgSubmitSettlementChunk
 	Body  json.RawMessage `json:"body,omitempty"`  // codec-decoded fields (custom Msgs included)
 	Error string          `json:"error,omitempty"` // set if the message JSON marshal failed
 }
@@ -422,23 +420,4 @@ func (s *server) validators(ctx context.Context) (any, error) {
 		out["cometbft_total"] = v.Total
 	}
 	return out, nil
-}
-
-func (s *server) claims(ctx context.Context) (any, error) {
-	rows := []json.RawMessage{}
-	slots, err := s.coreQ.CoreSlots(ctx, &coreslottypes.QueryCoreSlotsRequest{})
-	if err != nil {
-		return map[string]any{"by_slot": rows}, nil
-	}
-	for i, sl := range slots.Slots {
-		if i >= *maxSlots {
-			break
-		}
-		r, err := s.rewardsQ.SlotRewards(ctx, &rewardstypes.QuerySlotRewardsRequest{SlotId: sl.SlotId})
-		if err != nil {
-			continue
-		}
-		rows = append(rows, s.raw(r))
-	}
-	return map[string]any{"by_slot": rows}, nil
 }

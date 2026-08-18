@@ -20,9 +20,9 @@ const cards: Card[] = [
   },
   {
     tag: "Users",
-    title: "Claim rewards",
-    desc: "How rewards are minted and distributed, and how anyone can claim them.",
-    to: "/rewards/claims",
+    title: "Epoch lifecycle",
+    desc: "How an epoch closes, what it mints, and the entitlement it leaves behind.",
+    to: "/rewards/epoch-lifecycle",
   },
   {
     tag: "Concepts",

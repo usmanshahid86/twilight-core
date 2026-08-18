@@ -25,18 +25,6 @@ func paginatedFlags(t *testing.T, set map[string]string) *cobra.Command {
 	return c
 }
 
-func TestBuildSlotRewardsRequest(t *testing.T) {
-	c := paginatedFlags(t, map[string]string{"limit": "5"})
-	req, err := buildSlotRewardsRequest([]string{"3"}, c.Flags())
-	require.NoError(t, err)
-	require.Equal(t, uint64(3), req.SlotId)
-	require.NotNil(t, req.Pagination)
-	require.Equal(t, uint64(5), req.Pagination.Limit)
-
-	_, err = buildSlotRewardsRequest([]string{"not-a-number"}, c.Flags())
-	require.Error(t, err)
-}
-
 func TestBuildCurrentActiveBlocksRequest(t *testing.T) {
 	c := paginatedFlags(t, map[string]string{"limit": "4", "offset": "2"})
 	req, err := buildCurrentActiveBlocksRequest(c.Flags())
@@ -51,16 +39,6 @@ func TestBuildEpochRewardRequest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), req.EpochNumber)
 	_, err = buildEpochRewardRequest([]string{"x"})
-	require.Error(t, err)
-}
-
-func TestBuildClaimableRequest(t *testing.T) {
-	req, err := buildClaimableRequest([]string{"3", "1", "5"})
-	require.NoError(t, err)
-	require.Equal(t, uint64(3), req.SlotId)
-	require.Equal(t, uint64(1), req.StartEpoch)
-	require.Equal(t, uint64(5), req.EndEpoch)
-	_, err = buildClaimableRequest([]string{"3", "bad", "5"})
 	require.Error(t, err)
 }
 
@@ -90,17 +68,6 @@ func TestBuildEpochBoundariesRequest(t *testing.T) {
 	require.Equal(t, uint64(7), req.EpochNumber)
 
 	_, err = buildEpochBoundariesRequest([]string{"bad"})
-	require.Error(t, err)
-}
-func TestBuildClaimMsg(t *testing.T) {
-	msg, err := buildClaimMsg("signer-addr", "3", "1", "5")
-	require.NoError(t, err)
-	require.Equal(t, "signer-addr", msg.Signer)
-	require.Equal(t, uint64(3), msg.SlotId)
-	require.Equal(t, uint64(1), msg.StartEpoch)
-	require.Equal(t, uint64(5), msg.EndEpoch)
-
-	_, err = buildClaimMsg("signer-addr", "x", "1", "5")
 	require.Error(t, err)
 }
 

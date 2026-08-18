@@ -25,8 +25,6 @@ func setupQueryServer(t *testing.T) (types.QueryServer, sdk.Context, keeper.Keep
 	require.NoError(t, k.SetCurrentEpochConfig(ctx, cfg))
 	seedEpochTimeline(t, k, ctx, params, types.RewardsState{CurrentEpoch: 3, CurrentEpochStartHeight: 50})
 	require.NoError(t, k.SetFinalizedEpoch(ctx, validEpoch(1, params)))
-	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 1)))
-	require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, 2)))
 	require.NoError(t, k.SetActiveBlocks(ctx, 3, 1, 5))
 	require.NoError(t, k.SetActiveBlocks(ctx, 3, 2, 3))
 	return keeper.NewQueryServer(k), ctx, k
@@ -63,23 +61,6 @@ func TestQueryServerReadsAndErrors(t *testing.T) {
 	_, err = qs.EpochReward(ctx, &types.QueryEpochRewardRequest{EpochNumber: 99})
 	require.Equal(t, codes.NotFound, status.Code(err))
 	_, err = qs.EpochReward(ctx, &types.QueryEpochRewardRequest{EpochNumber: 0})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-
-	// SlotRewards: deterministic ascending epoch order
-	sr, err := qs.SlotRewards(ctx, &types.QuerySlotRewardsRequest{SlotId: 1})
-	require.NoError(t, err)
-	require.Len(t, sr.Rewards, 2)
-	require.Equal(t, uint64(1), sr.Rewards[0].EpochNumber)
-	require.Equal(t, uint64(2), sr.Rewards[1].EpochNumber)
-	_, err = qs.SlotRewards(ctx, &types.QuerySlotRewardsRequest{SlotId: 0})
-	require.Equal(t, codes.InvalidArgument, status.Code(err))
-
-	// ClaimableRewards: sums unclaimed positive amounts
-	cr, err := qs.ClaimableRewards(ctx, &types.QueryClaimableRewardsRequest{SlotId: 1, StartEpoch: 1, EndEpoch: 2})
-	require.NoError(t, err)
-	require.Len(t, cr.Rewards, 2)
-	require.Equal(t, "2", cr.TotalAmount)
-	_, err = qs.ClaimableRewards(ctx, &types.QueryClaimableRewardsRequest{SlotId: 1, StartEpoch: 2, EndEpoch: 1})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 
 	// CumulativeEmitted
@@ -123,28 +104,6 @@ func TestQueryServerPagination(t *testing.T) {
 	require.NoError(t, k.SetParams(ctx, params))
 	require.NoError(t, k.SetState(ctx, types.RewardsState{CurrentEpoch: 7, CurrentEpochStartHeight: 1, CumulativeEmitted: "0", CarryForwardRemainder: "0"}))
 	qs := keeper.NewQueryServer(k)
-
-	// --- SlotRewards: three records for slot 1, paginated by limit then next_key. ---
-	for epoch := uint64(1); epoch <= 3; epoch++ {
-		require.NoError(t, k.SetClaimRecord(ctx, validClaim(1, epoch)))
-	}
-	page1, err := qs.SlotRewards(ctx, &types.QuerySlotRewardsRequest{SlotId: 1, Pagination: &query.PageRequest{Limit: 2}})
-	require.NoError(t, err)
-	require.Len(t, page1.Rewards, 2)
-	require.Equal(t, uint64(1), page1.Rewards[0].EpochNumber)
-	require.Equal(t, uint64(2), page1.Rewards[1].EpochNumber)
-	require.NotNil(t, page1.Pagination)
-	require.NotEmpty(t, page1.Pagination.NextKey, "limit < total must return a continuation next_key")
-
-	page2, err := qs.SlotRewards(ctx, &types.QuerySlotRewardsRequest{SlotId: 1, Pagination: &query.PageRequest{Key: page1.Pagination.NextKey}})
-	require.NoError(t, err)
-	require.Len(t, page2.Rewards, 1)
-	require.Equal(t, uint64(3), page2.Rewards[0].EpochNumber)
-	require.Empty(t, page2.Pagination.NextKey, "final page must have an empty next_key")
-
-	empty, err := qs.SlotRewards(ctx, &types.QuerySlotRewardsRequest{SlotId: 9})
-	require.NoError(t, err)
-	require.Empty(t, empty.Rewards, "a slot with no records must return an empty list")
 
 	// --- CurrentEpochActiveBlocks: three slots for the open epoch, paginated. ---
 	for slot := uint64(1); slot <= 3; slot++ {

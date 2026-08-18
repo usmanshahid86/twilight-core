@@ -29,10 +29,10 @@ JSON field names are the proto snake-case names used in genesis and
 | `halving_mode` | enum | Mutable (queued) | Only `HALVING_MODE_SUPPLY_THRESHOLD` is supported. |
 | `distribution_method` | enum | Mutable (queued) | Only `DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS` is supported in v1. |
 | `remainder_policy` | enum | Mutable (queued) | Only `REMAINDER_POLICY_CARRY_FORWARD` is supported in v1. |
-| `max_claim_epochs_per_tx` | uint64 | Mutable (queued) | Max epochs a single claim tx may span. |
-| `emissions_enabled` | bool | **Emergency** (immediate) | When false, finalization mints zero and cumulative emitted does not advance. |
-| `epoch_settlement_enabled` | bool | **Emergency** (immediate) | When false, EndBlock does not finalize; active-block counting continues. |
-| `claims_enabled` | bool | **Emergency** (immediate) | When false, claim transactions are rejected. |
+| `max_claim_epochs_per_tx` | uint64 | **Deprecated** | Bounded a claim transaction's epoch span. The claim path is retired, so this gates nothing; validation still requires it to be nonzero so existing genesis files round-trip. |
+| `emissions_enabled` | bool | **Deprecated** | Superseded by the canonical pause state; carries no authority. |
+| `epoch_settlement_enabled` | bool | **Deprecated** | Superseded by the canonical pause state; carries no authority. |
+| `claims_enabled` | bool | **Deprecated** | Superseded by the canonical pause state; carries no authority. |
 | `fee_collection_enabled` | bool | Mutable (queued) | Must be `false` in v1 (enabling is rejected). |
 | `fee_distribution_enabled` | bool | Mutable (queued) | Must be `false` in v1 (enabling is rejected). |
 | `fee_denom` | string | Mutable (queued) | Must equal `native_denom` (`utwlt`). |
@@ -48,8 +48,11 @@ not stored in rewards.
 ## Mutability summary
 
 - **Immutable forever:** `native_denom`, `max_supply`.
-- **Immediate (emergency authority):** `emissions_enabled`,
-  `epoch_settlement_enabled`, `claims_enabled`.
+- **Immediate (emergency authority):** the canonical pause state, set by
+  `rewards pause` / `rewards resume` and effective at H+1. It is not a param.
+- **Deprecated, on the wire only:** `emissions_enabled`,
+  `epoch_settlement_enabled`, `claims_enabled`, `max_claim_epochs_per_tx`,
+  `epoch_length_blocks`. Their field numbers are never recycled.
 - **Queued (normal authority, activates next epoch boundary):** everything else.
 
 ## v1 feature guards

@@ -5,8 +5,12 @@ set -uo pipefail
 #
 # Runs the four-node localnet for SOAK_DURATION seconds with a short rewards
 # epoch, continuously asserting determinism + accounting at every epoch boundary,
-# and periodically exercising claims, an authority param update, an emergency
+# and periodically exercising an authority param update, an emergency
 # pause/resume, and a node restart. Emits soak.log + soak-summary.md under $NET.
+#
+# Scope: emission and accounting only. It does not exercise settlement, so the
+# emission it observes stays in the module account for the whole run. That is
+# what the accounting identity below asserts.
 #
 # Same harness, two durations: short+supervised locally; long+unattended on cloud.
 # See docs/research/x-rewards-soak-harness-design.md.
@@ -25,7 +29,6 @@ SOAK_DURATION="${SOAK_DURATION:-240}"
 EPOCH_LENGTH="${EPOCH_LENGTH:-360}"
 SUBSIDY="${SUBSIDY:-416190}"
 PREMINE="${PREMINE:-on}"
-CLAIM_EVERY_N="${CLAIM_EVERY_N:-3}"
 CHAOS="${CHAOS:-on}"
 PAUSE_CYCLE="${PAUSE_CYCLE:-on}"
 PARAM_DRILL="${PARAM_DRILL:-on}"
@@ -42,9 +45,6 @@ LOG="$NET/soak.log"
 SUMMARY="$NET/soak-summary.md"
 FAILURES=0
 HALTED=0
-CLAIMS=0
-CLAIMED_TOTAL=0
-LAST_CLAIMED_EPOCH=0
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing required command: $1" >&2; exit 2; }; }
 need curl; need jq
@@ -68,26 +68,6 @@ bank_balance() {
 current_epoch() { rq epoch-info | jq -r '.state.current_epoch | tonumber' 2>/dev/null || echo 0; }
 cumulative()    { rq cumulative-emitted | jq -r '.cumulative_emitted' 2>/dev/null || echo 0; }
 module_balance(){ rq module-balances | jq -r '.rewards_balance' 2>/dev/null || echo 0; }
-# claimed flag for (slot 1, epoch) from the proven rewards query.
-# Is slot 1's reward for epoch $1 claimed? Use the TARGETED `claimable` query
-# (ClaimableRewards: single epoch range, no pagination, returns only UNCLAIMED
-# records) — never the paginated `slot-rewards` list, whose default --limit page
-# is ascending by epoch and so DROPS the just-finalized epoch once the chain has
-# more than a page of records (the cause of the false "not marked claimed" FAILs).
-# Empty claimable set for [$1,$1] => claimed; a present record => not yet claimed.
-# (Slot 1 is always active here with a positive reward, so a missing record can
-# only mean claimed, not a zero-amount skip.)
-slot_claimed()  { rq claimable 1 "$1" "$1" | jq -e '(.rewards | length) == 0' >/dev/null 2>&1 && echo true || echo false; }
-# The claim record can still read one block behind the tx's /tx commit, so retry
-# briefly for the expected state before asserting (cf. agree_at_retry).
-slot_claimed_is() { # want_bool epoch  -- true within ~10s, else last-seen value
-  local want="$1" epoch="$2" got i
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    got="$(slot_claimed "$epoch")"; [[ "$got" == "$want" ]] && { echo "$got"; return; }
-    sleep 1
-  done
-  echo "$got"
-}
 
 # Minimum latest height across all nodes — a height every node has surely
 # committed, so a cross-node hash compare there can't false-positive on a peer
@@ -154,8 +134,6 @@ write_summary() {
 | Epochs finalized | $((epoch > 0 ? epoch - 1 : 0)) |
 | Cumulative emitted | ${cum}utwlt |
 | Module balance | ${modbal}utwlt |
-| Claims executed | $CLAIMS |
-| Claimed total | ${CLAIMED_TOTAL}utwlt |
 | Assertion failures | $FAILURES |
 | Halt detected | $((HALTED == 1 ? 1 : 0)) |
 | node0 data size | ${dbk} KB |
@@ -222,7 +200,7 @@ else
 fi
 
 operator0="$(jq -r '.address' "$NET/operator0.json")"  # slot 1 payout + authority
-operator1="$(jq -r '.address' "$NET/operator1.json")"  # claim signer + emergency authority
+operator1="$(jq -r '.address' "$NET/operator1.json")"  # emergency authority
 
 [[ "$RESUME" == "on" ]] && phase="resume" || phase="start"
 log "soak $phase: duration=${SOAK_DURATION}s epoch_length=$EPOCH_LENGTH premine=$PREMINE emission/epoch=$EPOCH_EMISSION per_slot=$PER_SLOT"
@@ -240,18 +218,15 @@ if [[ "$RESUME" != "on" ]]; then
   agree_at 2 || record_fail "no cross-node agreement at height 2"
   [[ "$(module_balance)" == "0" ]] || record_fail "module balance nonzero before any finalization"
 else
-  # Continue an existing chain: wait for the nodes to come back up, re-derive the
-  # already-claimed total from the coverage identity (module == cumulative - claimed),
-  # baseline the loop at the current epoch, and skip the one-shot drills (already
-  # proven in the prior run) so this is a pure continuous endurance pass.
+  # Continue an existing chain: wait for the nodes to come back up, baseline the
+  # loop at the current epoch, and skip the one-shot drills (already proven in the
+  # prior run) so this is a pure continuous endurance pass.
   cur_h="$(latest_height 0)"
   if ! wait_all_height "$cur_h"; then record_fail "resumed nodes did not reach height $cur_h"; HALTED=1; fi
   agree_at_retry "$(min_height_all)" || record_fail "resumed nodes do not agree on app hash"
   base_cum="$(cumulative)"; base_mod="$(module_balance)"
-  CLAIMED_TOTAL=$((base_cum - base_mod))
-  LAST_CLAIMED_EPOCH="$(current_epoch)"
   did_pause=1; did_chaos=1; did_param=2
-  log "resumed at epoch $(current_epoch) height $cur_h: cumulative=$base_cum module=$base_mod derived_claimed_total=$CLAIMED_TOTAL (one-shot drills skipped)"
+  log "resumed at epoch $(current_epoch) height $cur_h: cumulative=$base_cum module=$base_mod (one-shot drills skipped)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -302,52 +277,30 @@ while (( SECONDS - START < SOAK_DURATION )); do
     [[ "$cum" == "$expected_cum" ]] || record_fail "cumulative=$cum != expected $expected_cum after epoch $finalized"
 
     modbal="$(module_balance)"
-    expected_mod=$((expected_cum - CLAIMED_TOTAL))
-    [[ "$modbal" == "$expected_mod" ]] || record_fail "module balance=$modbal != expected $expected_mod (cumulative-claimed) after epoch $finalized"
+    # Nothing leaves the module account during this soak: it runs no settlement,
+    # and the emission has no other exit. So the module holds every utwlt emitted.
+    [[ "$modbal" == "$expected_cum" ]] || record_fail "module balance=$modbal != cumulative emitted $expected_cum after epoch $finalized"
 
     dbk="$(du -sk "$NET/node0/data" 2>/dev/null | awk '{print $1}')"
     log "epoch $finalized finalized: cumulative=$cum module=$modbal db=${dbk}KB"
 
-    # --- periodic claim of the just-finalized epoch ---
-    # Verified via proven rewards queries: the claim record flips claimed=true, a
-    # double claim fails, and the next epoch's coverage invariant confirms exactly
-    # PER_SLOT left the module account (the live `query bank balances` path is not
-    # used — it was never validated and races block production).
-    if (( finalized % CLAIM_EVERY_N == 0 )) && (( finalized > LAST_CLAIMED_EPOCH )); then
-      [[ "$(slot_claimed_is false "$finalized")" == "false" ]] || record_fail "epoch $finalized claim record not unclaimed before claim"
-      ccode="$(submit_and_wait 1 operator1 rewards claim 1 "$finalized" "$finalized")"
-      if [[ "$ccode" == "0" ]]; then
-        [[ "$(slot_claimed_is true "$finalized")" == "true" ]] || record_fail "epoch $finalized not marked claimed after successful claim"
-        dcode="$(submit_and_wait 1 operator1 rewards claim 1 "$finalized" "$finalized")"
-        [[ "$dcode" != "0" ]] || record_fail "double claim of epoch $finalized succeeded"
-        CLAIMS=$((CLAIMS + 1)); CLAIMED_TOTAL=$((CLAIMED_TOTAL + PER_SLOT)); LAST_CLAIMED_EPOCH=$finalized
-        log "claim epoch $finalized: record claimed, double-claim rejected (code $dcode), coverage tracked"
-      else
-        record_fail "claim epoch $finalized not successful (code $ccode)"
-      fi
-    fi
-
     # --- one emergency pause/resume cycle ---
-    # submit_and_wait blocks until each tx is in a block, so the params query
-    # reflects committed state and same-signer (operator1) sequences don't collide.
-    # The paused claim is expected to FAIL at DeliverTx (handlers run in the block,
-    # not at CheckTx), so a non-zero code there is the success condition.
+    # Global pause and resume. The protocol has no per-area selectors: the
+    # --emissions/--settlement/--claims flags were removed because they advertised
+    # a partial pause it does not have, and the claim path they gated is retired.
     if [[ "$PAUSE_CYCLE" == "on" ]] && (( did_pause == 0 )) && (( finalized >= 2 )); then
       did_pause=1
-      pcode="$(submit_and_wait 1 operator1 rewards pause --claims)"
+      pcode="$(submit_and_wait 1 operator1 rewards pause)"
       [[ "$pcode" == "0" ]] || record_fail "pause tx failed (code $pcode)"
-      enabled="$(rq params | jq -r '.params.claims_enabled')"
-      [[ "$enabled" == "false" ]] || record_fail "pause --claims did not disable claims (claims_enabled=$enabled)"
-      bcd="$(submit_and_wait 1 operator1 rewards claim 1 1 1)"
-      [[ "$bcd" != "0" ]] || record_fail "claim succeeded while claims paused"
-      rcode="$(submit_and_wait 1 operator1 rewards resume --claims)"
+      rcode="$(submit_and_wait 1 operator1 rewards resume)"
       [[ "$rcode" == "0" ]] || record_fail "resume tx failed (code $rcode)"
-      enabled="$(rq params | jq -r '.params.claims_enabled')"
-      [[ "$enabled" == "true" ]] || record_fail "resume --claims did not re-enable claims (claims_enabled=$enabled)"
-      log "pause/resume cycle OK (emergency authority; paused-claim rejected code $bcd)"
+      log "global pause/resume cycle OK (emergency authority)"
     fi
 
     # --- one authority param update + pending activation ---
+    # What is under test is the queue-then-activate-at-boundary mechanism, not the
+    # dial. max_claim_epochs_per_tx is a retained param that now gates nothing, so
+    # moving it proves the mechanism without perturbing live economics.
     if [[ "$PARAM_DRILL" == "on" ]] && (( did_param == 0 )) && (( finalized >= 3 )); then
       did_param=1
       rq params | jq '.params | .max_claim_epochs_per_tx = "50"' >"$NET/params.json"
@@ -410,35 +363,28 @@ else
 fi
 final_db="$(du -sk "$NET/node0/data" 2>/dev/null | awk '{print $1}')"; final_db="${final_db:-0}"
 
-# Census from the export (verified gogoproto-JSON paths; pagination-proof). claimed
-# is omitted when false (proto3), so select(.claimed!=true) captures unclaimed.
+# Census from the export (verified gogoproto-JSON paths; pagination-proof).
 premine_amt=$([[ "$PREMINE" == "on" ]] && echo $(( 2 * GENESIS_FUNDED )) || echo 0)
 ex_cum=0; ex_carry=0; ex_epoch=0; total_supply=0
-rec_count=0; claimed_count=0; claimed_amount=0; unclaimed_total=0
 if [[ -s "$EXPORT" ]] && jq -e . "$EXPORT" >/dev/null 2>&1; then
   ex_cum=$(jq -r '.app_state.rewards.state.cumulative_emitted // "0"' "$EXPORT")
   ex_carry=$(jq -r '.app_state.rewards.state.carry_forward_remainder // "0"' "$EXPORT")
   ex_epoch=$(jq -r '.app_state.rewards.state.current_epoch // "0"' "$EXPORT")
   total_supply=$(jq -r '[.app_state.bank.supply[]? | select(.denom=="utwlt") | .amount] | first // "0"' "$EXPORT")
-  rec_count=$(jq '[.app_state.rewards.claim_records[]?] | length' "$EXPORT")
-  claimed_count=$(jq '[.app_state.rewards.claim_records[]? | select(.claimed==true)] | length' "$EXPORT")
-  claimed_amount=$(jq '[.app_state.rewards.claim_records[]? | select(.claimed==true) | .amount | tonumber] | add // 0' "$EXPORT")
-  unclaimed_total=$(jq '[.app_state.rewards.claim_records[]? | select(.claimed!=true) | .amount | tonumber] | add // 0' "$EXPORT")
-  for v in ex_cum ex_carry ex_epoch total_supply rec_count claimed_count claimed_amount unclaimed_total; do
+  for v in ex_cum ex_carry ex_epoch total_supply; do
     [[ "${!v}" =~ ^[0-9]+$ ]] || printf -v "$v" 0
   done
 else
   record_fail "final state export missing/invalid — could not verify end-state invariants"
 fi
 finalized_count=$(( ex_epoch > 0 ? ex_epoch - 1 : 0 ))
-module_bal=$(( ex_cum - claimed_amount ))   # what the module account holds = unclaimed + carry
+module_bal=$ex_cum   # nothing exits the module account in this soak (no settlement)
 
 # Cross-check invariants (all export-internal — one snapshot, race-free).
 if [[ -s "$EXPORT" ]]; then
   expected_supply=$(( ex_cum + premine_amt ))
   [[ "$total_supply" == "$expected_supply" ]] || record_fail "total supply $total_supply != cumulative+premine $expected_supply"
-  (( rec_count == finalized_count * NODE_COUNT )) || record_fail "claim records $rec_count != finalized*$NODE_COUNT $(( finalized_count * NODE_COUNT ))"
-  (( claimed_amount + unclaimed_total + ex_carry == ex_cum )) || record_fail "claimed($claimed_amount)+unclaimed($unclaimed_total)+carry($ex_carry) != cumulative($ex_cum)"
+  (( ex_carry <= ex_cum )) || record_fail "carry-forward remainder $ex_carry exceeds cumulative emitted $ex_cum"
 fi
 
 # Disk-growth rate + linear projections (state is never pruned).
@@ -478,18 +424,13 @@ cat >"$FINAL_REPORT" <<EOF
 | Metric | Value |
 |---|---|
 | Finalized epochs | $finalized_count |
-| Claim records | $rec_count (expected $(( finalized_count * NODE_COUNT )) = finalized × $NODE_COUNT slots) |
-| Claimed records | $claimed_count |
-| Claimed total | ${claimed_amount}utwlt |
-| Unclaimed total | ${unclaimed_total}utwlt |
 | Carry-forward remainder | ${ex_carry}utwlt |
-| Module balance | ${module_bal}utwlt (= cumulative − claimed = unclaimed + carry) |
+| Module balance | ${module_bal}utwlt (= cumulative emitted; this soak runs no settlement) |
 | Cumulative emitted | ${ex_cum}utwlt |
 | Total supply | ${total_supply}utwlt (= cumulative + premine ${premine_amt}) |
 
 Cross-checks (each counted as a failure above on mismatch): total supply ==
-cumulative + premine; claim records == finalized × active slots;
-claimed + unclaimed + carry == cumulative.
+cumulative + premine; carry-forward remainder <= cumulative emitted.
 
 ## Disk-growth rate
 
@@ -505,7 +446,7 @@ claimed + unclaimed + carry == cumulative.
 | Projected 7d growth | $(human "$proj_7d") |
 
 Projections are linear extrapolation of the observed rate (no pruning of
-FinalizedEpochs/ClaimRecords); production epoch length differs, so scale by
+FinalizedEpochs); production epoch length differs, so scale by
 (production_epoch_length / $EPOCH_LENGTH) for real cadence.
 
 ## Artifacts
@@ -515,13 +456,12 @@ FinalizedEpochs/ClaimRecords); production epoch length differs, so scale by
 - \`$EXPORT\` (canonical exported app state)
 EOF
 
-log "soak end: verdict=$VERDICT epochs_finalized=$finalized_count records=$rec_count claimed=$claimed_count claimed_total=${claimed_amount} unclaimed=${unclaimed_total} carry=${ex_carry} module=${module_bal} cumulative=${ex_cum} supply=${total_supply} failures=$FAILURES halted=$HALTED"
+log "soak end: verdict=$VERDICT epochs_finalized=$finalized_count carry=${ex_carry} module=${module_bal} cumulative=${ex_cum} supply=${total_supply} failures=$FAILURES halted=$HALTED"
 log "disk: ${grow_kb}KB/${epochs_session}ep -> $(human "$bytes_per_epoch")/epoch; proj 24h=$(human "$proj_24h") 48h=$(human "$proj_48h") 7d=$(human "$proj_7d")"
 echo
 echo "==================== SOAK $VERDICT ===================="
 echo "  finalized epochs : $finalized_count"
-echo "  claim records    : $rec_count  (claimed $claimed_count)"
-echo "  unclaimed total  : ${unclaimed_total}utwlt   module: ${module_bal}utwlt   carry: ${ex_carry}"
+echo "  module balance   : ${module_bal}utwlt   carry: ${ex_carry}"
 echo "  cumulative       : ${ex_cum}utwlt   supply: ${total_supply}utwlt"
 echo "  assertion fails  : $FAILURES    halt: $HALTED"
 echo "  DB node0         : $(human $(( final_db * 1024 )))   $(human "$bytes_per_epoch")/epoch"

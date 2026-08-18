@@ -141,9 +141,6 @@ func TestFreshGenesisRunsItsFirstEpochBoundary(t *testing.T) {
 	require.Len(t, entitlements, 1, "the single active slot is owed the epoch")
 
 	// The legacy representation was not created beside it.
-	_, found, err = a.RewardsKeeper.GetClaimRecord(ctx, 1, 1)
-	require.NoError(t, err)
-	require.False(t, found, "V2 finalization creates no claim record")
 
 	// Solvency, from the outside: escrow holds exactly liability plus carry.
 	liability, err := a.RewardsKeeper.GetOutstandingEntitlementLiability(ctx)

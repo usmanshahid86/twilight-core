@@ -21,18 +21,19 @@ node RPC; there is no separate metrics exporter in the current version.
 
 | Signal | Source | Healthy |
 |---|---|---|
-| `rewards_balance` | `module-balances` | ≥ unclaimed claim records + carry |
+| `rewards_balance` | `module-balances` | ≥ outstanding entitlements + carry |
 | `fee_pool_balance` | `module-balances` | `0` (fees dormant) |
 | `carry_out` (per epoch) | `epoch-reward <e>` | `reward_pool − allocated_amount`, ≥ 0 |
 
 ## Pause-state signals
 
 ```bash
-twilightd rewards-query params --node <rpc> --output json \
-  | jq '{emissions_enabled, epoch_settlement_enabled, claims_enabled}'
+twilightd rewards-query pause-state --node <rpc> --output json
 ```
 
-If any is `false`, rewards is partially paused — correlate with operator intent.
+Rewards has one canonical pause state, not per-area flags. It reports
+`pause_state` (including any pending transition) and `release_enabled`. If
+paused, correlate with operator intent.
 
 ## Consensus / determinism signals (multi-node)
 
@@ -49,5 +50,5 @@ If any is `false`, rewards is partially paused — correlate with operator inten
 ## Logs
 
 Watch node logs for repeated EndBlock errors (a fail-closed finalization fault
-halts the block) and for `epoch_finalized` / `reward_claimed` events (see
+halts the block) and for `epoch_finalized` events (see
 [Events](../rewards/events.md)).

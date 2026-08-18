@@ -106,20 +106,4 @@ func TestGenesisValidationBoundaries(t *testing.T) {
 		genesis.FinalizedEpochs = []*types.EpochReward{&epoch, &epoch}
 		require.Error(t, genesis.Validate())
 	})
-
-	t.Run("duplicate claim record", func(t *testing.T) {
-		genesis := types.DefaultGenesis()
-		epoch := validEpoch(1, *genesis.Params)
-		claim := validClaim(1, 1)
-		genesis.FinalizedEpochs = []*types.EpochReward{&epoch}
-		genesis.ClaimRecords = []*types.EligibleSlotReward{&claim, &claim}
-		require.Error(t, genesis.Validate())
-	})
-
-	t.Run("claim without finalized epoch", func(t *testing.T) {
-		genesis := types.DefaultGenesis()
-		claim := validClaim(1, 1)
-		genesis.ClaimRecords = []*types.EligibleSlotReward{&claim}
-		require.Error(t, genesis.Validate())
-	})
 }

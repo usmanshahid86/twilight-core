@@ -79,7 +79,7 @@ The shipped implementation tightened the original decision in two important ways
    Rationale and trade-offs are recorded in
    [`staking-omission-or-inert-staking.md`](../../security/staking-omission-or-inert-staking.md).
 2. **Rewards live in [`x/rewards`](../../../x/rewards)** (epoch emission + active-block
-   allocation + claims), not the placeholder `x/operatorrewards` name used in the memo. See
+   allocation + entitlements), not the placeholder `x/operatorrewards` name used in the memo. See
    [ADR-0002](0002-rewards-emission.md).
 
 ## Consequences

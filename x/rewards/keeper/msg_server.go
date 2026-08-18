@@ -12,13 +12,6 @@ type msgServer struct{ Keeper }
 
 func NewMsgServer(k Keeper) types.MsgServer { return msgServer{Keeper: k} }
 
-func (m msgServer) ClaimRewards(ctx context.Context, msg *types.MsgClaimRewards) (*types.MsgClaimRewardsResponse, error) {
-	if err := m.Keeper.ClaimRewards(ctx, msg); err != nil {
-		return nil, err
-	}
-	return &types.MsgClaimRewardsResponse{}, nil
-}
-
 func (m msgServer) UpdateRewardsParams(ctx context.Context, msg *types.MsgUpdateRewardsParams) (*types.MsgUpdateRewardsParamsResponse, error) {
 	if msg == nil || msg.Params == nil {
 		return nil, types.ErrInvalidParams.Wrap("params are required")

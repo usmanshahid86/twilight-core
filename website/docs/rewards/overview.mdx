@@ -7,9 +7,9 @@ import { constants } from '@site/docs/_snippets/constants.mdx';
 # Rewards Overview
 
 `x/rewards` mints scheduled `{constants.nativeDenom}` block rewards, allocates
-each epoch's reward pool by active-block participation, and lets finalized rewards
-be claimed to each operator's snapshotted payout address. It depends on CoreSlot
-for the active operator set but **never** manages validators itself.
+each epoch's reward pool by active-block participation, and holds the result as a
+per-slot entitlement until settlement releases it. It depends on CoreSlot for the
+active operator set but **never** manages validators itself.
 
 ## High-level lifecycle
 
@@ -19,12 +19,13 @@ for the active operator set but **never** manages validators itself.
 2. **EndBlock** — when the configured epoch boundary is reached, the module
    finalizes the epoch: it mints the clipped block emission, builds the reward
    pool (emission + carry-in − treasury), allocates it across operators by
-   active blocks, writes an immutable epoch aggregate plus per-operator claim
-   records, advances the carry-forward remainder and cumulative emitted, and
-   opens the next epoch.
-3. **Claim** — anyone may submit a claim transaction for a slot's finalized
-   rewards; funds always go to the **snapshotted payout address**, not the
-   transaction signer.
+   active blocks, writes an immutable epoch aggregate plus one **slot
+   entitlement** per eligible slot, advances the carry-forward remainder and
+   cumulative emitted, and opens the next epoch.
+3. **Settlement** — value leaves escrow only through `x/mining`, which pays the
+   epoch's participants and returns the remainder to the slot's **snapshotted
+   payout address**. Rewards exposes this as a constrained keeper boundary with
+   no transaction of its own.
 
 ```mermaid
 sequenceDiagram
@@ -38,7 +39,7 @@ sequenceDiagram
     Runtime->>CoreSlot: EndBlock (validator updates)
     Runtime->>Rewards: EndBlock
     Rewards->>Bank: Mint epoch emission (utwlt)
-    Rewards->>Rewards: Create immutable epoch + claim records
+    Rewards->>Rewards: Create immutable epoch + slot entitlements
 ```
 
 ## Key parameters (production defaults)
@@ -62,17 +63,18 @@ override the epoch length; such values are always labeled as test settings.
   in v1). Rewards reads these through a narrow read-only interface; payout is by
   active-block participation.
 - **Module accounts** — `{constants.rewardsModuleAccount}` (the `Minter`,
-  holding minted emission and unclaimed rewards) and
+  holding minted emission and unreleased entitlements) and
   `{constants.feePoolModuleAccount}` (dormant fee plumbing, no permissions).
 - **Bank** — mints `{constants.nativeDenom}` into the rewards account and sends
-  claims from it.
+  released value from it.
 
 ## Authority model
 
 - **Params updates** are authorized by the CoreSlot **authority** and queued to
   activate at the next epoch boundary.
-- **Pause / resume** of emissions, settlement, or claims is authorized by the
-  CoreSlot **emergency authority** and takes effect immediately.
+- **Pause / resume** is authorized by the CoreSlot **emergency authority** and
+  takes effect at the beginning of the next block. There is one canonical pause
+  state, not per-area selectors.
 - Rewards `Params` store **no** authority of their own — both are read from
   CoreSlot.
 

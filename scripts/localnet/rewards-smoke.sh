@@ -10,16 +10,11 @@ set -euo pipefail
 #
 # THIS IS NOT A MONEY-MOVEMENT PROOF, and it deliberately no longer claims to be.
 #
-# V2 finalization creates SlotEntitlements rather than claim records, and the
-# only way value leaves rewards escrow is the constrained keeper API, which has
-# no transaction, no CLI, and no public surface by design. There is therefore no
-# public payout a localnet can submit at this stage. The definitive public
-# money-moving proof arrives with Settlement, which calls that API.
-#
-# Repairing this script by injecting legacy claim records into genesis is
-# explicitly forbidden: it would manufacture a payable obligation the chain no
-# longer creates, and present the resulting transfer as evidence about a path
-# production does not use.
+# V2 finalization creates SlotEntitlements, and the only way value leaves rewards
+# escrow is the constrained keeper API, which has no transaction, no CLI, and no
+# public surface by design. There is therefore no public payout a localnet can
+# submit at this stage. The definitive public money-moving proof arrives with
+# Settlement, which calls that API.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${BIN:-$ROOT/build/twilightd}"
@@ -182,10 +177,11 @@ supply="$(jq -r '[.app_state.bank.supply[]? | select(.denom == "utwlt") | .amoun
 [[ "$supply" == "$EXPECTED_SUPPLY_AFTER_FINALIZE" ]]
 [[ "$(jq -r '.app_state.rewards.state.cumulative_emitted' "$export_file")" == "$EXPECTED_EMISSION" ]]
 [[ "$(jq -r '.app_state.rewards.finalized_epochs[0].epoch_number' "$export_file")" == "1" ]]
-# The switchover, visible in exported state: an entitlement exists and no claim
-# record was created for the epoch that produced it.
+# The canonical obligation the epoch produced: one entitlement per active slot.
 [[ "$(jq -r '[.app_state.rewards.slot_entitlements[]? | select(.epoch == "1")] | length' "$export_file")" == "$NODE_COUNT" ]]
-[[ "$(jq -r '[.app_state.rewards.claim_records[]? | select(.epoch_number == "1")] | length' "$export_file")" == "0" ]]
+# Exported genesis carries no claim-record section at all — the field is retired
+# and its number reserved, so `has("claim_records")` must be false, not merely empty.
+[[ "$(jq -r '.app_state.rewards | has("claim_records")' "$export_file")" == "false" ]]
 
 echo "rewards localnet epoch/entitlement smoke: PASS"
 echo "  epoch_length=$EPOCH_LENGTH minted=$EXPECTED_EMISSION per_slot=$EXPECTED_PER_SLOT"

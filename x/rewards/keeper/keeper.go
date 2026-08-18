@@ -58,7 +58,6 @@ type Keeper struct {
 	CurrentEpochConfig collections.Item[types.EpochConfigSnapshot]
 	ActiveBlocks       collections.Map[collections.Pair[uint64, uint64], uint64]
 	FinalizedEpochs    collections.Map[uint64, types.EpochReward]
-	ClaimRecords       collections.Map[collections.Pair[uint64, uint64], types.EligibleSlotReward]
 
 	// EpochConfigVersions is the immutable epoch-configuration history keyed by
 	// effective epoch, and the sole authority for epoch geometry.
@@ -154,7 +153,6 @@ func NewKeeper(
 		CurrentEpochConfig: collections.NewItem(sb, types.CurrentEpochConfigKey, "current_epoch_config", codec.CollValue[types.EpochConfigSnapshot](cdc)),
 		ActiveBlocks:       collections.NewMap(sb, types.ActiveBlocksPrefix, "active_blocks", pairKey, collections.Uint64Value),
 		FinalizedEpochs:    collections.NewMap(sb, types.FinalizedEpochsPrefix, "finalized_epochs", collections.Uint64Key, codec.CollValue[types.EpochReward](cdc)),
-		ClaimRecords:       collections.NewMap(sb, types.ClaimRecordsPrefix, "claim_records", pairKey, codec.CollValue[types.EligibleSlotReward](cdc)),
 		EpochConfigVersions: collections.NewMap(sb, types.EpochConfigVersionsPrefix, "epoch_config_versions",
 			collections.Uint64Key, codec.CollValue[types.EpochConfigVersion](cdc)),
 		ScheduledEpochConfigs: collections.NewMap(sb, types.ScheduledEpochConfigsPrefix, "scheduled_epoch_configs",

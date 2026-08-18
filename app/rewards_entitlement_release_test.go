@@ -76,9 +76,6 @@ func TestIntegratedFinalizationEntitlementAndRelease(t *testing.T) {
 	perSlot := entitlements[0].EntitlementAmount
 
 	// No claim record exists for the epoch that produced them.
-	_, found, err = a.RewardsKeeper.GetClaimRecord(ctx, 1, 1)
-	require.NoError(t, err)
-	require.False(t, found)
 
 	// --- Escrow solvency, against the real module account. ---
 	escrow := a.AccountKeeper.GetModuleAddress(rewardstypes.ModuleName)

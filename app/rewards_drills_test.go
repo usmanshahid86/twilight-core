@@ -16,13 +16,12 @@ package app_test
 //	2. Nonzero carry-forward        - TestDrillNonzeroCarryForward
 //	3+5. Non-uniform blocks + churn - TestDrillNonUniformBlocksAndChurn
 //	4. Treasury bps split           - TestDrillTreasuryBpsSplit (real FinalizeBlock)
-//	6. max_claim_epochs_per_tx cap  - TestDrillMaxClaimEpochsCap
 //	combined                        - TestDrillCombinedAllBranches
 //
-// Single-slot, no-claim, no-churn branches (halving, treasury) run through the
+// Single-slot, no-churn branches (halving, treasury) run through the
 // real ABCI FinalizeBlock loop as a runtime anchor. Branches that need multiple
-// slots, mid-epoch CoreSlot churn, or claims use the direct-keeper integration
-// pattern established by TestRewardsShortEpochFinalizeSuspendClaim (real bank,
+// slots, mid-epoch CoreSlot churn, or a release use the direct-keeper integration
+// pattern established by TestRewardsEpochFinalizeSuspendAndRelease (real bank,
 // real module accounts, real CoreSlot msg server, runtime EndBlock dispatch
 // order coreslot -> rewards). Runtime FinalizeBlock dispatch itself is already
 // proven by TestRewardsRuntimeDispatchFinalizeBlock; these drills target the
@@ -445,8 +444,8 @@ func TestDrillNonzeroCarryForward(t *testing.T) {
 // the real CoreSlot msg server after block 1, so BeginBlock at blocks 2 and 3
 // observes only slot 2. Slot 1 ends the epoch with BlocksActive=1, slot 2 with
 // BlocksActive=3 -> non-uniform allocation (1:3) AND a real active-set change
-// mid-emission. The suspended-but-earned slot still finalizes and stays
-// claimable. C1 kept a fixed, uniformly-active set, so neither branch fired.
+// mid-emission. The suspended-but-earned slot still finalizes and keeps its
+// entitlement. C1 kept a fixed, uniformly-active set, so neither branch fired.
 // ===========================================================================
 func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 	a := bootApp(t)
@@ -485,8 +484,8 @@ func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 	allocated := slot1Amount + slot2Amount
 
 	// Allocation is proportional to active blocks (1:3), not uniform. The
-	// per-slot active-block counts are preserved on the finalized claim records
-	// (the live ActiveBlocks counters are deleted once the epoch finalizes).
+	// per-slot active-block counts are preserved on the entitlements the epoch
+	// created (the live ActiveBlocks counters are deleted once it finalizes).
 	epoch, found, err := a.RewardsKeeper.GetFinalizedEpoch(ctx3, 1)
 	require.NoError(t, err)
 	require.True(t, found)
@@ -522,92 +521,11 @@ func TestDrillNonUniformBlocksAndChurn(t *testing.T) {
 }
 
 // ===========================================================================
-// Branch 6: the LEGACY claim cap, over LEGACY state.
-//
-// max_claim_epochs_per_tx bounds a span of ClaimRecords. V2 finalization creates
-// none -- the obligation it produces is a SlotEntitlement -- so the cap has
-// nothing to bound on the live path and this drill is explicitly legacy
-// coverage: it seeds claim records directly rather than expecting finalization
-// to produce them.
-//
-// Kept because the code is still reachable and still owns real money until the
-// claim surface is retired. It is NOT a V2 money-movement proof, and the epochs
-// it drives are asserted to produce entitlements, not claims.
-// ===========================================================================
-func TestDrillLegacyMaxClaimEpochsCap(t *testing.T) {
-	a := bootApp(t)
-	base := a.NewUncachedContext(false, cmtproto.Header{Height: 1})
-
-	pay := acc(12)
-	p, snap := rewardsParams(t, func(p *rewardstypes.Params) {
-		p.InitialBlockSubsidy = "100"
-		p.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
-		p.MaxClaimEpochsPerTx = 3
-	})
-	initCoreSlotsAndRewards(t, a, base, []slotSpec{
-		{id: 1, operator: acc(2), payout: pay, keyMarker: 1},
-	}, genesisState(p, snap))
-
-	// Four full epochs -> four finalized epochs. The live path creates
-	// entitlements; the claim records below are legacy fixture state.
-	perEpoch := drillEpochLen * 100
-	ctx := driveBlocks(t, a, base, 1, 4*drillEpochLen)
-	for epoch := uint64(1); epoch <= 4; epoch++ {
-		require.Equal(t, strconv.FormatInt(perEpoch, 10),
-			entitlementOf(t, a, ctx, 1, epoch).EntitlementAmount)
-		_, found, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, epoch)
-		require.NoError(t, err)
-		require.Falsef(t, found, "V2 finalization must create no claim record for epoch %d", epoch)
-	}
-
-	// Legacy setup: the claim records this drill is about, seeded directly. They
-	// deliberately name a different payout destination than the entitlements, so
-	// the balances below cannot be confused with V2 release.
-	legacyPay := acc(13)
-	for epoch := uint64(1); epoch <= 4; epoch++ {
-		require.NoError(t, a.RewardsKeeper.SetClaimRecord(ctx, rewardstypes.EligibleSlotReward{
-			SlotId: 1, EpochNumber: epoch, OperatorAddress: acc(2), PayoutAddress: legacyPay,
-			BlocksActive: uint64(drillEpochLen), RewardWeight: coreslottypes.DefaultRewardWeight,
-			EffectiveWeight: strconv.FormatInt(drillEpochLen, 10),
-			Amount:          strconv.FormatInt(perEpoch, 10),
-		}))
-	}
-
-	// A span exceeding the cap is rejected (delta 3 >= cap 3).
-	err := a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
-		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 4,
-	})
-	require.Error(t, err, "a 4-epoch span must exceed MaxClaimEpochsPerTx=3")
-	require.Contains(t, err.Error(), "claim range exceeds maximum")
-
-	// Nothing was paid by the rejected claim.
-	require.True(t, a.BankKeeper.GetBalance(ctx, mustAddr(t, legacyPay), app.BaseDenom).Amount.IsZero(),
-		"a rejected over-cap claim must pay nothing")
-
-	// The maximum allowed span (delta 2, epochs 1..3) succeeds.
-	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
-		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 3,
-	}))
-	require.Equal(t, strconv.FormatInt(3*perEpoch, 10),
-		a.BankKeeper.GetBalance(ctx, mustAddr(t, legacyPay), app.BaseDenom).Amount.String())
-
-	// Epoch 4 was outside the allowed span and remains unclaimed.
-	rec4, _, err := a.RewardsKeeper.GetClaimRecord(ctx, 1, 4)
-	require.NoError(t, err)
-	require.False(t, rec4.Claimed)
-	require.NoError(t, a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
-		Signer: acc(9), SlotId: 1, StartEpoch: 4, EndEpoch: 4,
-	}))
-	require.Equal(t, strconv.FormatInt(4*perEpoch, 10),
-		a.BankKeeper.GetBalance(ctx, mustAddr(t, legacyPay), app.BaseDenom).Amount.String())
-}
-
-// ===========================================================================
 // Combined: all branches composing in one chain.
 //
 // 3 slots, epoch length 3, subsidy=100, maxSupply=1000 (forces a halving as
 // cumulative crosses 500), EmissionTreasuryShareBps=1000 (treasury split every
-// epoch), MaxClaimEpochsPerTx=2 (cap fires on a 3-epoch span). Slot 3 is
+// epoch). Slot 3 is
 // suspended mid-epoch to churn the active set and produce non-uniform blocks,
 // which in turn yields non-divisible pools and nonzero carry-forward. The
 // branches are NOT isolated here -- the point is that they compose and the full
@@ -637,7 +555,6 @@ func TestDrillCombinedAllBranches(t *testing.T) {
 		p.EpochLengthBlocks = appparams.HardMinEpochLengthBlocks
 		p.EmissionTreasuryShareBps = 1000 // 10% to treasury every epoch
 		p.TreasuryAddress = treasury
-		p.MaxClaimEpochsPerTx = 2
 	})
 	initCoreSlotsAndRewards(t, a, base, []slotSpec{
 		{id: 1, operator: acc(2), payout: pay1, keyMarker: 1},
@@ -691,8 +608,8 @@ func TestDrillCombinedAllBranches(t *testing.T) {
 	require.NoError(t, err)
 	ctx = driveBlocks(t, a, base, epoch2Start+1, drillEpochLen-1)
 	// Slot 3 was active only for the first block of epoch 2; slots 1 and 2 for all
-	// of it. Read the preserved count off the finalized claim record, since the
-	// live counters are deleted at finalization.
+	// of it. Read the preserved count off the entitlement, since the live
+	// counters are deleted at finalization.
 	ent3, found, err := a.RewardsKeeper.GetSlotEntitlement(ctx, 3, 2)
 	require.NoError(t, err)
 	require.True(t, found, "suspended-but-earned slot 3 still holds an entitlement for epoch 2")
@@ -729,13 +646,9 @@ func TestDrillCombinedAllBranches(t *testing.T) {
 	require.True(t, carrySeen, "non-divisible pools must have produced a nonzero carry-forward at least once")
 
 	// Release branch: the constrained keeper path pays earned value to the
-	// immutable payout snapshot. The legacy claim cap is not exercised here --
-	// finalization creates no claim record for a V2 epoch, so the cap has nothing
-	// to bound; it survives only as legacy coverage over legacy state.
-	require.Error(t, a.RewardsKeeper.ClaimRewards(ctx, &rewardstypes.MsgClaimRewards{
-		Signer: acc(9), SlotId: 1, StartEpoch: 1, EndEpoch: 1,
-	}), "the legacy path must refuse a V2 obligation: no claim record exists for it")
-
+	// immutable payout snapshot. There is no longer a second path to compare it
+	// against — the claim message, its store and its cap were retired once
+	// Settlement became the only way entitlement value leaves escrow.
 	releaseToPayout(t, a, ctx, 1, 1)
 	releaseToPayout(t, a, ctx, 1, 2)
 

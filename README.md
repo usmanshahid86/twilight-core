@@ -31,9 +31,9 @@ delegation, staking, slashing, or unbonding.
 **Rewards & emission (`x/rewards`).** Block subsidy is emitted on an epoch schedule: at
 epoch finalization, `utwlt` is minted into the rewards module account, tracked against a
 maximum supply with **supply-threshold halving** (not a fixed block-height schedule). Each
-epoch's emission is allocated to eligible active operators by active-block participation and is
-claimable per `(slot, epoch)` until claimed. An emergency authority can pause emission, epoch settlement,
-or claims independently. The chain's **default genesis has no premine**. (The standard
+epoch's emission is allocated to eligible active operators by active-block participation and held
+as a per-`(slot, epoch)` entitlement until settlement releases it. An emergency authority can
+pause rewards, which stops accrual and release together. The chain's **default genesis has no premine**. (The standard
 Cosmos `distribution` module is omitted; reward distribution is handled entirely by
 Twilight's custom `x/rewards` module.)
 
@@ -46,7 +46,7 @@ state). See [REVIEW.md](REVIEW.md) for the determinism rules contributors follow
 | Module | Responsibility | CLI |
 |---|---|---|
 | [`x/coreslot`](x/coreslot) | Validator admission, slot lifecycle, consensus-key rotation, payout address, reward weight, and validator-set updates | `twilightd coreslot …`, `twilightd coreslot-query …` |
-| [`x/rewards`](x/rewards) | Epoch emission, supply-threshold halving, per-operator reward allocation and claims, emergency pause | `twilightd rewards …`, `twilightd rewards-query …` |
+| [`x/rewards`](x/rewards) | Epoch emission, supply-threshold halving, per-operator reward allocation and entitlements, emergency pause | `twilightd rewards …`, `twilightd rewards-query …` |
 
 Standard `tx`/`query` subcommands for the wired Cosmos modules (`bank`, `auth`, `consensus`)
 are generated via AutoCLI — e.g. `twilightd tx bank send`, `twilightd query bank balances`.
@@ -87,7 +87,7 @@ Bring up a local network manually, or run the rewards/chaos suites:
 make localnet-init             # initialise a local multi-node genesis
 ./scripts/localnet/start.sh    # start the nodes  (./scripts/localnet/stop.sh to stop)
 
-make localnet-rewards-smoke    # rewards finalize + claim
+make localnet-rewards-epoch-smoke  # rewards epoch finalization + entitlements
 make drills                    # lifecycle + restart-rotation + quorum drills
 ```
 
@@ -110,7 +110,7 @@ Twilight Core is pre-1.0 and under active development. The current codebase incl
 
 - `x/coreslot` — validator admission, slot lifecycle management, and validator-set updates;
 - `x/rewards` — scheduled `utwlt` emission through epoch finalization, with per-operator
-  reward accounting and claims;
+  reward accounting and entitlements;
 - localnet smoke checks and operational drills exercising consensus-critical behavior.
 
 The localnet/dev setup (`scripts/localnet/init.sh`) funds the local authority and

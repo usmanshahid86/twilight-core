@@ -13,8 +13,9 @@ node binary is `twilightd`. Two custom modules carry the design:
   admitted to authority-governed *CoreSlots*; its EndBlocker is the **only** source of
   CometBFT `ValidatorUpdate`s in the app. No delegation, staking, slashing, or unbonding.
 - **`x/rewards`** — epoch emission of `utwlt` with supply-threshold halving, per-operator
-  allocation by active-block participation, and per-`(slot, epoch)` claims. An emergency
-  authority can pause emission / settlement / claims independently.
+  allocation by active-block participation, and per-`(slot, epoch)` entitlements released by
+  settlement. An emergency authority can pause rewards, which stops accrual and release
+  together.
 
 The standard **staking, distribution, governance, mint, and slashing** modules are
 **intentionally omitted** (not wired into `app/`). `auth`, `bank`, and `consensus` are
@@ -46,7 +47,7 @@ Consensus/economic changes must also pass the local end-to-end checks:
 
 ```bash
 make localnet-smoke           # 4-node localnet sanity
-make localnet-rewards-smoke   # rewards finalize + claim
+make localnet-rewards-epoch-smoke  # rewards epoch finalization + entitlements
 make drills                   # lifecycle + restart-rotation + quorum chaos drills
 ```
 

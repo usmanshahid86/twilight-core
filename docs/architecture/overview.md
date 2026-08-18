@@ -66,10 +66,10 @@ Operator rewards are a **bounded block subsidy**, settled per epoch:
 - **Allocation.** Each epoch's pool is split by **uniform active-block participation**: a
   slot's share is proportional to the blocks it was active that epoch. The configured reward
   weight is snapshotted but not used for allocation in v1.
-- **Claims.** Allocations are claimable per `(slot, epoch)`. Triggering a claim is
-  **permissionless**, and payout goes to the payout address **snapshotted at finalization** —
-  not to the caller. Claimed records are marked claimed (no replay), and a multi-epoch claim
-  range is atomic.
+- **Entitlements and settlement.** Finalization writes one `SlotEntitlement` per eligible
+  slot, held in the rewards module account. Value leaves escrow only through **settlement** in
+  `x/mining`, which pays the epoch's participants by chunk and returns the remainder to the
+  payout address **snapshotted at finalization** — a destination no caller can redirect.
 
 The default genesis has **no premine**. See [ADR-0002](adr/0002-rewards-emission.md) for the
 full rewards/emission decision and parameters.
@@ -89,8 +89,8 @@ rules (a cross-cutting principle, recorded across the ADRs and the contributor
 ## 7. v1 scope and non-goals
 
 - **In v1:** authority-governed CoreSlot validator set, epoch emission with supply-threshold
-  halving, uniform active-block allocation, claim-based payout, emergency pause (emission,
-  settlement, and claims independently), zero-premine default. Treasury share is implemented
+  halving, uniform active-block allocation, entitlement-and-settlement payout, emergency pause
+  (one canonical state, effective at H+1), zero-premine default. Treasury share is implemented
   but off by default (parameter-flippable).
 - **Not in v1:** staking, slashing, on-chain governance, `x/distribution`, and `x/mint`;
   **weighted rewards** and **fee-funded rewards** are present in the parameter schema but are

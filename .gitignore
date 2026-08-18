@@ -90,6 +90,7 @@ Temporary Items
 
 # Root build binaries (build to build/ instead; never track at repo root)
 /twilightd
+/dashboard
 
 # Docs site (Docusaurus) — Node artifacts stay isolated under website/ and are
 # never tracked; the docs site must not affect Go builds or release binaries.

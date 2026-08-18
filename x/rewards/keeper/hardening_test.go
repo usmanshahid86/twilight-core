@@ -66,7 +66,10 @@ func TestEconomicsFilesRemainKeeperOnly(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	require.True(t, ok)
 	dir := filepath.Dir(currentFile)
-	for _, name := range []string{"endblock.go", "finalize.go", "distribution.go", "claims.go", "msg_server.go"} {
+	// claims.go is deliberately absent from this list: the legacy claim path was
+	// retired, and naming a deleted file here would make the check pass vacuously
+	// on a read error rather than assert anything.
+	for _, name := range []string{"endblock.go", "finalize.go", "distribution.go", "msg_server.go"} {
 		source, err := os.ReadFile(filepath.Join(dir, name))
 		require.NoError(t, err)
 		require.NotContains(t, string(source), "ValidatorUpdate")
@@ -87,6 +90,7 @@ func TestBeginBlockHasNoPhaseFiveBehavior(t *testing.T) {
 		"FinalizeEpoch",
 		"Distribute",
 		"Allocate",
+		// Retired with the legacy claim path; listed so a reintroduction is caught.
 		"ClaimRewards",
 		"SetSlot",
 		"ConsensusPower",

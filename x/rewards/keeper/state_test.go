@@ -64,7 +64,7 @@ func TestActiveBlockStorageHelpers(t *testing.T) {
 	require.Equal(t, uint64(99), blocks)
 }
 
-func TestFinalizedEpochAndClaimRecordStorage(t *testing.T) {
+func TestFinalizedEpochStorage(t *testing.T) {
 	k, ctx, _ := setupKeeper(t, &coreSlotKeeperMock{})
 	params := types.DefaultParams()
 	epoch := validEpoch(2, params)
@@ -76,17 +76,4 @@ func TestFinalizedEpochAndClaimRecordStorage(t *testing.T) {
 	_, found, err = k.GetFinalizedEpoch(ctx, 3)
 	require.NoError(t, err)
 	require.False(t, found)
-
-	require.NoError(t, k.SetClaimRecord(ctx, validClaim(2, 3)))
-	require.NoError(t, k.SetClaimRecord(ctx, validClaim(2, 1)))
-	require.NoError(t, k.SetClaimRecord(ctx, validClaim(2, 2)))
-	require.NoError(t, k.SetClaimRecord(ctx, validClaim(3, 2)))
-
-	claim, found, err := k.GetClaimRecord(ctx, 2, 2)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, uint64(2), claim.EpochNumber)
-	rows, err := k.IterateClaimRecordsForSlot(ctx, 2, 2, 3)
-	require.NoError(t, err)
-	require.Equal(t, []uint64{2, 3}, []uint64{rows[0].EpochNumber, rows[1].EpochNumber})
 }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"cosmossdk.io/collections"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/twilight-project/twilight-core/x/rewards/types"
@@ -106,9 +105,4 @@ func TestDenomAndClosedEpochImmutabilityInvariants(t *testing.T) {
 	require.True(t, broken)
 
 	require.Error(t, k.SetFinalizedEpoch(ctx, epoch), "finalized aggregate overwrite must be rejected")
-}
-
-func TestClaimRecordCollectionKeyTypeRemainsStable(t *testing.T) {
-	k, ctx, _ := setupAccountingKeeper(t, &coreSlotKeeperMock{}, 1, types.DefaultParams())
-	require.NoError(t, k.ClaimRecords.Set(ctx, collections.Join(uint64(1), uint64(1)), validClaim(1, 1)))
 }

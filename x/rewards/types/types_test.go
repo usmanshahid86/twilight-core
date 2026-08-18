@@ -185,7 +185,6 @@ func TestDefaultGenesis(t *testing.T) {
 	require.Equal(t, "0", genesis.State.CumulativeEmitted)
 	require.Equal(t, "0", genesis.State.CarryForwardRemainder)
 	require.Empty(t, genesis.FinalizedEpochs)
-	require.Empty(t, genesis.ClaimRecords)
 	require.False(t, genesis.HasPendingParams)
 	require.Nil(t, genesis.PendingParams)
 }
@@ -216,20 +215,4 @@ func TestGenesisRejectsDuplicateEpochsAndClaims(t *testing.T) {
 	genesis.FinalizedEpochs = []*types.EpochReward{epoch, epoch}
 	require.Error(t, genesis.Validate())
 
-	genesis.FinalizedEpochs = []*types.EpochReward{epoch}
-	claim := &types.EligibleSlotReward{
-		SlotId: 1, EpochNumber: 1, OperatorAddress: testAddress(2), PayoutAddress: testAddress(3),
-		RewardWeight: "1.000000000000000000", EffectiveWeight: "10", Amount: "1",
-	}
-	genesis.ClaimRecords = []*types.EligibleSlotReward{claim, claim}
-	require.Error(t, genesis.Validate())
-}
-
-func TestGenesisRejectsInvalidClaimMarkers(t *testing.T) {
-	genesis := types.DefaultGenesis()
-	genesis.ClaimRecords = []*types.EligibleSlotReward{{
-		SlotId: 1, EpochNumber: 1, OperatorAddress: testAddress(2), PayoutAddress: testAddress(3),
-		RewardWeight: "1.000000000000000000", EffectiveWeight: "10", Amount: "1", ClaimedAtHeight: 5,
-	}}
-	require.Error(t, genesis.Validate())
 }

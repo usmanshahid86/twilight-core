@@ -60,7 +60,11 @@ message Params {
   HalvingMode halving_mode = 10;
   DistributionMethod distribution_method = 11;
   RemainderPolicy remainder_policy = 12;
-  uint64 max_claim_epochs_per_tx = 13;
+  // Bounded the epoch span of a single claim transaction. The claim path is
+  // retired, so this gates nothing; validation still requires it to be nonzero
+  // so existing genesis files keep round-tripping. Retained on the wire, and its
+  // number is never recycled.
+  uint64 max_claim_epochs_per_tx = 13 [deprecated = true];
   bool fee_collection_enabled = 14;
   bool fee_distribution_enabled = 15;
   string fee_denom = 16;

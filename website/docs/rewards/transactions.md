@@ -14,9 +14,8 @@ authority — the keeper enforces it. Raw `--help` captures are under
 | Command | Args | Authority required |
 |---|---|---|
 | `update-params` | `[params-json-file]` | CoreSlot **authority** |
-| `pause` | _(flags)_ | CoreSlot **emergency authority** |
-| `resume` | _(flags)_ | CoreSlot **emergency authority** |
-| `claim` | `[slot-id] [start-epoch] [end-epoch]` | **any** signer (pays snapshotted payout) |
+| `pause` | _(none)_ | CoreSlot **emergency authority** |
+| `resume` | _(none)_ | CoreSlot **emergency authority** |
 
 The `--from`, `--chain-id`, `--node`, `--gas`, `--fees`, `--yes` flags are the
 standard Cosmos tx flags.
@@ -51,36 +50,25 @@ See [Parameters](params.md) for the full field list and mutability.
 
 ## `pause` / `resume`
 
-Toggle the immediate runtime flags. At least one flag is required; each affects
-only the named flag and takes effect immediately.
+Toggle the single canonical pause state. There are no per-area selectors: pausing
+stops reward accrual and release together.
 
 ```bash
-twilightd rewards pause  --emissions --settlement --claims --from <emergency-authority> ...
-twilightd rewards resume --claims                          --from <emergency-authority> ...
+twilightd rewards pause  --from <emergency-authority> ...
+twilightd rewards resume --from <emergency-authority> ...
 ```
 
-| Flag | Effect of `pause` |
-|---|---|
-| `--emissions` | Finalization still runs but mints zero; cumulative emitted unchanged |
-| `--settlement` | EndBlock does not finalize; active-block counting continues |
-| `--claims` | Claim transactions are rejected; finalization unaffected |
+A transition accepted in block H takes effect at the beginning of H+1, before any
+reward sampling, so a block's reward treatment is a property of the block rather
+than of the order its transactions happened to execute in.
 
-`resume` re-enables the same flags. These do not touch pending params or closed
-epochs. A no-flag invocation is rejected.
-
-## `claim`
-
-Triggers a claim for a slot over an inclusive epoch range; funds go to the
-snapshotted payout address. Covered in detail under [Claims](claims.md).
-
-```bash
-twilightd rewards claim 1 1 1 --from <signer> --chain-id <chain-id> --node <rpc> --yes
-```
+Pausing does not stop epoch time: epoch numbering advances and epochs still
+finalize. A fully paused epoch counts zero reward-enabled blocks and emits
+nothing. These commands do not touch pending params or closed epochs.
 
 ## Failure cases
 
 | Command | Failure |
 |---|---|
 | `update-params` | wrong authority; immutable field change; unsupported feature; invalid JSON |
-| `pause` / `resume` | wrong emergency authority; no flags set |
-| `claim` | see [Claims → failure cases](claims.md#failure-cases) |
+| `pause` / `resume` | wrong emergency authority |

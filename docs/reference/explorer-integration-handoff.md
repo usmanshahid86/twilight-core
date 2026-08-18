@@ -6,8 +6,8 @@ Every claim here was verified against the code in `twilight-core` (Cosmos SDK v0
 CometBFT). Use it as the checklist a reviewer holds the explorer design up against.
 
 > The single biggest source of explorer bugs on this chain: **it is CoreSlot-PoA +
-> rewards only — there is NO staking/gov/mint/distribution.** Anything in the explorer
-> that assumes a standard Cosmos validator/staking/gov model is wrong here.
+> rewards + mining only — there is NO staking/gov/mint/distribution.** Anything in the
+> explorer that assumes a standard Cosmos validator/staking/gov model is wrong here.
 
 ---
 
@@ -16,7 +16,7 @@ CometBFT). Use it as the checklist a reviewer holds the explorer design up again
 - SDK **v0.53.7**, CometBFT. App is a depinject `runtime.App`.
 - Native denom: **`utwlt`** (base, the only denom in stateful accounting); display `twlt`;
   symbol `TWLT`. Bech32 prefixes: accounts `twilight…`, consensus `twilightvalcons…`.
-- Registered modules: **auth, bank, consensus, tx, x/coreslot, x/rewards** (+ genutil/params via runtime).
+- Registered modules: **auth, bank, consensus, tx, x/coreslot, x/rewards, x/mining** (+ genutil/params via runtime).
 - **NOT present:** staking, gov, mint, distribution, slashing, IBC, group, feegrant,
   authz. Their REST/gRPC routes return **501 Not Implemented** — this is by design, not an
   outage. An explorer must not treat 501 on those as an error or a chain it can't index.
@@ -57,11 +57,20 @@ binary; the current binary serves them.
 ## 4. Decoding transactions (the explorer's raw-tx fallback)
 
 Type URLs are correct and registered as `sdk.Msg`:
-- coreslot (9): `/twilight.coreslot.v1.{MsgRegisterCoreSlot, MsgActivateCoreSlot,
+- coreslot (11): `/twilight.coreslot.v1.{MsgRegisterCoreSlot, MsgActivateCoreSlot,
   MsgInactivateCoreSlot, MsgSuspendCoreSlot, MsgRemoveCoreSlot, MsgRotateConsensusKey,
-  MsgUpdatePayoutAddress, MsgUpdateOperatorMetadata, MsgUpdateParams}`
-- rewards (4): `/twilight.rewards.v1.{MsgClaimRewards, MsgUpdateRewardsParams,
-  MsgPauseRewards, MsgResumeRewards}`
+  MsgUpdatePayoutAddress, MsgUpdateOperatorMetadata, MsgUpdateSettlementAddress,
+  MsgUpdateSelectionPolicy, MsgUpdateParams}`
+- rewards (3): `/twilight.rewards.v1.{MsgUpdateRewardsParams, MsgPauseRewards,
+  MsgResumeRewards}`
+- mining (2): `/twilight.mining.v1.{MsgSubmitSettlementChunk, MsgFinalizeSettlement}`
+
+`twilight-msg-type-urls.json` is the machine-readable copy of exactly this list; treat it
+as the authority over this prose.
+
+> **No mining tx CLI exists yet.** Both mining messages are registered and decodable, but
+> the node ships only `twilightd mining-query`. A client that submits settlement must build
+> the `Msg` itself. Do not model a `twilightd mining …` tx command; it is not there.
 
 Two supported decode paths:
 1. **Server-side (easy):** REST `GET /cosmos/tx/v1beta1/txs/{hash}` — the chain decodes
@@ -82,27 +91,26 @@ Two supported decode paths:
 Full inventory: `docs/reference/rest-routes.md`. Highlights an indexer relies on:
 
 **x/rewards** (`twilight.rewards.v1.Query`, base `/twilight/rewards/v1`): `params`,
-`epoch-info`, `next-halving`, `epochs/{epoch_number}`, `slots/{slot_id}/rewards`,
-`slots/{slot_id}/claimable`, `cumulative-emitted`, `supply-schedule`,
-`current-epoch/active-blocks`, `module-balances`.
+`epoch-info`, `next-halving`, `epochs/{epoch_number}`, `cumulative-emitted`,
+`supply-schedule`, `current-epoch/active-blocks`, `module-balances`.
 
 **x/coreslot** (`twilight.coreslot.v1.Query`, base `/twilight/coreslot/v1`): `params`,
 `slots/{slot_id}`, `slots`, **`active-slots`**, `operators/{operator_address}`,
 `consensus/{consensus_address}` (hex), `pending-key-rotations`, `last-applied-validators`,
 `reserved-consensus-address/{consensus_address}` (hex), `slots/{slot_id}/reward-weight`.
 
+**x/mining** (`twilight.mining.v1.Query`, base `/twilight/mining/v1`):
+`settlements/{slot_id}/{epoch}`, `slots/{slot_id}/open-settlements`, `settlement-clock`,
+`distribution-mode-versions`, `distribution-mode-versions/{version}`,
+`selection-params-versions`, `selection-params-versions/{version}`,
+`settlement-params-versions`, `settlement-params-versions/{version}`.
+
 Query footguns the design MUST account for:
 - **`active-slots` not `slots/active`** — the latter collides with `slots/{slot_id}` and
   returns 400 (parsed as `slot_id="active"`).
-- **`slot-rewards` / `SlotRewards` paginates ascending by epoch.** A fixed `--limit` page
-  drops the most recent epochs once the chain exceeds one page — do NOT use it to find a
-  recent epoch's claim status. (This exact bug produced false failures in the soak.) Use
-  `ClaimableRewards` (targeted epoch range) or page to the key.
-- **`ClaimableRewards` requires `start_epoch` & `end_epoch`** (query params) and returns
-  **only UNCLAIMED** records (claimed ones are filtered out). Empty ⇒ claimed (or none).
 - **`EpochReward` (`epochs/{n}`) returns 404** for an epoch that isn't finalized yet.
-- Authoritative "is this slot-epoch claimed?" lives in **ClaimRecords** (via
-  `slot-rewards`/`claimable`), NOT in the `EpochReward` snapshot's embedded rewards.
+- **`EpochReward.rewards[]` is empty** and is not the per-slot obligation. The obligation a
+  finalized epoch creates is a `SlotEntitlement`; see the retirement note in §6.
 - Rewards **amounts are strings** (not `cosmos.base.v1beta1.Coin`); denom is `utwlt`.
 
 ## 6. Events (exact emitted strings — for event projections)
@@ -114,7 +122,6 @@ Verified from `x/{rewards,coreslot}/keeper/events.go` + the `types` constants. E
 - `epoch_finalized` — `epoch`, `start_height`, `end_height`, `minted_emission`,
   `cumulative_emitted`, `reward_pool`, `allocated`, `carry_out`, `eligible_slots`,
   `distribution_method`
-- `reward_claimed` — `signer`, `slot_id`, `start_epoch`, `end_epoch`, `amount`, `payout_count`
 - `treasury_paid` — `payout_address`, `amount`
 - `params_update_queued`, `params_activated` — params governance (authority)
 - `rewards_paused`, `rewards_resumed` — emergency pause state
@@ -123,12 +130,24 @@ Verified from `x/{rewards,coreslot}/keeper/events.go` + the `types` constants. E
 - `coreslot_registered`, `coreslot_activated`, `coreslot_inactivated`, `coreslot_suspended`,
   `coreslot_removed`, `coreslot_key_rotation_requested`, `coreslot_key_rotated`,
   `coreslot_rotation_canceled`, `coreslot_payout_updated`, `coreslot_metadata_updated`,
+  `coreslot_settlement_updated`, `coreslot_selection_policy_updated`,
   `coreslot_params_updated`, `coreslot_validator_update_emitted`
 - common attribute keys: `slot_id`, `operator_address`, `consensus_address`,
   `old_status`, `new_status`, `power`, `reason`, `old_consensus_address`,
   `new_consensus_address`, `effective_height`, `authority`, `height`
 
-If the indexer's event projections reference any event name NOT in these two lists (e.g.
+**x/mining:**
+- `mining_settlement_chunk_submitted` — `slot_id`, `epoch`, `chunk_index`,
+  `next_chunk_index`, `recipient_count`, `chunk_total`
+- `mining_settlement_finalized` — `slot_id`, `epoch`, `finalization_reason`,
+  `released_remainder`, `finalized_height`
+
+Mining events are an **accelerator, never a correctness requirement**: the settlement
+worker must be able to lose every event, restart, read committed state, and determine
+exactly what to do next. Every attribute above is also readable from state, so an indexer
+that misses events can rebuild from the queries in §5 rather than losing the settlement.
+
+If the indexer's event projections reference any event name NOT in these three lists (e.g.
 `reward_distributed`, `validator_jailed`, staking/gov events), that's a design error —
 those events do not exist.
 
@@ -156,6 +175,31 @@ An indexer that must ingest history from a pre-V2 chain is the one case that nee
 both spellings, and that belongs in the indexer's own decoding layer rather than in
 the node.
 
+### V2 breaking change — the legacy claim surface is retired
+
+The claim path is gone from the chain. Nothing about it is deprecated-but-present:
+the message, its queries, its REST routes, its event and its store prefix were all
+removed, and the prefix is permanently reserved.
+
+| Surface | Status |
+|---|---|
+| `/twilight.rewards.v1.MsgClaimRewards` | removed — no longer registered, no longer decodable |
+| `SlotRewards` / `slots/{slot_id}/rewards` | removed — the gateway answers **501** |
+| `ClaimableRewards` / `slots/{slot_id}/claimable` | removed — the gateway answers **501** |
+| `reward_claimed` event | never emitted again |
+| `GenesisState.claim_records` (field 4) | removed; the field number is reserved |
+| `ClaimRecord` store prefix `0x07` | retired permanently and never reused |
+
+What replaced it: a finalized epoch creates one **`SlotEntitlement`** per eligible
+slot, held in the rewards module account. Value leaves escrow only through
+**settlement** in `x/mining` — `MsgSubmitSettlementChunk` pays participants and
+`MsgFinalizeSettlement` returns the remainder to the operator's snapshotted payout
+address. An indexer that models payouts must project settlement, not claims.
+
+An indexer ingesting pre-V2 history still needs the old decoders for those historical
+blocks; as with the rotation rename, that belongs in the indexer's decoding layer, not
+in the node.
+
 ## 7. Rewards economics (so rewards pages match the chain)
 
 - Epoch-based emission: each epoch finalizes and mints `minted_emission` into the rewards
@@ -163,7 +207,8 @@ the node.
 - **Halving is by supply threshold**, not block height (see `supply-schedule` /
   `next-halving`). Don't model it as a fixed block-height halving.
 - Per-slot distribution: each epoch's emission is split across eligible active slots by
-  reward weight; claimable per (slot, epoch) until claimed. Claims can span an epoch range.
+  active-block participation, creating one `SlotEntitlement` per (slot, epoch) that is
+  held until settlement releases it.
 - Module accounting is queryable via `module-balances` (rewards + fee-pool balances).
 - Premine is configurable (devnet may have funded accounts; the soak ran zero-premine).
 
@@ -186,12 +231,11 @@ the node.
 2. Does it decode custom Msgs via the descriptor set or the REST tx service (not hand-rolled
    or assuming upstream TS bindings)?
 3. Does it use hex (not bech32 valcons) for CoreSlot consensus-address lookups?
-4. Does it avoid the `slot-rewards` fixed-`limit` pagination trap for recent-epoch state?
-5. Do its event projections match exactly the event names in §6 (no invented events)?
-6. Does it model halving by supply threshold, amounts as strings/`utwlt`, claims as epoch
-   ranges, and "claimed" from ClaimRecords?
-7. Does it treat 501 on absent modules as expected, and `active-slots` (not `slots/active`)?
-8. Does it track validator-set changes via CoreSlot events + CometBFT validators, and
+4. Do its event projections match exactly the event names in §6 (no invented events)?
+5. Does it model halving by supply threshold, amounts as strings/`utwlt`, and per-(slot,
+   epoch) obligations as `SlotEntitlement`s released by settlement — not as claims?
+6. Does it treat 501 on absent modules as expected, and `active-slots` (not `slots/active`)?
+7. Does it track validator-set changes via CoreSlot events + CometBFT validators, and
    reflect the N-of-N PoA liveness model?
 
 ## 10. Source-of-truth files in the chain repo (for the agent to cite)
@@ -199,7 +243,7 @@ the node.
 - `docs/reference/rest-routes.md` — full REST route table
 - `docs/reference/swagger.md` + `app/openapi/twilight.swagger.json` — OpenAPI of the surface
 - `docs/proto/{twilight-descriptors.pb, twilight-msg-type-urls.json, README.md}` — tx decode
-- `proto/twilight/{coreslot,rewards}/v1/*.proto` — schema
-- `x/{coreslot,rewards}/types/codec.go` — registered Msg type URLs
-- `x/{coreslot,rewards}/keeper/events.go` + `types` consts — emitted events
-- `x/{coreslot,rewards}/keeper/query_server.go` — query semantics (pagination, not-found, hex keys)
+- `proto/twilight/{coreslot,rewards,mining}/v1/*.proto` — schema
+- `x/{coreslot,rewards,mining}/types/codec.go` — registered Msg type URLs
+- `x/{coreslot,rewards,mining}/types/events.go` — emitted events
+- `x/{coreslot,rewards,mining}/keeper/query_server.go` — query semantics (pagination, not-found, hex keys)

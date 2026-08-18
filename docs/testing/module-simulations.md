@@ -43,10 +43,10 @@ decisive via `AllowEmergencyBelowMinActive`).
 ## Rewards economic sim — `app/rewards_sim_test.go`
 
 `TestRewardsEconomicSimulation` (8 seeds × 220 ops). Randomized params (subsidy, epoch length,
-treasury bps, max supply, claim cap) over a multi-slot zero-premine chain, driving epoch advances,
-mid-epoch churn, valid/invalid claims (predicted from chain state, with the exact rejection reason
-asserted), and emergency pause/resume. After **every** operation it asserts the five rewards
-invariants and the full accounting identity:
+treasury bps, max supply) over a multi-slot zero-premine chain, driving epoch advances,
+mid-epoch churn, valid/invalid entitlement releases (predicted from chain state, with the exact
+rejection reason asserted), and emergency pause/resume. After **every** operation it asserts the
+five rewards invariants and the full accounting identity:
 
 ```
 cumulative == Σ MintedEmission
@@ -55,16 +55,17 @@ supply     == cumulative                 (zero premine)
 treasury balance == Σ TreasuryAmount
 ```
 
-A rejected claim is additionally proven atomic (no module-balance or supply change). A standing
-**coverage assertion** fails the suite if, across the seeds, any claimed branch was not actually
-exercised (successful + rejected claims, cap rejection, replay rejection, claims-disabled
-rejection, nonzero carry, treasury split, halving crossing) — guarding against silent regression
-to a vacuous run.
+A rejected release is additionally proven atomic (no module-balance or supply change). A standing
+**coverage assertion** fails the suite if, across the seeds, any branch it claims to cover was not
+actually exercised (successful and rejected releases, over-release rejection, release against a
+missing entitlement, paused-release rejection, operator remainder paid and zero-remainder no-op,
+nonzero carry, treasury split, halving crossing) — guarding against silent regression to a
+vacuous run.
 
 ## Result
 
 Both sims pass; the suites are deterministic and reproducible. Adversarially reviewed, including
-mutation testing (deliberately breaking `endblock.go` / `distribution.go` / `claims.go` and
+mutation testing (deliberately breaking `endblock.go` / `distribution.go` / `release.go` and
 confirming the sims fail). Run with:
 
 ```

@@ -15,7 +15,7 @@ and `mint` modules are **omitted**.
 | Module | Role |
 |---|---|
 | `x/coreslot` | Owns the validator/operator slot set; the **only** module that emits validator updates. Stores each slot's operator address, payout address, reward weight, and status. Exposes a read-only interface to rewards. |
-| `x/rewards` | Reads the active CoreSlot set, counts active blocks per epoch, finalizes epochs, mints `utwlt`, creates claim records, and pays snapshotted payout addresses. Does **not** manage validators. |
+| `x/rewards` | Reads the active CoreSlot set, counts active blocks per epoch, finalizes epochs, mints `utwlt`, and creates the slot entitlements that settlement later releases. Does **not** manage validators. |
 | `auth`, `bank`, `consensus` | Standard Cosmos SDK modules (accounts, balances/supply, consensus params). |
 
 The runtime is wired via Cosmos SDK `depinject`; CoreSlot and rewards keepers are
@@ -49,7 +49,7 @@ sequenceDiagram
     CoreSlot-->>Runtime: Validator updates
     Runtime->>Rewards: EndBlock
     Rewards->>Bank: Mint epoch emission (utwlt)
-    Rewards->>Rewards: Create immutable epoch + claim records
+    Rewards->>Rewards: Create immutable epoch + slot entitlements
 ```
 
 ## Module boundaries
@@ -73,6 +73,6 @@ proposal flow. Validator authority and emergency authority are CoreSlot concepts
 |---|---|
 | `app/` | App wiring (`app.go`), module/account config (`config.go`), params (`params/`). |
 | `x/coreslot/` | CoreSlot module (PoA validator authority). |
-| `x/rewards/` | Rewards module (emission, epochs, claims, params, invariants). |
+| `x/rewards/` | Rewards module (emission, epochs, entitlements, params, invariants). |
 | `cmd/twilightd/` | The `twilightd` node + CLI binary. |
 | `scripts/localnet/` | Localnet init/start/agree/stop + smoke, soak, and drill scripts. |

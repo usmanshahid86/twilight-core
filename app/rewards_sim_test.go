@@ -4,7 +4,7 @@ package app_test
 //
 // A seeded, randomized state-machine test (deterministic property fuzzing) that
 // generalizes the branch-coverage drills: each run picks randomized rewards
-// params (subsidy, epoch length, treasury bps, max supply, claim cap) for a
+// params (subsidy, epoch length, treasury bps, max supply) for a
 // multi-slot zero-premine chain, then drives a long random sequence of:
 //
 //   - advance block (crossing epoch boundaries -> mint / carry / treasury split)
@@ -202,8 +202,8 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 		switch rng.Intn(6) {
 		case 0, 1, 2: // advance the chain (the dominant op)
 			// A CHUNK of blocks, not one. Epochs are now hundreds of blocks long,
-			// so advancing singly would never close one and the claim, cap and
-			// replay branches below would never become reachable — the simulation
+			// so advancing singly would never close one and the release and
+			// over-release branches below would never become reachable — the simulation
 			// would still pass while exercising almost nothing.
 			for i := int64(0); i < advanceChunk; i++ {
 				driveBlock(t, a, base, height) // side effect only; ctx is refreshed below
@@ -227,7 +227,7 @@ func runRewardsSim(t *testing.T, seed int64, steps int) rewardsCoverage {
 				}
 			}
 
-		case 4: // claim: predict validity from chain state, then assert
+		case 4: // release: predict validity from chain state, then assert
 			simRelease(t, a, ctx, rng, &cov, seed, step)
 
 		case 5: // emergency pause or resume a random subset of flags
@@ -495,9 +495,9 @@ func pauseResume(t *testing.T, a *app.App, ctx sdk.Context, emer string, pause b
 	return a.RewardsKeeper.SetPauseState(ctx, rewardstypes.RewardsPauseState{CurrentPaused: pause})
 }
 
-// releaseEnabled reports the canonical release state, which is what now governs
-// whether the legacy claim path may move funds. The retired claims_enabled switch
-// carries no authority and must not be used to predict a rejection.
+// releaseEnabled reports the canonical release state, which is what governs
+// whether entitlement value may move. The retired claims_enabled param carries no
+// authority and must not be used to predict a rejection.
 func releaseEnabled(t *testing.T, a *app.App, ctx sdk.Context) bool {
 	t.Helper()
 	enabled, err := a.RewardsKeeper.SettlementReleaseEnabled(ctx)

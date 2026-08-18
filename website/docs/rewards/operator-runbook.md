@@ -33,17 +33,12 @@ twilightd rewards-query epoch-reward <epoch> --node <rpc>
 # minted_emission, reward_pool, allocated_amount, carry_out, rewards[]
 ```
 
-## Check and claim a slot's rewards
+## How a slot's rewards are released
 
-```bash
-twilightd rewards-query slot-rewards <slot-id> --limit 10 --node <rpc>
-twilightd rewards-query claimable <slot-id> <start> <end> --node <rpc>
-
-twilightd rewards claim <slot-id> <start> <end> \
-  --from <signer> --chain-id <chain-id> --node <rpc> --gas 600000 --fees 0utwlt --yes
-```
-
-Funds go to the snapshotted payout address. See [Claims](claims.md).
+Rewards accrue at finalization as a per-slot **entitlement** held in the rewards
+module account. There is no claim transaction: entitlements are released by
+settlement in `x/mining`, which pays participants and returns the remainder to
+the operator. See [Epoch Lifecycle](epoch-lifecycle.md).
 
 ## Verify cross-node agreement (localnet)
 
@@ -56,8 +51,8 @@ scripts/localnet/agree.sh         # app/validators/next-validators hash agreemen
 | Action | Command | Authority |
 |---|---|---|
 | Queue params update | `rewards update-params ./params.json --from <auth>` | CoreSlot authority |
-| Pause | `rewards pause --emissions --settlement --claims --from <emg>` | CoreSlot emergency authority |
-| Resume | `rewards resume --claims --from <emg>` | CoreSlot emergency authority |
+| Pause | `rewards pause --from <emg>` | CoreSlot emergency authority |
+| Resume | `rewards resume --from <emg>` | CoreSlot emergency authority |
 
 See [Authority & Emergency Guide](../operators/authority-and-emergency-guide.md).
 
@@ -65,5 +60,5 @@ See [Authority & Emergency Guide](../operators/authority-and-emergency-guide.md)
 
 > **Operator check:** after each epoch boundary, confirm `cumulative_emitted`
 > changed by the expected bounded emission for that epoch,
-> `module-balances.rewards_balance` covers unclaimed + carry, and (on a
+> `module-balances.rewards_balance` covers unreleased entitlements + carry, and (on a
 > multi-node network) all nodes agree on app hash.

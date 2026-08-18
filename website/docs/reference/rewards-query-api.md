@@ -30,22 +30,6 @@ Finalized epoch aggregate. Args: `epoch` (uint, required, > 0). Returns
 `distributable_fees`, `treasury_amount`, `reward_pool`, `allocated_amount`,
 `carry_out`, `cumulative_emitted_after_epoch`, `rewards[]`.
 
-## `slot-rewards [slot-id]`
-Claim records for a slot. Args: `slot-id` (uint, required, > 0).
-**Paginated** (ascending epoch). → `rewards[]` (`slot_id`, `epoch_number`,
-`operator_address`, `payout_address`, `blocks_active`, `reward_weight`,
-`effective_weight`, `amount`, `claimed`, `claimed_at_height`), `pagination`.
-
-:::note
-`reward_weight` is the CoreSlot snapshot and is **metadata-only — it has no payout
-effect in v1**. The payout (`amount`) is driven by `effective_weight`, which equals
-`blocks_active` for v1 active-block participation allocation. See [Rewards Economics](../rewards/economics.mdx).
-:::
-
-## `claimable [slot-id] [start-epoch] [end-epoch]`
-Unclaimed positive rewards in an inclusive range. Args all uint, required;
-`start ≤ end`. → `rewards[]`, `total_amount`.
-
 ## `cumulative-emitted`
 → `cumulative_emitted`, `max_supply`.
 
@@ -61,7 +45,7 @@ Active-block counters for the open epoch. **Paginated** (ascending slot id).
 
 ## Pagination flags
 
-`slot-rewards` and `current-active-blocks` accept `--limit`, `--offset`,
+`current-active-blocks` accepts `--limit`, `--offset`,
 `--page`, `--page-key`, `--count-total`, `--reverse`. Use the `next_key` from a
 response as the next `--page-key`. Other commands take no pagination flags.
 

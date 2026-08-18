@@ -25,32 +25,14 @@ Authoritative per-message reference for `twilightd rewards`. Narrative usage is 
 | Field | Source |
 |---|---|
 | `emergency_authority` | `--from`; must equal CoreSlot emergency authority |
-| `pause_emissions` | `--emissions` |
-| `pause_epoch_settlement` | `--settlement` |
-| `pause_claims` | `--claims` |
 
-- Immediate; toggles only the requested flags.
-- Rejected if not the emergency authority, or if no flag is set.
+- Sets the single canonical pause state; there are no per-area selectors.
+- Takes effect at the beginning of the next block, before any reward sampling.
+- Rejected if not the emergency authority.
 
 ## `resume` → `MsgResumeRewards`
 
-Same shape as `pause` with `resume_*` fields and `--emissions/--settlement/--claims`.
-
-## `claim [slot-id] [start-epoch] [end-epoch]` → `MsgClaimRewards`
-
-| Field | Source |
-|---|---|
-| `signer` | `--from` (any valid account) |
-| `slot_id` | arg 1 |
-| `start_epoch` | arg 2 |
-| `end_epoch` | arg 3 |
-
-- Pays each record's snapshotted payout address (grouped by payout across a
-  range); the signer receives nothing unless it is a payout.
-- Mints nothing; total supply unchanged.
-- Rejected if claims are disabled, an epoch is not finalized, a record is missing
-  or already claimed, the amount is non-positive, the range exceeds
-  `max_claim_epochs_per_tx`, or the module balance is insufficient.
+Same shape as `pause`, clearing the same canonical state.
 
 ## Authority summary
 
@@ -58,6 +40,5 @@ Same shape as `pause` with `resume_*` fields and `--emissions/--settlement/--cla
 |---|---|
 | `MsgUpdateRewardsParams` | CoreSlot authority |
 | `MsgPauseRewards` / `MsgResumeRewards` | CoreSlot emergency authority |
-| `MsgClaimRewards` | any signer |
 
 The CLI never infers or hardcodes authority; the message server enforces it.

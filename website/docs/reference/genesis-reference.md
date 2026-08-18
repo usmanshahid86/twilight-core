@@ -18,7 +18,6 @@ how genesis is initialized and a non-reference overview, see
 | `pending_params` | `Params` | Present only if a params update is queued |
 | `has_pending_params` | bool | Presence flag for `pending_params` |
 | `finalized_epochs` | `EpochReward[]` | Immutable finalized epoch aggregates |
-| `claim_records` | `EligibleSlotReward[]` | Per-`(slot, epoch)` claim rows |
 
 ### `RewardsState`
 
@@ -34,7 +33,7 @@ how genesis is initialized and a non-reference overview, see
 ```json
 {
   "params": { "native_denom": "utwlt", "max_supply": "21000000000000",
-              "initial_block_subsidy": "416190", "epoch_length_blocks": "17280",
+              "initial_block_subsidy": "416190", "epoch_length_blocks": "360",
               "distribution_method": "DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS",
               "remainder_policy": "REMAINDER_POLICY_CARRY_FORWARD",
               "emissions_enabled": true, "epoch_settlement_enabled": true,
@@ -65,8 +64,9 @@ jq '.app_state.rewards' ~/.twilightd/config/genesis.json
 
 - `cumulative_emitted` ≤ `max_supply`;
 - `native_denom` must be `utwlt`;
-- a claim record must reference a finalized epoch;
-- no duplicate finalized epoch or claim record;
+- no duplicate finalized epoch;
+- a fresh genesis carries no finalized epochs, no slot entitlements, and an
+  outstanding entitlement liability of exactly `"0"`;
 - standard `Params` validation ([params reference](params-reference.md)).
 
 No premine: default rewards genesis has `cumulative_emitted = 0` and no rewards
