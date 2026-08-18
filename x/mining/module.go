@@ -65,13 +65,18 @@ func (AppModule) IsOnePerModuleType()      {}
 func (AppModule) Name() string             { return types.ModuleName }
 func (AppModule) ConsensusVersion() uint64 { return ConsensusVersion }
 
-// RegisterServices registers nothing in this gate.
+// RegisterServices registers the settlement message service.
 //
-// x/mining deliberately has no message service yet: the settlement transactions
-// are the only messages this module will ever own, and there is no mode,
-// Selection-parameter or settlement-parameter update transaction in this profile.
-// The state model exists; the mutation surfaces do not.
-func (AppModule) RegisterServices(_ module.Configurator) {}
+// The settlement transactions are the only messages this module will ever own.
+// There is deliberately no mode, Selection-parameter or settlement-parameter
+// update transaction in this profile — the state model for all three exists and is
+// historically versioned, but the mutation surfaces do not — and there is no
+// message that opens a settlement.
+//
+// The query service arrives with the observability gate.
+func (am AppModule) RegisterServices(cfg module.Configurator) {
+	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServer(am.keeper))
+}
 
 func (am AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, raw json.RawMessage) {
 	var genesis types.GenesisState

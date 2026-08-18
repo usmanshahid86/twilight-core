@@ -3,16 +3,23 @@ package types
 import (
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/msgservice"
 )
 
-// RegisterInterfaces registers this module's implementations.
+// RegisterInterfaces registers this module's messages.
 //
-// x/mining carries no messages in this gate: the Settlement transactions arrive
-// with the message gates, and there is deliberately no mode, Selection-parameter
-// or settlement-parameter update transaction in this profile. The function exists
-// so the module satisfies the interface and so adding a message later is a change
-// to a body rather than a new registration point.
-func RegisterInterfaces(_ codectypes.InterfaceRegistry) {}
+// The settlement transactions are the only messages x/mining owns. There is
+// deliberately no mode, Selection-parameter or settlement-parameter update
+// message, and no message that opens a settlement.
+func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
+	registry.RegisterImplementations(
+		(*sdk.Msg)(nil),
+		&MsgSubmitSettlementChunk{},
+	)
+	msgservice.RegisterMsgServiceDesc(registry, &_Msg_serviceDesc)
+}
 
-// RegisterLegacyAminoCodec has nothing to register for the same reason.
-func RegisterLegacyAminoCodec(_ *codec.LegacyAmino) {}
+func RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
+	cdc.RegisterConcrete(&MsgSubmitSettlementChunk{}, "twilight/mining/MsgSubmitSettlementChunk", nil)
+}
