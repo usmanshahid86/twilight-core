@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/query"
 	"google.golang.org/grpc/codes"
 
 	"github.com/twilight-project/twilight-core/x/mining/keeper"
@@ -324,4 +325,140 @@ func TestAHistoryWithoutItsOriginIsCorrupt(t *testing.T) {
 		_, err := q.SettlementParamsVersion(ctx, &types.QuerySettlementParamsVersionRequest{Version: 3})
 		require.Equal(t, codes.NotFound, grpcCode(t, err))
 	})
+}
+
+// TestRequestClassificationPrecedesChainState is A6-R1.
+//
+// A malformed request stays malformed no matter what condition the chain is in.
+// Answering Internal because the history behind a bad request happens to be damaged
+// would send the caller to investigate the chain when the fault is in its own
+// request — and, worse, would make the classification of an identical request depend
+// on state the caller cannot see.
+//
+// The corrupt-origin variants are the point of this test. A valid request against a
+// damaged history must still be Internal, so the two rules are genuinely ordered
+// rather than one having replaced the other.
+func TestRequestClassificationPrecedesChainState(t *testing.T) {
+	// The three ways a family origin can be broken, each of which makes a VALID
+	// request answer Internal.
+	breakOrigin := map[string]func(*testing.T, keeper.Keeper, sdk.Context){
+		"origin missing": func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+			require.NoError(t, k.SettlementParamsVersions.Remove(ctx, 1))
+			require.NoError(t, k.DistributionModeVersions.Remove(ctx, 1))
+			require.NoError(t, k.SelectionParamsVersions.Remove(ctx, 1))
+		},
+		"origin carries the wrong version": func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+			require.NoError(t, k.SettlementParamsVersions.Set(ctx, 1, types.SettlementParamsVersion{
+				Version: 4, EffectiveEpoch: 1,
+				SettlementWindowEpochs:   types.DefaultSettlementWindowEpochs,
+				MaxRecipientsPerChunk:    types.DefaultMaxRecipientsPerChunk,
+				MaxChunksPerSettlement:   types.DefaultMaxChunksPerSettlement,
+				MinRecipientPayoutAmount: types.DefaultMinRecipientPayoutAmount,
+			}))
+			mode, err := k.DistributionModeVersions.Get(ctx, 1)
+			require.NoError(t, err)
+			mode.Version = 4
+			require.NoError(t, k.DistributionModeVersions.Set(ctx, 1, mode))
+			sel, err := k.SelectionParamsVersions.Get(ctx, 1)
+			require.NoError(t, err)
+			sel.Version = 4
+			require.NoError(t, k.SelectionParamsVersions.Set(ctx, 1, sel))
+		},
+	}
+
+	// --- exact-version queries: A, B, C ---------------------------------------
+	exact := map[string]func(types.QueryServer, sdk.Context, uint64) error{
+		"distribution mode": func(q types.QueryServer, ctx sdk.Context, v uint64) error {
+			_, err := q.DistributionModeVersion(ctx, &types.QueryDistributionModeVersionRequest{Version: v})
+			return err
+		},
+		"selection params": func(q types.QueryServer, ctx sdk.Context, v uint64) error {
+			_, err := q.SelectionParamsVersion(ctx, &types.QuerySelectionParamsVersionRequest{Version: v})
+			return err
+		},
+		"settlement params": func(q types.QueryServer, ctx sdk.Context, v uint64) error {
+			_, err := q.SettlementParamsVersion(ctx, &types.QuerySettlementParamsVersionRequest{Version: v})
+			return err
+		},
+	}
+
+	for family, ask := range exact {
+		// A. version 0 with an intact origin.
+		t.Run(family+"/version zero, origin valid -> InvalidArgument", func(t *testing.T) {
+			q, _, ctx, _ := queryFixture(t)
+			require.Equal(t, codes.InvalidArgument, grpcCode(t, ask(q, ctx, 0)))
+		})
+
+		// B and C. version 0 with a broken origin: the request is still what is wrong.
+		for name, breakIt := range breakOrigin {
+			t.Run(family+"/version zero, "+name+" -> InvalidArgument", func(t *testing.T) {
+				q, k, ctx, _ := queryFixture(t)
+				breakIt(t, k, ctx)
+				require.Equal(t, codes.InvalidArgument, grpcCode(t, ask(q, ctx, 0)),
+					"no chain-state read may override request classification")
+			})
+
+			// G and H. A VALID request against the same damage is still Internal, so
+			// the bootstrap proof was ordered rather than removed.
+			t.Run(family+"/valid version, "+name+" -> Internal", func(t *testing.T) {
+				q, k, ctx, _ := queryFixture(t)
+				breakIt(t, k, ctx)
+				require.Equal(t, codes.Internal, grpcCode(t, ask(q, ctx, 1)))
+			})
+		}
+
+		// I. Intact origin, valid request: ordinary behavior.
+		t.Run(family+"/valid version, intact origin -> success", func(t *testing.T) {
+			q, _, ctx, _ := queryFixture(t)
+			require.NoError(t, ask(q, ctx, 1))
+		})
+	}
+
+	// --- history listings: D, E, F --------------------------------------------
+	lists := map[string]func(types.QueryServer, sdk.Context, *query.PageRequest) error{
+		"distribution mode": func(q types.QueryServer, ctx sdk.Context, p *query.PageRequest) error {
+			_, err := q.DistributionModeVersions(ctx, &types.QueryDistributionModeVersionsRequest{Pagination: p})
+			return err
+		},
+		"selection params": func(q types.QueryServer, ctx sdk.Context, p *query.PageRequest) error {
+			_, err := q.SelectionParamsVersions(ctx, &types.QuerySelectionParamsVersionsRequest{Pagination: p})
+			return err
+		},
+		"settlement params": func(q types.QueryServer, ctx sdk.Context, p *query.PageRequest) error {
+			_, err := q.SettlementParamsVersions(ctx, &types.QuerySettlementParamsVersionsRequest{Pagination: p})
+			return err
+		},
+	}
+	unsupported := map[string]*query.PageRequest{
+		"offset":      {Offset: 1},
+		"count_total": {CountTotal: true},
+		"reverse":     {Reverse: true},
+	}
+
+	for family, list := range lists {
+		for shape, page := range unsupported {
+			// D, E, F. Unsupported pagination against a broken origin.
+			for name, breakIt := range breakOrigin {
+				t.Run(family+"/"+shape+" pagination, "+name+" -> InvalidArgument", func(t *testing.T) {
+					q, k, ctx, _ := queryFixture(t)
+					breakIt(t, k, ctx)
+					require.Equal(t, codes.InvalidArgument, grpcCode(t, list(q, ctx, page)),
+						"an unsupported page request is malformed regardless of the history")
+				})
+			}
+		}
+
+		// The listing counterparts of G/H/I.
+		for name, breakIt := range breakOrigin {
+			t.Run(family+"/valid pagination, "+name+" -> Internal", func(t *testing.T) {
+				q, k, ctx, _ := queryFixture(t)
+				breakIt(t, k, ctx)
+				require.Equal(t, codes.Internal, grpcCode(t, list(q, ctx, nil)))
+			})
+		}
+		t.Run(family+"/valid pagination, intact origin -> success", func(t *testing.T) {
+			q, _, ctx, _ := queryFixture(t)
+			require.NoError(t, list(q, ctx, &query.PageRequest{Limit: 10}))
+		})
+	}
 }

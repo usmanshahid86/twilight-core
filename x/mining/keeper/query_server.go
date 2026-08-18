@@ -341,6 +341,9 @@ func (q queryServer) DistributionModeVersion(
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "a request is required")
 	}
+	if err := requireVersionRequest(req.Version, "distribution mode"); err != nil {
+		return nil, err
+	}
 	if err := q.requireHistoryAnchor(ctx, func() error {
 		_, err := q.GenesisDistributionMode(ctx)
 		return err
@@ -363,6 +366,9 @@ func (q queryServer) SelectionParamsVersion(
 ) (*types.QuerySelectionParamsVersionResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "a request is required")
+	}
+	if err := requireVersionRequest(req.Version, "selection parameters"); err != nil {
+		return nil, err
 	}
 	if err := q.requireHistoryAnchor(ctx, func() error {
 		_, err := q.GenesisSelectionParams(ctx)
@@ -387,6 +393,9 @@ func (q queryServer) SettlementParamsVersion(
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "a request is required")
 	}
+	if err := requireVersionRequest(req.Version, "settlement parameters"); err != nil {
+		return nil, err
+	}
 	if err := q.requireHistoryAnchor(ctx, func() error {
 		_, err := q.GenesisSettlementParams(ctx)
 		return err
@@ -402,6 +411,21 @@ func (q queryServer) SettlementParamsVersion(
 		return nil, err
 	}
 	return &types.QuerySettlementParamsVersionResponse{Version: record}, nil
+}
+
+// requireVersionRequest validates the shape of an exact-version request.
+//
+// Request validity is decided BEFORE any chain state is consulted, and that ordering
+// is the contract rather than an efficiency choice. A caller that asked for version 0
+// asked a malformed question, and it stays malformed no matter what condition the
+// chain is in — answering Internal because the history behind it happens to be
+// damaged would tell that caller to investigate the chain when the fault is in its
+// own request.
+func requireVersionRequest(version uint64, family string) error {
+	if version == 0 {
+		return status.Errorf(codes.InvalidArgument, "%s version numbers start at 1", family)
+	}
+	return nil
 }
 
 // requireHistoryAnchor proves a configuration history still has its mandatory
@@ -440,8 +464,10 @@ func exactVersion[V any](
 	validate func(key uint64, record V) error,
 	family string,
 ) (*V, error) {
-	if version == 0 {
-		return nil, status.Errorf(codes.InvalidArgument, "%s version numbers start at 1", family)
+	// Belt and braces, through the SAME helper the handlers call, so the two can
+	// never drift into classifying an identical request differently.
+	if err := requireVersionRequest(version, family); err != nil {
+		return nil, err
 	}
 	epochKey, class, err := resolveExactVersion(ctx, history, index, version, versionOf, validate, family)
 	if err != nil {
@@ -466,13 +492,19 @@ func (q queryServer) DistributionModeVersions(
 	if req != nil {
 		page = req.Pagination
 	}
+	// Pagination shape first: an unsupported page request is malformed regardless
+	// of what the history behind it looks like.
+	bounded, err := boundedPage(page)
+	if err != nil {
+		return nil, err
+	}
 	if err := q.requireHistoryAnchor(ctx, func() error {
 		_, err := q.GenesisDistributionMode(ctx)
 		return err
 	}); err != nil {
 		return nil, err
 	}
-	versions, pageRes, err := listVersions(ctx, q.Keeper.DistributionModeVersions, page, validateModeRecord)
+	versions, pageRes, err := listVersions(ctx, q.Keeper.DistributionModeVersions, bounded, validateModeRecord)
 	if err != nil {
 		return nil, err
 	}
@@ -486,13 +518,19 @@ func (q queryServer) SelectionParamsVersions(
 	if req != nil {
 		page = req.Pagination
 	}
+	// Pagination shape first: an unsupported page request is malformed regardless
+	// of what the history behind it looks like.
+	bounded, err := boundedPage(page)
+	if err != nil {
+		return nil, err
+	}
 	if err := q.requireHistoryAnchor(ctx, func() error {
 		_, err := q.GenesisSelectionParams(ctx)
 		return err
 	}); err != nil {
 		return nil, err
 	}
-	versions, pageRes, err := listVersions(ctx, q.Keeper.SelectionParamsVersions, page, validateSelectionParamsRecord)
+	versions, pageRes, err := listVersions(ctx, q.Keeper.SelectionParamsVersions, bounded, validateSelectionParamsRecord)
 	if err != nil {
 		return nil, err
 	}
@@ -506,13 +544,19 @@ func (q queryServer) SettlementParamsVersions(
 	if req != nil {
 		page = req.Pagination
 	}
+	// Pagination shape first: an unsupported page request is malformed regardless
+	// of what the history behind it looks like.
+	bounded, err := boundedPage(page)
+	if err != nil {
+		return nil, err
+	}
 	if err := q.requireHistoryAnchor(ctx, func() error {
 		_, err := q.GenesisSettlementParams(ctx)
 		return err
 	}); err != nil {
 		return nil, err
 	}
-	versions, pageRes, err := listVersions(ctx, q.Keeper.SettlementParamsVersions, page, validateSettlementParamsRecord)
+	versions, pageRes, err := listVersions(ctx, q.Keeper.SettlementParamsVersions, bounded, validateSettlementParamsRecord)
 	if err != nil {
 		return nil, err
 	}
@@ -521,6 +565,11 @@ func (q queryServer) SettlementParamsVersions(
 
 // listVersions pages one configuration history in canonical ascending order.
 //
+// The page request arrives ALREADY validated and bounded. Validation happens in the
+// handler, before any chain state is read, so a malformed request is classified as
+// malformed even when the history behind it is damaged; re-validating here would
+// either be dead work or a second policy able to disagree with the first.
+//
 // A malformed record encountered while building a page fails the whole page. There
 // is no best-effort listing: a history returned with one row quietly omitted or
 // normalized would be a history the caller could not reconcile against, and a
@@ -528,13 +577,9 @@ func (q queryServer) SettlementParamsVersions(
 func listVersions[V any](
 	ctx context.Context,
 	history collections.Map[uint64, V],
-	page *query.PageRequest,
+	bounded *query.PageRequest,
 	validate func(key uint64, record V) error,
 ) ([]*V, *query.PageResponse, error) {
-	bounded, err := boundedPage(page)
-	if err != nil {
-		return nil, nil, err
-	}
 	records, pageRes, err := query.CollectionPaginate(ctx, history, bounded,
 		func(key uint64, record V) (*V, error) {
 			if err := validate(key, record); err != nil {
