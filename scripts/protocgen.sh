@@ -37,16 +37,17 @@ protoc "${INCLUDES[@]}" "$GOCOSMOS_OUT" \
   proto/twilight/rewards/v1/tx.proto \
   proto/twilight/rewards/v1/query.proto
 
-# x/mining. The query service arrives with the observability gate; until then this
-# module has no gateway or OpenAPI entry below.
+# x/mining.
 protoc "${INCLUDES[@]}" "$GOCOSMOS_OUT" \
   proto/twilight/mining/v1/mining.proto \
   proto/twilight/mining/v1/genesis.proto \
-  proto/twilight/mining/v1/tx.proto
+  proto/twilight/mining/v1/tx.proto \
+  proto/twilight/mining/v1/query.proto
 
 # REST gateway: generate *.pb.gw.go for the annotated query services only.
 protoc "${INCLUDES[@]}" "$GATEWAY_OUT" proto/twilight/coreslot/v1/query.proto
 protoc "${INCLUDES[@]}" "$GATEWAY_OUT" proto/twilight/rewards/v1/query.proto
+protoc "${INCLUDES[@]}" "$GATEWAY_OUT" proto/twilight/mining/v1/query.proto
 
 # OpenAPI/Swagger spec for the *enabled* REST surface — the modules this app actually
 # registers (auth, bank, tx, consensus, base/tendermint, base/node) plus the twilight

@@ -1,0 +1,164 @@
+syntax = "proto3";
+package twilight.mining.v1;
+
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "google/api/annotations.proto";
+import "twilight/mining/v1/mining.proto";
+
+option go_package = "github.com/twilight-project/twilight-core/x/mining/types";
+
+// The observability surface a settlement worker recovers from.
+//
+// The governing requirement is that events are never required for correctness. A
+// worker may lose its transaction response, its event stream, its process and its
+// local database, and must still be able to determine from committed chain state
+// alone exactly what operation comes next. Everything below exists to make that
+// possible.
+//
+// Responses separate three kinds of value and never blur them:
+//
+//   canonical    stored x/mining state, returned exactly as stored
+//   correlated   authoritative x/rewards state, read at query time, never stored here
+//   derived      computed at query time from the two above, never stored anywhere
+//
+// No derived value has a stored counterpart. A settlement records no released
+// amount, no remaining amount, no ceiling, no created height, no created clock and
+// no deadline, because a stored copy of any of them would be a second authority
+// able to disagree with the one the release boundary actually enforces.
+service Query {
+  // Settlement returns one settlement with everything needed to decide the next
+  // operation against it.
+  rpc Settlement(QuerySettlementRequest) returns (QuerySettlementResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/settlements/{slot_id}/{epoch}";
+  }
+
+  // OpenSettlements lists a Slot's outstanding settlements, bounded and
+  // index-backed.
+  rpc OpenSettlements(QueryOpenSettlementsRequest) returns (QueryOpenSettlementsResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/slots/{slot_id}/open-settlements";
+  }
+
+  // SettlementClock returns the canonical settlement clock. It is NOT a block
+  // height: it advances only on blocks whose beginning-of-block pause state
+  // permitted settlement release.
+  rpc SettlementClock(QuerySettlementClockRequest) returns (QuerySettlementClockResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/settlement-clock";
+  }
+
+  // DistributionModeVersion returns one distribution-mode record by its exact
+  // version number.
+  rpc DistributionModeVersion(QueryDistributionModeVersionRequest) returns (QueryDistributionModeVersionResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/distribution-mode-versions/{version}";
+  }
+  rpc DistributionModeVersions(QueryDistributionModeVersionsRequest) returns (QueryDistributionModeVersionsResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/distribution-mode-versions";
+  }
+
+  // SelectionParamsVersion returns one Selection-parameter record by exact version.
+  rpc SelectionParamsVersion(QuerySelectionParamsVersionRequest) returns (QuerySelectionParamsVersionResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/selection-params-versions/{version}";
+  }
+  rpc SelectionParamsVersions(QuerySelectionParamsVersionsRequest) returns (QuerySelectionParamsVersionsResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/selection-params-versions";
+  }
+
+  // SettlementParamsVersion returns one settlement-parameter record by exact
+  // version.
+  rpc SettlementParamsVersion(QuerySettlementParamsVersionRequest) returns (QuerySettlementParamsVersionResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/settlement-params-versions/{version}";
+  }
+  rpc SettlementParamsVersions(QuerySettlementParamsVersionsRequest) returns (QuerySettlementParamsVersionsResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/settlement-params-versions";
+  }
+}
+
+message QuerySettlementRequest {
+  uint64 slot_id = 1;
+  uint64 epoch = 2;
+}
+
+// QuerySettlementResponse is everything a worker needs to resume against one
+// settlement, with the authority of each value made explicit by its grouping.
+message QuerySettlementResponse {
+  // --- canonical: stored x/mining state, exactly as stored ---
+  Settlement settlement = 1;
+
+  // --- correlated: authoritative x/rewards state, never stored by x/mining ---
+  string entitlement_amount = 2;
+  string released_amount = 3;
+  // The immutable destination the operator remainder is paid to. No caller can
+  // name it and no transaction carries it.
+  string payout_address = 4;
+
+  // --- derived: computed here, stored nowhere ---
+  string remaining_amount = 5;
+  // How much of the entitlement participant chunks may still release in total.
+  // Zero for an operator-only settlement, whose whole entitlement belongs to the
+  // operator.
+  string participant_distribution_ceiling = 6;
+  // The settlement clock recorded by this epoch's anchor. Correlated canonical
+  // anchor state, not a settlement field.
+  uint64 created_settlement_clock = 7;
+  // For a participant-capable settlement, the clock at which its participant
+  // window closes. For an operator-only settlement this equals the anchor clock
+  // and is NOT an authorization boundary — such a settlement is finalizable
+  // immediately and never becomes deadline-gated.
+  uint64 deadline_clock = 8;
+  // Whether finalization is available to any valid account right now. False for a
+  // finalized settlement, because no finalization remains available at all — never
+  // read it as an invitation to retry a terminal transition.
+  bool permissionless_finalization_now = 9;
+  // The canonical clock at the height this query was served, so a caller can
+  // compare it against deadline_clock without a second round trip.
+  uint64 current_settlement_clock = 10;
+}
+
+message QueryOpenSettlementsRequest {
+  uint64 slot_id = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+
+// QueryOpenSettlementsResponse returns canonical settlement rows, not index
+// entries. The index locates them; it never decides whether one is open.
+message QueryOpenSettlementsResponse {
+  repeated Settlement settlements = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QuerySettlementClockRequest {}
+message QuerySettlementClockResponse {
+  uint64 settlement_clock = 1;
+}
+
+message QueryDistributionModeVersionRequest { uint64 version = 1; }
+message QueryDistributionModeVersionResponse { MiningDistributionModeVersion version = 1; }
+
+message QueryDistributionModeVersionsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+message QueryDistributionModeVersionsResponse {
+  repeated MiningDistributionModeVersion versions = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QuerySelectionParamsVersionRequest { uint64 version = 1; }
+message QuerySelectionParamsVersionResponse { SelectionParamsVersion version = 1; }
+
+message QuerySelectionParamsVersionsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+message QuerySelectionParamsVersionsResponse {
+  repeated SelectionParamsVersion versions = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QuerySettlementParamsVersionRequest { uint64 version = 1; }
+message QuerySettlementParamsVersionResponse { SettlementParamsVersion version = 1; }
+
+message QuerySettlementParamsVersionsRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+message QuerySettlementParamsVersionsResponse {
+  repeated SettlementParamsVersion versions = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
