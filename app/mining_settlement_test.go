@@ -326,3 +326,39 @@ func TestSettlementChunksAcrossTheWholeEntitlementConserveValue(t *testing.T) {
 
 	assertInvariants(t, e.app, e.ctx)
 }
+
+// TestAFutureAnchorBlocksReleaseOnTheRealBank is the real-bank half of the
+// temporal-integrity rule.
+//
+// The keeper test proves the release boundary is never called. Only a real bank
+// can prove what that means in money: escrow untouched and no participant balance
+// created. A future anchor extends the participant window, so without the check
+// this chunk would be admitted and paid.
+func TestAFutureAnchorBlocksReleaseOnTheRealBank(t *testing.T) {
+	e := bootSettlement(t)
+	recipient := acc(0x73)
+
+	clock, err := e.app.MiningKeeper.GetSettlementClock(e.ctx)
+	require.NoError(t, err)
+	anchor, found, err := e.app.MiningKeeper.GetSettlementEpochAnchor(e.ctx, e.epoch)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.LessOrEqual(t, anchor.CreatedSettlementClock, clock)
+
+	anchor.CreatedSettlementClock = clock + 5_000
+	require.NoError(t, e.app.MiningKeeper.SettlementEpochAnchors.Set(e.ctx, e.epoch, anchor))
+
+	escrowBefore := e.escrow(t)
+	_, err = e.msgServer.SubmitSettlementChunk(e.ctx, e.chunk(0, payoutLine(recipient, "50000")))
+	require.ErrorIs(t, err, miningtypes.ErrInvalidState)
+	require.Contains(t, err.Error(), "ahead of the canonical clock")
+
+	require.True(t, e.balance(t, recipient).IsZero(), "no participant balance was created")
+	require.Equal(t, escrowBefore.String(), e.escrow(t).String(), "escrow is untouched")
+	require.Equal(t, "0", e.entitlement(t).ReleasedAmount)
+
+	settlement, _, err := e.app.MiningKeeper.GetSettlement(e.ctx, e.slotID, e.epoch)
+	require.NoError(t, err)
+	require.Zero(t, settlement.NextChunkIndex)
+	assertInvariants(t, e.app, e.ctx)
+}

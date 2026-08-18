@@ -281,11 +281,16 @@ func (k Keeper) requireBeforeDeadline(
 	if err != nil {
 		return err
 	}
-	deadline, err := k.DeadlineClock(ctx, settlement, anchor, params)
+	clock, err := k.GetSettlementClock(ctx)
 	if err != nil {
 		return err
 	}
-	clock, err := k.GetSettlementClock(ctx)
+	// The anchor must be a moment that has actually happened, proven BEFORE the
+	// window it opens is measured.
+	if err := requireAnchorHasElapsed(settlement, anchor, clock); err != nil {
+		return err
+	}
+	deadline, err := k.DeadlineClock(ctx, settlement, anchor, params)
 	if err != nil {
 		return err
 	}
@@ -293,6 +298,40 @@ func (k Keeper) requireBeforeDeadline(
 		return types.ErrUnsupportedFeature.Wrapf(
 			"the participant window for slot %d in epoch %d closed at settlement clock %d, and the clock is %d",
 			settlement.SlotId, settlement.Epoch, deadline, clock)
+	}
+	return nil
+}
+
+// requireAnchorHasElapsed proves an anchor describes a moment the chain has
+// already reached.
+//
+// # Why the window check alone is not enough
+//
+// Admission proves current_clock < anchor_clock + window. That comparison treats
+// the anchor as trusted input: an anchor carrying a clock the chain has not
+// reached yet pushes the deadline forward by exactly its excess, so a corrupted
+// future anchor does not merely survive the check — it EXTENDS the participant
+// window, and can reopen one that had already closed. Everything downstream then
+// authorizes a real release against impossible canonical state.
+//
+// The clock is monotonic and only ever advances, so an anchor ahead of it cannot
+// have been created by any code path. Equality is fine, and so is zero: an epoch
+// whose settlements were materialized before the clock had ever ticked carries a
+// legitimate anchor of zero, and it must keep working forever.
+//
+// Stated as a standalone rule rather than inline because finalization needs the
+// same guarantee about the same anchor — the deadline it consults decides which
+// authorization arm applies, so it must not be derived from a moment that never
+// happened either.
+func requireAnchorHasElapsed(
+	settlement types.Settlement, anchor types.SettlementEpochAnchor, clock uint64,
+) error {
+	if anchor.CreatedSettlementClock > clock {
+		return types.ErrInvalidState.Wrapf(
+			"the settlement epoch anchor for epoch %d records settlement clock %d, "+
+				"which is ahead of the canonical clock %d; slot %d cannot be settled against "+
+				"a moment that has not happened",
+			settlement.Epoch, anchor.CreatedSettlementClock, clock, settlement.SlotId)
 	}
 	return nil
 }

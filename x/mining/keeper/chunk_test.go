@@ -720,3 +720,84 @@ func TestASettlementMayNotResolveAnotherSlotsEntitlement(t *testing.T) {
 	require.Contains(t, err.Error(), "resolved an entitlement for slot 1 in epoch 4")
 	require.Zero(t, rewards.payCalls)
 }
+
+// TestAFutureAnchorCannotAuthorizeAParticipantRelease is the temporal integrity
+// rule the window check alone does not give.
+//
+// Admission proves current_clock < anchor_clock + window, which treats the anchor
+// as trusted input. An anchor carrying a clock the chain has not reached pushes
+// the deadline forward by exactly its excess, so a corrupted future anchor does
+// not merely survive — it EXTENDS the participant window and can reopen one that
+// had already closed.
+//
+// The anchor here is far enough ahead that the window check would happily admit
+// the chunk, so the test genuinely reaches the deadline authorization arm rather
+// than passing on some earlier unrelated rejection. Every other input is valid:
+// an OPEN participant-capable settlement, a real entitlement, the correct signer,
+// chunk 0, an in-range amount.
+func TestAFutureAnchorCannotAuthorizeAParticipantRelease(t *testing.T) {
+	k, ctx, rewards := settlementFixture(t)
+
+	// Prove the chunk is otherwise admissible at this exact clock, so the failure
+	// below can only be the anchor.
+	clock, err := k.GetSettlementClock(ctx)
+	require.NoError(t, err)
+	settlement, found, err := k.GetSettlement(ctx, 1, 1)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t,
+		types.SettlementMode_SETTLEMENT_MODE_TRUSTED_AS, settlement.SettlementMode)
+	require.False(t, settlement.Finalized)
+	require.Zero(t, settlement.NextChunkIndex)
+
+	anchor, found, err := k.GetSettlementEpochAnchor(ctx, 1)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.LessOrEqual(t, anchor.CreatedSettlementClock, clock, "the fixture anchor is sane")
+
+	// Now put the anchor ahead of the canonical clock.
+	anchor.CreatedSettlementClock = clock + 5_000
+	require.NoError(t, k.SettlementEpochAnchors.Set(ctx, 1, anchor))
+
+	_, err = k.SubmitSettlementChunk(ctx, chunk(0, line(participantA, "50000")))
+	require.ErrorIs(t, err, types.ErrInvalidState)
+	require.Contains(t, err.Error(), "ahead of the canonical clock")
+
+	require.Zero(t, rewards.payCalls, "the release boundary is never reached")
+	require.Equal(t, "0", releasedAmount(t, rewards, 1, 1), "released_amount is unchanged")
+	require.Zero(t, nextChunkIndex(t, k, ctx), "next_chunk_index is unchanged")
+}
+
+// TestAnAnchorAtTheCurrentClockOrZeroStaysValid is the boundary the temporal check
+// must not overshoot.
+//
+// Equality is legitimate — an epoch materialized in this very block anchors at the
+// clock this block produced — and so is zero, which is what an epoch closing
+// before the clock has ever ticked carries. Rejecting either would break ordinary
+// settlements rather than corrupt ones.
+func TestAnAnchorAtTheCurrentClockOrZeroStaysValid(t *testing.T) {
+	t.Run("anchor equal to the current clock", func(t *testing.T) {
+		k, ctx, _ := settlementFixture(t)
+		clock, err := k.GetSettlementClock(ctx)
+		require.NoError(t, err)
+		anchor, _, err := k.GetSettlementEpochAnchor(ctx, 1)
+		require.NoError(t, err)
+		anchor.CreatedSettlementClock = clock
+		require.NoError(t, k.SettlementEpochAnchors.Set(ctx, 1, anchor))
+
+		_, err = k.SubmitSettlementChunk(ctx, chunk(0, line(participantA, "50000")))
+		require.NoError(t, err)
+	})
+
+	t.Run("anchor and clock both zero", func(t *testing.T) {
+		k, ctx, _ := settlementFixture(t)
+		anchor, _, err := k.GetSettlementEpochAnchor(ctx, 1)
+		require.NoError(t, err)
+		anchor.CreatedSettlementClock = 0
+		require.NoError(t, k.SettlementEpochAnchors.Set(ctx, 1, anchor))
+		require.NoError(t, k.SettlementClock.Set(ctx, 0))
+
+		_, err = k.SubmitSettlementChunk(ctx, chunk(0, line(participantA, "50000")))
+		require.NoError(t, err)
+	})
+}
