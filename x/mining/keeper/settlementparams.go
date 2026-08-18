@@ -160,6 +160,24 @@ func (k Keeper) scheduledSettlementParamsFor(
 	return scheduled, true, nil
 }
 
+// validateSelectionParamsRecord checks a stored Selection-parameter row against
+// the key it was found under and against its own invariants.
+//
+// The same shape as validateModeRecord and validateSettlementParamsRecord, and it
+// exists for the same reason: the key relationship alone says the row is filed
+// correctly, not that its CONTENTS are canonical. Promotion derives a successor
+// from the predecessor's version number and orders itself against the
+// predecessor's effective epoch, so a malformed predecessor would be extended
+// rather than refused.
+func validateSelectionParamsRecord(key uint64, version types.SelectionParamsVersion) error {
+	if version.EffectiveEpoch != key {
+		return types.ErrInvalidState.Wrapf(
+			"selection params version stored at epoch %d declares effective epoch %d",
+			key, version.EffectiveEpoch)
+	}
+	return version.Validate()
+}
+
 // promoteScheduledSelectionParams mirrors the settlement-parameter promotion.
 //
 // It exists so the mode and both parameter families share one promotion story at
@@ -187,10 +205,11 @@ func (k Keeper) promoteScheduledSelectionParams(ctx context.Context, effectiveEp
 	if !latestFound {
 		return types.ErrParamsNotFound.Wrap("selection parameter history is empty")
 	}
-	if latest.EffectiveEpoch != latestKey {
-		return types.ErrInvalidState.Wrapf(
-			"selection params version stored at epoch %d declares effective epoch %d",
-			latestKey, latest.EffectiveEpoch)
+	// The predecessor is validated in FULL before anything is derived from it. A
+	// malformed canonical row must fail the block, never be silently extended by a
+	// successful promotion built on top of it.
+	if err := validateSelectionParamsRecord(latestKey, latest); err != nil {
+		return err
 	}
 	if effectiveEpoch <= latest.EffectiveEpoch {
 		return types.ErrInvalidState.Wrapf(
