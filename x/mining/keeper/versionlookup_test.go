@@ -239,3 +239,89 @@ func TestHistoryListingsAreOrderedAndFailClosed(t *testing.T) {
 			"a history returned with a row quietly omitted cannot be reconciled against")
 	})
 }
+
+// TestAHistoryWithoutItsOriginIsCorrupt is A6-S1.
+//
+// Every family begins at version 1, effective from epoch 1, and that origin is
+// canonical identity rather than convention. A decapitated history still answers
+// perfectly well from its later rows — a seek finds the greatest key at or below
+// what was asked for, and a self-valid row validates — so without an explicit anchor
+// proof the surface would report it as healthy.
+//
+// Each subtest first shows the query succeeding with the anchor intact, so the
+// refusal is demonstrably caused by the anchor and not by the damage incidentally
+// breaking something else.
+func TestAHistoryWithoutItsOriginIsCorrupt(t *testing.T) {
+	// A self-valid later row, so the history can answer from it if nothing checks.
+	seedLater := func(t *testing.T, k keeper.Keeper, ctx sdk.Context) {
+		t.Helper()
+		settlementParamsAt(t, k, ctx, 5, 10)
+	}
+
+	t.Run("intact origin answers normally", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		seedLater(t, k, ctx)
+		res, err := q.SettlementParamsVersion(ctx, &types.QuerySettlementParamsVersionRequest{Version: 5})
+		require.NoError(t, err)
+		require.Equal(t, uint64(5), res.Version.Version)
+		list, err := q.SettlementParamsVersions(ctx, &types.QuerySettlementParamsVersionsRequest{})
+		require.NoError(t, err)
+		require.Len(t, list.Versions, 2)
+	})
+
+	t.Run("a removed origin fails exact lookup and listing", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		seedLater(t, k, ctx)
+		require.NoError(t, k.SettlementParamsVersions.Remove(ctx, 1))
+
+		_, err := q.SettlementParamsVersion(ctx, &types.QuerySettlementParamsVersionRequest{Version: 5})
+		require.Equal(t, codes.Internal, grpcCode(t, err))
+		_, err = q.SettlementParamsVersions(ctx, &types.QuerySettlementParamsVersionsRequest{})
+		require.Equal(t, codes.Internal, grpcCode(t, err))
+	})
+
+	t.Run("a moved origin fails too", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		// Version 1 relocated to epoch 3: self-consistent, but no longer the origin.
+		require.NoError(t, k.SettlementParamsVersions.Remove(ctx, 1))
+		settlementParamsAt(t, k, ctx, 1, 3)
+
+		_, err := q.SettlementParamsVersion(ctx, &types.QuerySettlementParamsVersionRequest{Version: 1})
+		require.Equal(t, codes.Internal, grpcCode(t, err))
+	})
+
+	t.Run("an origin carrying the wrong version fails", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		// Epoch 1 holds a row numbered 4 rather than 1.
+		require.NoError(t, k.SettlementParamsVersions.Set(ctx, 1, types.SettlementParamsVersion{
+			Version: 4, EffectiveEpoch: 1,
+			SettlementWindowEpochs:   types.DefaultSettlementWindowEpochs,
+			MaxRecipientsPerChunk:    types.DefaultMaxRecipientsPerChunk,
+			MaxChunksPerSettlement:   types.DefaultMaxChunksPerSettlement,
+			MinRecipientPayoutAmount: types.DefaultMinRecipientPayoutAmount,
+		}))
+		_, err := q.SettlementParamsVersions(ctx, &types.QuerySettlementParamsVersionsRequest{})
+		require.Equal(t, codes.Internal, grpcCode(t, err))
+	})
+
+	t.Run("every family is anchored", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		require.NoError(t, k.DistributionModeVersions.Remove(ctx, 1))
+		_, err := q.DistributionModeVersions(ctx, &types.QueryDistributionModeVersionsRequest{})
+		require.Equal(t, codes.Internal, grpcCode(t, err))
+
+		q, k, ctx, _ = queryFixture(t)
+		require.NoError(t, k.SelectionParamsVersions.Remove(ctx, 1))
+		_, err = q.SelectionParamsVersions(ctx, &types.QuerySelectionParamsVersionsRequest{})
+		require.Equal(t, codes.Internal, grpcCode(t, err))
+	})
+
+	t.Run("numeric version gaps remain legal", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		seedLater(t, k, ctx)
+		// The origin is intact, so a gap between v1 and v5 is still an ordinary
+		// absence rather than corruption.
+		_, err := q.SettlementParamsVersion(ctx, &types.QuerySettlementParamsVersionRequest{Version: 3})
+		require.Equal(t, codes.NotFound, grpcCode(t, err))
+	})
+}

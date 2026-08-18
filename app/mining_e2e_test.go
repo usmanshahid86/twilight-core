@@ -79,7 +79,12 @@ func TestDefinitivePOC1SettlementEndToEnd(t *testing.T) {
 	require.True(t, found, "the deployed reward path produced the entitlement; nothing injected it")
 	entitlementAmount, err := owed.Amount()
 	require.NoError(t, err)
-	require.True(t, entitlementAmount.IsPositive())
+	// The frozen scenario's exact value, not merely a positive one. A
+	// positive-but-wrong emission — a changed subsidy, a changed epoch length, a
+	// changed allocation rule — would otherwise leave the definitive proof green
+	// while proving the wrong economics.
+	require.Equal(t, "36000000", entitlementAmount.String(),
+		"360 blocks at a subsidy of 100000, allocated to the single participating Slot")
 	require.Equal(t, payout, owed.PayoutAddress, "the payout snapshot is the operator destination")
 
 	msgServer := miningkeeper.NewMsgServer(a.MiningKeeper)
@@ -111,6 +116,7 @@ func TestDefinitivePOC1SettlementEndToEnd(t *testing.T) {
 	// --- 4. the trusted worker distributes part of it -------------------------
 	participant := acc(0x55)
 	distributed := entitlementAmount.QuoRaw(4)
+	require.Equal(t, "9000000", distributed.String(), "the frozen participant payout")
 	require.True(t, distributed.GTE(appparams.HardMinSettlementPayoutAmount()),
 		"the participant line is above the immutable floor")
 
@@ -158,7 +164,10 @@ func TestDefinitivePOC1SettlementEndToEnd(t *testing.T) {
 	})
 	require.NoError(t, err)
 	remainder := entitlementAmount.Sub(distributed)
+	require.Equal(t, "27000000", remainder.String(), "the frozen operator remainder")
 	require.Equal(t, remainder.String(), finalizeRes.ReleasedRemainder)
+	require.Equal(t, entitlementAmount, distributed.Add(remainder),
+		"participant plus operator is the whole entitlement")
 	require.Equal(t,
 		miningtypes.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY,
 		finalizeRes.FinalizationReason)

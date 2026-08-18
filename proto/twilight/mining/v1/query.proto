@@ -32,8 +32,10 @@ service Query {
     option (google.api.http).get = "/twilight/mining/v1/settlements/{slot_id}/{epoch}";
   }
 
-  // OpenSettlements lists a Slot's outstanding settlements, bounded and
-  // index-backed.
+  // OpenSettlements lists a Slot's outstanding settlements from canonical rows,
+  // bounded per request. The derived open-settlement index is deliberately NOT the
+  // completeness authority here: a missing index entry is indistinguishable from a
+  // lost one, so traversing it could hide an obligation the chain still owes.
   rpc OpenSettlements(QueryOpenSettlementsRequest) returns (QueryOpenSettlementsResponse) {
     option (google.api.http).get = "/twilight/mining/v1/slots/{slot_id}/open-settlements";
   }
@@ -118,8 +120,12 @@ message QueryOpenSettlementsRequest {
   cosmos.base.query.v1beta1.PageRequest pagination = 2;
 }
 
-// QueryOpenSettlementsResponse returns canonical settlement rows, not index
-// entries. The index locates them; it never decides whether one is open.
+// QueryOpenSettlementsResponse returns canonical settlement rows.
+//
+// The per-request bound is on canonical rows INSPECTED, not on results returned, so
+// a page may contain fewer results than the limit — or none — while more open
+// settlements exist further on. Follow next_key until it comes back empty; an empty
+// page is not proof that a Slot has no outstanding work.
 message QueryOpenSettlementsResponse {
   repeated Settlement settlements = 1;
   cosmos.base.query.v1beta1.PageResponse pagination = 2;

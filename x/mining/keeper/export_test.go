@@ -29,3 +29,8 @@ var (
 // and leave the guarantee resting on the cache alone. Driving the body directly
 // shows which ordering fails safe when that cache is not there.
 var FinalizeSettlementWithoutCache = Keeper.finalizeSettlement
+
+// EncodeEpochCursor exposes the OpenSettlements continuation cursor so a test can
+// construct one rather than only echoing one back, which is the only way to reach
+// the "cursor past the end" branch deliberately.
+var EncodeEpochCursor = encodeEpochCursor

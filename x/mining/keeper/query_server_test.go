@@ -218,9 +218,14 @@ func TestSettlementQueryClassifiesAbsenceApartFromCorruption(t *testing.T) {
 	}
 }
 
-// TestOpenSettlementsIsIndexBackedButNotIndexAuthoritative pins the listing rule.
-func TestOpenSettlementsIsIndexBackedButNotIndexAuthoritative(t *testing.T) {
-	t.Run("lists the open canonical row", func(t *testing.T) {
+// TestOpenSettlementsReadsCanonicalRowsNotTheDerivedIndex is A6-B2.
+//
+// The derived index can identify candidate rows, but its ABSENCE proves nothing —
+// a missing entry looks exactly like a lost one. Traversing it would let a real
+// outstanding obligation vanish from a successful recovery response, which is the
+// worst failure available to a surface that exists to tell a worker what it owes.
+func TestOpenSettlementsReadsCanonicalRowsNotTheDerivedIndex(t *testing.T) {
+	t.Run("an open canonical row is returned", func(t *testing.T) {
 		q, _, ctx, _ := queryFixture(t)
 		res, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{SlotId: 1})
 		require.NoError(t, err)
@@ -228,7 +233,23 @@ func TestOpenSettlementsIsIndexBackedButNotIndexAuthoritative(t *testing.T) {
 		require.Equal(t, uint64(1), res.Settlements[0].Epoch)
 	})
 
-	t.Run("a finalized settlement leaves the listing", func(t *testing.T) {
+	// The load-bearing regression: delete the derived entry and the canonical
+	// obligation must still be reported.
+	t.Run("an open canonical row survives losing its index entry", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		require.NoError(t, k.OpenSettlementsBySlot.Remove(ctx, collections.Join(uint64(1), uint64(1))))
+		has, err := k.OpenSettlementsBySlot.Has(ctx, collections.Join(uint64(1), uint64(1)))
+		require.NoError(t, err)
+		require.False(t, has, "the derived entry really is gone")
+
+		res, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{SlotId: 1})
+		require.NoError(t, err)
+		require.Len(t, res.Settlements, 1,
+			"a lost index entry must never hide a canonical obligation")
+		require.Equal(t, uint64(1), res.Settlements[0].Epoch)
+	})
+
+	t.Run("a finalized canonical row is not returned", func(t *testing.T) {
 		q, k, ctx, _ := queryFixture(t)
 		_, _, err := k.FinalizeSettlement(ctx, finalize(settlementSigner))
 		require.NoError(t, err)
@@ -237,21 +258,40 @@ func TestOpenSettlementsIsIndexBackedButNotIndexAuthoritative(t *testing.T) {
 		require.Empty(t, res.Settlements)
 	})
 
-	t.Run("a stale index entry for a finalized row is corruption", func(t *testing.T) {
+	t.Run("a stale index entry cannot resurrect a finalized row", func(t *testing.T) {
 		q, k, ctx, _ := queryFixture(t)
 		_, _, err := k.FinalizeSettlement(ctx, finalize(settlementSigner))
 		require.NoError(t, err)
-		// Reinstate the entry the transition retired.
 		require.NoError(t, k.OpenSettlementsBySlot.Set(ctx, collections.Join(uint64(1), uint64(1)), 1))
 
-		_, err = q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{SlotId: 1})
-		require.Equal(t, codes.Internal, grpcCode(t, err),
-			"the index never decides whether a settlement is open")
+		res, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{SlotId: 1})
+		require.NoError(t, err)
+		require.Empty(t, res.Settlements, "lifecycle is decided by the canonical row alone")
 	})
 
-	t.Run("an index entry with no canonical row is corruption", func(t *testing.T) {
+	t.Run("a mixed history returns only the open rows, in order", func(t *testing.T) {
 		q, k, ctx, _ := queryFixture(t)
-		require.NoError(t, k.OpenSettlementsBySlot.Set(ctx, collections.Join(uint64(1), uint64(7)), 7))
+		seedSettlements(t, k, ctx, map[uint64]bool{2: true, 3: false, 4: true, 5: false})
+
+		res, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{SlotId: 1})
+		require.NoError(t, err)
+		epochs := make([]uint64, 0, len(res.Settlements))
+		for _, s := range res.Settlements {
+			epochs = append(epochs, s.Epoch)
+			require.False(t, s.Finalized)
+		}
+		require.Equal(t, []uint64{1, 3, 5}, epochs)
+	})
+
+	t.Run("a malformed canonical row fails the page", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		// A row filed under epoch 2 that declares epoch 9.
+		require.NoError(t, k.Settlements.Set(ctx, collections.Join(uint64(1), uint64(2)),
+			types.Settlement{
+				SlotId: 1, Epoch: 9, DistributionModeVersion: 1,
+				SettlementMode:          types.SettlementMode_SETTLEMENT_MODE_TRUSTED_AS,
+				SettlementParamsVersion: 1,
+			}))
 		_, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{SlotId: 1})
 		require.Equal(t, codes.Internal, grpcCode(t, err))
 	})
@@ -261,6 +301,99 @@ func TestOpenSettlementsIsIndexBackedButNotIndexAuthoritative(t *testing.T) {
 		_, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{SlotId: 0})
 		require.Equal(t, codes.InvalidArgument, grpcCode(t, err))
 	})
+}
+
+// TestOpenSettlementsBudgetsCanonicalRowsNotResults pins the resource rule and the
+// continuation contract that follows from it.
+//
+// The bound is on rows INSPECTED. A Slot with a long finalized history therefore
+// yields pages that are short or empty while more open work exists further on —
+// filling the page instead would mean scanning past the budget, which is exactly the
+// lifetime-proportional cost the bound exists to prevent.
+func TestOpenSettlementsBudgetsCanonicalRowsNotResults(t *testing.T) {
+	q, k, ctx, _ := queryFixture(t)
+	// 150 canonical rows for the Slot: epochs 1..150, every third one open.
+	rows := map[uint64]bool{}
+	openEpochs := []uint64{}
+	for epoch := uint64(2); epoch <= 150; epoch++ {
+		finalized := epoch%3 != 0
+		rows[epoch] = finalized
+		if !finalized {
+			openEpochs = append(openEpochs, epoch)
+		}
+	}
+	seedSettlements(t, k, ctx, rows)
+	openEpochs = append([]uint64{1}, openEpochs...) // the fixture's own open row
+
+	t.Run("one request inspects at most the server cap", func(t *testing.T) {
+		res, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{SlotId: 1})
+		require.NoError(t, err)
+		require.NotEmpty(t, res.Pagination.NextKey, "150 rows cannot be inspected in one page")
+		require.Less(t, len(res.Settlements), 100,
+			"a page of 100 inspected rows yields fewer open results")
+	})
+
+	t.Run("continuation returns every open row exactly once", func(t *testing.T) {
+		seen := []uint64{}
+		var key []byte
+		for pages := 0; pages < 10; pages++ {
+			res, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{
+				SlotId: 1, Pagination: &query.PageRequest{Key: key},
+			})
+			require.NoError(t, err)
+			for _, s := range res.Settlements {
+				seen = append(seen, s.Epoch)
+			}
+			key = res.Pagination.NextKey
+			if len(key) == 0 {
+				break
+			}
+		}
+		require.Equal(t, openEpochs, seen, "every open settlement, once, in order")
+	})
+
+	t.Run("a malformed continuation key is refused", func(t *testing.T) {
+		// Any length other than the cursor's own. Note that a well-formed cursor
+		// pointing past the end is NOT malformed — it is an ordinary exhausted page —
+		// so the check is on shape, not on reachability.
+		for _, bad := range [][]byte{{0x01}, {0x01, 0x02, 0x03}, make([]byte, 9)} {
+			_, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{
+				SlotId: 1, Pagination: &query.PageRequest{Key: bad},
+			})
+			require.Equalf(t, codes.InvalidArgument, grpcCode(t, err),
+				"a %d-byte pagination key is not a continuation key", len(bad))
+		}
+	})
+
+	t.Run("a cursor past the end is an ordinary empty page", func(t *testing.T) {
+		res, err := q.OpenSettlements(ctx, &types.QueryOpenSettlementsRequest{
+			SlotId: 1, Pagination: &query.PageRequest{Key: keeper.EncodeEpochCursor(9_000)},
+		})
+		require.NoError(t, err)
+		require.Empty(t, res.Settlements)
+		require.Empty(t, res.Pagination.NextKey)
+	})
+}
+
+// seedSettlements writes canonical settlement rows for slot 1, each either open or
+// finalized, without touching the derived index — so tests can build a history the
+// index does not describe.
+func seedSettlements(t *testing.T, k keeper.Keeper, ctx sdk.Context, rows map[uint64]bool) {
+	t.Helper()
+	for epoch, finalized := range rows {
+		settlement := types.Settlement{
+			SlotId: 1, Epoch: epoch, DistributionModeVersion: 1,
+			SettlementMode:          types.SettlementMode_SETTLEMENT_MODE_TRUSTED_AS,
+			SettlementParamsVersion: 1,
+		}
+		if finalized {
+			settlement.Finalized = true
+			settlement.FinalizedHeight = 10
+			settlement.FinalizationReason =
+				types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY
+		}
+		require.NoError(t, k.Settlements.Set(ctx, collections.Join(uint64(1), epoch), settlement))
+	}
 }
 
 // TestListingsAreBoundedIndependentlyOfChainLifetime pins the resource rules.
@@ -320,4 +453,61 @@ func TestSettlementClockQueryHasNoDefault(t *testing.T) {
 	_, err = q.SettlementClock(ctx, &types.QuerySettlementClockRequest{})
 	require.Equal(t, codes.Internal, grpcCode(t, err),
 		"an absent clock on an initialized chain is corruption, not zero")
+}
+
+// TestAFinalizedSettlementMustHaveReleasedItsEntitlementInFull is A6-B1.
+//
+// Finalization proves released == entitlement before it writes terminal metadata,
+// so a finalized row with value still unreleased is state no admitted transition
+// produced. Answering successfully would tell a worker the obligation is closed
+// while the chain still owes against it — and the worker's own reconciliation would
+// then agree, because it would be reading the same corrupt row.
+func TestAFinalizedSettlementMustHaveReleasedItsEntitlementInFull(t *testing.T) {
+	t.Run("finalized with value unreleased is Internal", func(t *testing.T) {
+		q, k, ctx, rewards := queryFixture(t)
+		_, _, err := k.FinalizeSettlement(ctx, finalize(settlementSigner))
+		require.NoError(t, err)
+		// Wind the authoritative released amount back below the entitlement.
+		partial := entitlement(1, 1, fixtureEntitlement)
+		partial.ReleasedAmount = "400000"
+		rewards.entitlements[1] = []rewardstypes.SlotEntitlement{partial}
+
+		_, err = q.Settlement(ctx, &types.QuerySettlementRequest{SlotId: 1, Epoch: 1})
+		require.Equal(t, codes.Internal, grpcCode(t, err))
+	})
+
+	t.Run("finalized and fully released is served", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		_, _, err := k.FinalizeSettlement(ctx, finalize(settlementSigner))
+		require.NoError(t, err)
+
+		res, err := q.Settlement(ctx, &types.QuerySettlementRequest{SlotId: 1, Epoch: 1})
+		require.NoError(t, err)
+		require.True(t, res.Settlement.Finalized)
+		require.Equal(t, "0", res.RemainingAmount)
+		require.Equal(t, fixtureEntitlement, res.ReleasedAmount)
+	})
+
+	t.Run("open and only partly released stays valid", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		_, err := k.SubmitSettlementChunk(ctx, chunk(0, line(participantA, "400000")))
+		require.NoError(t, err)
+
+		res, err := q.Settlement(ctx, &types.QuerySettlementRequest{SlotId: 1, Epoch: 1})
+		require.NoError(t, err)
+		require.False(t, res.Settlement.Finalized)
+		require.Equal(t, "600000", res.RemainingAmount)
+	})
+
+	t.Run("open and fully distributed stays valid", func(t *testing.T) {
+		q, k, ctx, _ := queryFixture(t)
+		_, err := k.SubmitSettlementChunk(ctx, chunk(0, line(participantA, fixtureEntitlement)))
+		require.NoError(t, err)
+
+		res, err := q.Settlement(ctx, &types.QuerySettlementRequest{SlotId: 1, Epoch: 1})
+		require.NoError(t, err)
+		require.False(t, res.Settlement.Finalized,
+			"exhausting the window before finalizing is ordinary, not corruption")
+		require.Equal(t, "0", res.RemainingAmount)
+	})
 }

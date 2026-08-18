@@ -70,7 +70,8 @@ protoc "${INCLUDES[@]}" \
   cosmos/base/tendermint/v1beta1/query.proto \
   cosmos/base/node/v1beta1/query.proto \
   twilight/coreslot/v1/query.proto \
-  twilight/rewards/v1/query.proto
+  twilight/rewards/v1/query.proto \
+  twilight/mining/v1/query.proto
 
 mkdir -p x/coreslot/types x/rewards/types x/mining/types
 mv twilight/coreslot/v1/*.go x/coreslot/types/
@@ -84,4 +85,4 @@ for types_dir in x/coreslot/types x/rewards/types x/mining/types; do
   rm -f "$types_dir"/*.pb.go.bak
 done
 gofmt -w x/coreslot/types/*.pb.go x/rewards/types/*.pb.go x/mining/types/*.pb.go
-gofmt -w x/coreslot/types/*.pb.gw.go x/rewards/types/*.pb.gw.go
+gofmt -w x/coreslot/types/*.pb.gw.go x/rewards/types/*.pb.gw.go x/mining/types/*.pb.gw.go

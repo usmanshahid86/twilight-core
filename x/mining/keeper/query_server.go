@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"context"
+	"encoding/binary"
 
 	"cosmossdk.io/collections"
 
@@ -133,6 +134,20 @@ func (q queryServer) Settlement(
 			"the entitlement for slot %d in epoch %d has released %s of %s",
 			settlement.SlotId, settlement.Epoch, released, amount)
 	}
+	// A finalized settlement asserts that its entitlement was released in full. A
+	// row claiming to be terminal while value remains unreleased is state no admitted
+	// transition produced — finalization proves the equality before it writes the
+	// terminal metadata — and answering the query successfully would tell a worker an
+	// obligation is closed while the chain still owes against it.
+	//
+	// The check is on FINALIZED only. An open settlement that happens to be fully
+	// distributed is perfectly ordinary: the participant window can be exhausted long
+	// before anyone finalizes, and refusing that would break the common case.
+	if settlement.Finalized && !released.Equal(amount) {
+		return nil, status.Errorf(codes.Internal,
+			"the settlement for slot %d in epoch %d is finalized but has released %s of %s",
+			settlement.SlotId, settlement.Epoch, released, amount)
+	}
 	ceiling, err := ParticipantDistributionCeiling(settlement, entitlement)
 	if err != nil {
 		return nil, corrupt(err)
@@ -211,13 +226,29 @@ func (q queryServer) derivedFinalizationState(
 	return deadline, !settlement.Finalized && clock >= deadline, nil
 }
 
-// OpenSettlements lists a Slot's outstanding settlements through the derived index.
+// OpenSettlements lists a Slot's outstanding settlements from CANONICAL rows.
 //
-// The index locates rows; it never decides whether one is open. Every entry is
-// resolved to its canonical settlement and cross-checked, so a stale entry pointing
-// at a finalized row, or at no row at all, is reported as corruption rather than
-// answered around. There is no query-time repair: a divergence between a derived
-// index and the rows it describes is corruption, not a cache to refresh.
+// # Why this does not read the derived index
+//
+// OpenSettlementsBySlot can positively identify candidate rows, but its ABSENCE
+// proves nothing: a missing entry is exactly what a lost or unwritten index entry
+// looks like. Traversing the index would therefore let a real outstanding
+// obligation vanish from a successful recovery response — the worst possible
+// failure for a surface whose whole purpose is telling a worker what it still owes.
+//
+// Canonical membership and lifecycle authority is the Settlements collection.
+// OpenSettlementsBySlot remains in the module for state-transition and rebuild
+// purposes; it is simply never the public query's completeness authority.
+//
+// # The budget is on rows INSPECTED, not on results returned
+//
+// At most one page of canonical settlement rows is read per request, and only the
+// open ones among them are returned. A page may therefore come back with fewer
+// results than the limit — even empty — while more open settlements exist further
+// on. That is deliberate: filling the page instead would mean scanning past the
+// budget whenever a Slot has a long finalized history, which is precisely the
+// lifetime-proportional work the bound exists to prevent. The caller follows
+// next_key until it is empty.
 func (q queryServer) OpenSettlements(
 	ctx context.Context, req *types.QueryOpenSettlementsRequest,
 ) (*types.QueryOpenSettlementsResponse, error) {
@@ -228,34 +259,78 @@ func (q queryServer) OpenSettlements(
 	if err != nil {
 		return nil, err
 	}
+	budget := page.Limit
 
-	settlements, pageRes, err := query.CollectionPaginate(
-		ctx, q.Keeper.OpenSettlementsBySlot, page,
-		func(key collections.Pair[uint64, uint64], _ uint64) (*types.Settlement, error) {
-			settlement, found, err := q.GetSettlement(ctx, key.K1(), key.K2())
-			if err != nil {
-				return nil, err
-			}
-			if !found {
-				return nil, types.ErrInvalidState.Wrapf(
-					"the open-settlement index names slot %d in epoch %d, which has no settlement",
-					key.K1(), key.K2())
-			}
-			if settlement.Finalized {
-				return nil, types.ErrInvalidState.Wrapf(
-					"the open-settlement index names slot %d in epoch %d, which is finalized",
-					key.K1(), key.K2())
-			}
-			return &settlement, nil
-		},
-		// Bounded to one Slot's prefix, so the cost tracks that Slot's outstanding
-		// rows rather than the whole collection or its lifetime history.
-		query.WithCollectionPaginationPairPrefix[uint64, uint64](req.SlotId),
-	)
+	rng := collections.NewPrefixedPairRange[uint64, uint64](req.SlotId)
+	if len(page.Key) > 0 {
+		resume, err := decodeEpochCursor(page.Key)
+		if err != nil {
+			return nil, err
+		}
+		rng = rng.StartInclusive(resume)
+	}
+
+	iter, err := q.Keeper.Settlements.Iterate(ctx, rng)
 	if err != nil {
 		return nil, corrupt(err)
 	}
-	return &types.QueryOpenSettlementsResponse{Settlements: settlements, Pagination: pageRes}, nil
+	defer iter.Close()
+
+	settlements := make([]*types.Settlement, 0, budget)
+	var nextKey []byte
+	inspected := uint64(0)
+	for ; iter.Valid(); iter.Next() {
+		key, err := iter.Key()
+		if err != nil {
+			return nil, corrupt(err)
+		}
+		if inspected == budget {
+			// The budget is spent. This row is the resumption point and is NOT read.
+			nextKey = encodeEpochCursor(key.K2())
+			break
+		}
+		settlement, err := iter.Value()
+		if err != nil {
+			return nil, corrupt(err)
+		}
+		// Held to the key it lives under and to its own invariants. A malformed row
+		// fails the page rather than being skipped: a recovery listing with a row
+		// quietly omitted is worse than no listing at all.
+		if err := validateSettlementRecord(key, settlement); err != nil {
+			return nil, corrupt(err)
+		}
+		inspected++
+		if settlement.Finalized {
+			continue
+		}
+		value := settlement
+		settlements = append(settlements, &value)
+	}
+
+	return &types.QueryOpenSettlementsResponse{
+		Settlements: settlements,
+		Pagination:  &query.PageResponse{NextKey: nextKey},
+	}, nil
+}
+
+// encodeEpochCursor / decodeEpochCursor carry the continuation point.
+//
+// The cursor is the epoch of the next canonical row to inspect. The Slot is already
+// fixed by the request, so the epoch alone identifies the resumption point
+// unambiguously, and big-endian keeps the bytes ordered the same way the collection
+// is.
+func encodeEpochCursor(epoch uint64) []byte {
+	cursor := make([]byte, 8)
+	binary.BigEndian.PutUint64(cursor, epoch)
+	return cursor
+}
+
+func decodeEpochCursor(cursor []byte) (uint64, error) {
+	if len(cursor) != 8 {
+		return 0, status.Error(codes.InvalidArgument,
+			"pagination key must be a continuation key returned by a previous response")
+	}
+	return binary.BigEndian.Uint64(cursor), nil
 }
 
 // --- configuration history -------------------------------------------------
@@ -265,6 +340,12 @@ func (q queryServer) DistributionModeVersion(
 ) (*types.QueryDistributionModeVersionResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "a request is required")
+	}
+	if err := q.requireHistoryAnchor(ctx, func() error {
+		_, err := q.GenesisDistributionMode(ctx)
+		return err
+	}); err != nil {
+		return nil, err
 	}
 	record, err := exactVersion(
 		ctx, q.Keeper.DistributionModeVersions, q.DistributionModeVersionIndex, req.Version,
@@ -283,6 +364,12 @@ func (q queryServer) SelectionParamsVersion(
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "a request is required")
 	}
+	if err := q.requireHistoryAnchor(ctx, func() error {
+		_, err := q.GenesisSelectionParams(ctx)
+		return err
+	}); err != nil {
+		return nil, err
+	}
 	record, err := exactVersion(
 		ctx, q.Keeper.SelectionParamsVersions, q.SelectionParamsVersionIndex, req.Version,
 		func(v types.SelectionParamsVersion) uint64 { return v.Version },
@@ -300,6 +387,12 @@ func (q queryServer) SettlementParamsVersion(
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "a request is required")
 	}
+	if err := q.requireHistoryAnchor(ctx, func() error {
+		_, err := q.GenesisSettlementParams(ctx)
+		return err
+	}); err != nil {
+		return nil, err
+	}
 	record, err := exactVersion(
 		ctx, q.Keeper.SettlementParamsVersions, q.SettlementParamsVersionIndex, req.Version,
 		func(v types.SettlementParamsVersion) uint64 { return v.Version },
@@ -309,6 +402,26 @@ func (q queryServer) SettlementParamsVersion(
 		return nil, err
 	}
 	return &types.QuerySettlementParamsVersionResponse{Version: record}, nil
+}
+
+// requireHistoryAnchor proves a configuration history still has its mandatory
+// origin before any result from it is trusted.
+//
+// Every family begins at version 1, effective from epoch 1, and that origin is
+// canonical identity rather than convention. A history whose anchor has been removed
+// or moved can still answer perfectly well from its later rows — a seek finds the
+// greatest key at or below whatever was asked for, and a self-valid row validates —
+// so without this the surface would report a decapitated history as healthy.
+//
+// One point read per query, and no repair: a broken origin fails closed rather than
+// being reconstructed from what happens to remain.
+//
+// Numeric version GAPS stay legal. Only the origin is contiguous by identity.
+func (q queryServer) requireHistoryAnchor(_ context.Context, prove func() error) error {
+	if err := prove(); err != nil {
+		return corrupt(err)
+	}
+	return nil
 }
 
 // exactVersion runs the ratified lookup and maps its classification onto the public
@@ -353,6 +466,12 @@ func (q queryServer) DistributionModeVersions(
 	if req != nil {
 		page = req.Pagination
 	}
+	if err := q.requireHistoryAnchor(ctx, func() error {
+		_, err := q.GenesisDistributionMode(ctx)
+		return err
+	}); err != nil {
+		return nil, err
+	}
 	versions, pageRes, err := listVersions(ctx, q.Keeper.DistributionModeVersions, page, validateModeRecord)
 	if err != nil {
 		return nil, err
@@ -367,6 +486,12 @@ func (q queryServer) SelectionParamsVersions(
 	if req != nil {
 		page = req.Pagination
 	}
+	if err := q.requireHistoryAnchor(ctx, func() error {
+		_, err := q.GenesisSelectionParams(ctx)
+		return err
+	}); err != nil {
+		return nil, err
+	}
 	versions, pageRes, err := listVersions(ctx, q.Keeper.SelectionParamsVersions, page, validateSelectionParamsRecord)
 	if err != nil {
 		return nil, err
@@ -380,6 +505,12 @@ func (q queryServer) SettlementParamsVersions(
 	var page *query.PageRequest
 	if req != nil {
 		page = req.Pagination
+	}
+	if err := q.requireHistoryAnchor(ctx, func() error {
+		_, err := q.GenesisSettlementParams(ctx)
+		return err
+	}); err != nil {
+		return nil, err
 	}
 	versions, pageRes, err := listVersions(ctx, q.Keeper.SettlementParamsVersions, page, validateSettlementParamsRecord)
 	if err != nil {

@@ -2238,6 +2238,420 @@
         ]
       }
     },
+    "/twilight/mining/v1/distribution-mode-versions": {
+      "get": {
+        "operationId": "Query_DistributionModeVersions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryDistributionModeVersionsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/mining/v1/distribution-mode-versions/{version}": {
+      "get": {
+        "summary": "DistributionModeVersion returns one distribution-mode record by its exact\nversion number.",
+        "operationId": "Query_DistributionModeVersion",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryDistributionModeVersionResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/mining/v1/selection-params-versions": {
+      "get": {
+        "operationId": "Query_SelectionParamsVersions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySelectionParamsVersionsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/mining/v1/selection-params-versions/{version}": {
+      "get": {
+        "summary": "SelectionParamsVersion returns one Selection-parameter record by exact version.",
+        "operationId": "Query_SelectionParamsVersion",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySelectionParamsVersionResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/mining/v1/settlement-clock": {
+      "get": {
+        "summary": "SettlementClock returns the canonical settlement clock. It is NOT a block\nheight: it advances only on blocks whose beginning-of-block pause state\npermitted settlement release.",
+        "operationId": "Query_SettlementClock",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySettlementClockResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/mining/v1/settlement-params-versions": {
+      "get": {
+        "operationId": "Query_SettlementParamsVersions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySettlementParamsVersionsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/mining/v1/settlement-params-versions/{version}": {
+      "get": {
+        "summary": "SettlementParamsVersion returns one settlement-parameter record by exact\nversion.",
+        "operationId": "Query_SettlementParamsVersion",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySettlementParamsVersionResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/mining/v1/settlements/{slot_id}/{epoch}": {
+      "get": {
+        "summary": "Settlement returns one settlement with everything needed to decide the next\noperation against it.",
+        "operationId": "Query_Settlement",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySettlementResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "epoch",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/mining/v1/slots/{slot_id}/open-settlements": {
+      "get": {
+        "summary": "OpenSettlements lists a Slot's outstanding settlements from canonical rows,\nbounded per request. The derived open-settlement index is deliberately NOT the\ncompleteness authority here: a missing index entry is indistinguishable from a\nlost one, so traversing it could hide an obligation the chain still owes.",
+        "operationId": "Query_OpenSettlements",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryOpenSettlementsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "slot_id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.key",
+            "description": "key is a value returned in PageResponse.next_key to begin\nquerying the next page most efficiently. Only one of offset or key\nshould be set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "pagination.offset",
+            "description": "offset is a numeric offset that can be used when key is unavailable.\nIt is less efficient than using key. Only one of offset or key should\nbe set.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.limit",
+            "description": "limit is the total number of results to be returned in the result page.\nIf left empty it will default to a value to be set by each app.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "pagination.count_total",
+            "description": "count_total is set to true  to indicate that the result set should include\na count of the total number of items available for pagination in UIs.\ncount_total is only respected when offset is used. It is ignored when key\nis set.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "pagination.reverse",
+            "description": "reverse is set to true if results are to be returned in the descending order.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
     "/twilight/rewards/v1/cumulative-emitted": {
       "get": {
         "operationId": "Query_CumulativeEmitted",
@@ -3222,6 +3636,117 @@
           }
         }
       }
+    },
+    "miningV1SelectionParamsVersion": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "effective_epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "max_selection_rate_bps": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "max_selected_participants_per_selection": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "max_candidates_per_selection": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "beacon_start_offset_blocks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "beacon_window_blocks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "min_external_beacon_blocks": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "min_distinct_external_proposers": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "SelectionParamsVersion is one immutable entry of the global Selection-parameter\nhistory.\n\nPOC 1 creates the genesis version because canonical fresh genesis requires the\nhistory and requires every ACTIVE CoreSlot policy to satisfy it. Nothing in\nPOC 1 runs Selection, and no runtime update path exists."
+    },
+    "miningV1Settlement": {
+      "type": "object",
+      "properties": {
+        "slot_id": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "distribution_mode_version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "settlement_mode": {
+          "$ref": "#/definitions/v1SettlementMode"
+        },
+        "settlement_params_version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "next_chunk_index": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "finalized": {
+          "type": "boolean"
+        },
+        "finalized_height": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "finalization_reason": {
+          "$ref": "#/definitions/v1SettlementFinalizationReason"
+        }
+      },
+      "description": "Settlement is the canonical per-Slot settlement workflow record, keyed\n(slot_id, epoch), with stored lifecycle OPEN -\u003e FINALIZED.\n\n# What this record deliberately does NOT contain\n\nreleased_amount is absent. Its canonical authority is the corresponding\nx/rewards SlotEntitlement: a participant chunk increases the entitlement-side\nvalue, and finalization derives the remainder from it. A copy here would be a\nsecond monetary authority free to diverge from the one the release boundary\nactually enforces.\n\nparticipant_distribution_ceiling, created_height, created_settlement_clock and\ndeadline_clock are absent for the same reason in a weaker form: each is derived\nfrom the epoch anchor plus the target-bound settlement parameters, and a stored\ncopy would be a forgeable duplicate of something canonical."
+    },
+    "miningV1SettlementParamsVersion": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "effective_epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "settlement_window_epochs": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "max_recipients_per_chunk": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "max_chunks_per_settlement": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "min_recipient_payout_amount": {
+          "type": "string",
+          "description": "min_recipient_payout_amount is a canonical base-denom integer as text. It is\narbitrary precision and is never narrowed to a fixed-width type: a legitimate\nfloor may exceed the range of a uint64."
+        }
+      },
+      "description": "SettlementParamsVersion is one immutable entry of the settlement-validity\nparameter history, bound to a target at its N-2 boundary before any Selection\noutcome is knowable.\n\nA later update can never reduce or reinterpret the payout capacity or deadline\nof an already-bound target."
     },
     "p2pDefaultNodeInfo": {
       "type": "object",
@@ -4327,6 +4852,38 @@
         }
       }
     },
+    "v1MiningDistributionMode": {
+      "type": "string",
+      "enum": [
+        "MINING_DISTRIBUTION_MODE_UNSPECIFIED",
+        "MINING_DISTRIBUTION_MODE_TRUSTED_AS_DISTRIBUTION",
+        "MINING_DISTRIBUTION_MODE_PROTOCOL_SELECTION"
+      ],
+      "default": "MINING_DISTRIBUTION_MODE_UNSPECIFIED",
+      "description": "Enum numeric values are permanent after release. Future upgrades may add\nvalues but must not reuse, reorder, or change existing numeric values.\n\nThe mode is chain-wide, authority-scheduled, historically versioned, effective\nonly at epoch boundaries, and non-retroactive. There is deliberately no\nper-Slot opt-out and no boolean shorthand: POC 1 reaches only\nTRUSTED_AS_DISTRIBUTION, but the value that makes protocol Selection reachable\nexists from the first release so a later tranche adds a producer rather than a\nstate migration."
+    },
+    "v1MiningDistributionModeVersion": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "mode": {
+          "$ref": "#/definitions/v1MiningDistributionMode"
+        },
+        "valid_from_epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "valid_until_epoch_exclusive": {
+          "type": "string",
+          "format": "uint64",
+          "description": "valid_until_epoch_exclusive is 0 for an open-ended current version."
+        }
+      },
+      "description": "MiningDistributionModeVersion is one immutable entry of the chain-wide\ndistribution-mode history.\n\nIt carries a validity INTERVAL rather than a single effective epoch, which is\nwhat distinguishes it from the reward and settlement parameter families. The\ninterval shape is canonical and must not be flattened into the effective-epoch\nrecord used by the other histories."
+    },
     "v1NextHalvingInfo": {
       "type": "object",
       "properties": {
@@ -4496,6 +5053,29 @@
         }
       }
     },
+    "v1QueryDistributionModeVersionResponse": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/definitions/v1MiningDistributionModeVersion"
+        }
+      }
+    },
+    "v1QueryDistributionModeVersionsResponse": {
+      "type": "object",
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1MiningDistributionModeVersion"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse"
+        }
+      }
+    },
     "v1QueryEpochBoundariesResponse": {
       "type": "object",
       "properties": {
@@ -4628,6 +5208,22 @@
         }
       }
     },
+    "v1QueryOpenSettlementsResponse": {
+      "type": "object",
+      "properties": {
+        "settlements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/miningV1Settlement"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse"
+        }
+      },
+      "description": "QueryOpenSettlementsResponse returns canonical settlement rows.\n\nThe per-request bound is on canonical rows INSPECTED, not on results returned, so\na page may contain fewer results than the limit — or none — while more open\nsettlements exist further on. Follow next_key until it comes back empty; an empty\npage is not proof that a Slot has no outstanding work."
+    },
     "v1QueryPendingKeyRotationsResponse": {
       "type": "object",
       "properties": {
@@ -4695,6 +5291,29 @@
         }
       }
     },
+    "v1QuerySelectionParamsVersionResponse": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/definitions/miningV1SelectionParamsVersion"
+        }
+      }
+    },
+    "v1QuerySelectionParamsVersionsResponse": {
+      "type": "object",
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/miningV1SelectionParamsVersion"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse"
+        }
+      }
+    },
     "v1QuerySelectionPolicyResponse": {
       "type": "object",
       "properties": {
@@ -4702,6 +5321,86 @@
           "$ref": "#/definitions/coreslotV1SelectionPolicyVersion"
         }
       }
+    },
+    "v1QuerySettlementClockResponse": {
+      "type": "object",
+      "properties": {
+        "settlement_clock": {
+          "type": "string",
+          "format": "uint64"
+        }
+      }
+    },
+    "v1QuerySettlementParamsVersionResponse": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/definitions/miningV1SettlementParamsVersion"
+        }
+      }
+    },
+    "v1QuerySettlementParamsVersionsResponse": {
+      "type": "object",
+      "properties": {
+        "versions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/miningV1SettlementParamsVersion"
+          }
+        },
+        "pagination": {
+          "$ref": "#/definitions/v1beta1PageResponse"
+        }
+      }
+    },
+    "v1QuerySettlementResponse": {
+      "type": "object",
+      "properties": {
+        "settlement": {
+          "$ref": "#/definitions/miningV1Settlement",
+          "title": "--- canonical: stored x/mining state, exactly as stored ---"
+        },
+        "entitlement_amount": {
+          "type": "string",
+          "title": "--- correlated: authoritative x/rewards state, never stored by x/mining ---"
+        },
+        "released_amount": {
+          "type": "string"
+        },
+        "payout_address": {
+          "type": "string",
+          "description": "The immutable destination the operator remainder is paid to. No caller can\nname it and no transaction carries it."
+        },
+        "remaining_amount": {
+          "type": "string",
+          "title": "--- derived: computed here, stored nowhere ---"
+        },
+        "participant_distribution_ceiling": {
+          "type": "string",
+          "description": "How much of the entitlement participant chunks may still release in total.\nZero for an operator-only settlement, whose whole entitlement belongs to the\noperator."
+        },
+        "created_settlement_clock": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The settlement clock recorded by this epoch's anchor. Correlated canonical\nanchor state, not a settlement field."
+        },
+        "deadline_clock": {
+          "type": "string",
+          "format": "uint64",
+          "description": "For a participant-capable settlement, the clock at which its participant\nwindow closes. For an operator-only settlement this equals the anchor clock\nand is NOT an authorization boundary — such a settlement is finalizable\nimmediately and never becomes deadline-gated."
+        },
+        "permissionless_finalization_now": {
+          "type": "boolean",
+          "description": "Whether finalization is available to any valid account right now. False for a\nfinalized settlement, because no finalization remains available at all — never\nread it as an invitation to retry a terminal transition."
+        },
+        "current_settlement_clock": {
+          "type": "string",
+          "format": "uint64",
+          "description": "The canonical clock at the height this query was served, so a caller can\ncompare it against deadline_clock without a second round trip."
+        }
+      },
+      "description": "QuerySettlementResponse is everything a worker needs to resume against one\nsettlement, with the authority of each value made explicit by its grouping."
     },
     "v1QuerySlotEntitlementResponse": {
       "type": "object",
@@ -4815,6 +5514,28 @@
         }
       },
       "description": "ScheduledRewardConfig is the single pending reward-configuration change, keyed\nby the epoch it becomes effective at.\n\nAt most one entry exists, and its key is exactly current_epoch + 1: an update\naccepted during epoch E is staged for E+1 and is promoted at the end of E. A\nsecond, unrelated future entry is invalid state rather than a queue.\n\nIt carries no version number. The version is assigned at promotion time from\nthe history it extends, so a scheduled entry cannot pre-commit an identity that\na replacement would then have to reuse."
+    },
+    "v1SettlementFinalizationReason": {
+      "type": "string",
+      "enum": [
+        "SETTLEMENT_FINALIZATION_REASON_UNSPECIFIED",
+        "SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY",
+        "SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_AFTER_DEADLINE",
+        "SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_OPERATOR_ONLY"
+      ],
+      "default": "SETTLEMENT_FINALIZATION_REASON_UNSPECIFIED",
+      "description": "Enum numeric values are permanent after release. Future upgrades may add\nvalues but must not reuse, reorder, or change existing numeric values.\n\nRecords the authorization ARM through which a settlement reached FINALIZED,\nnever the identity of the caller. UNSPECIFIED is valid only while a settlement\nis OPEN; a FINALIZED settlement carries exactly one other value.\n\nThis is immutable audit metadata. Nothing may branch on it to decide who may\nact or where value goes."
+    },
+    "v1SettlementMode": {
+      "type": "string",
+      "enum": [
+        "SETTLEMENT_MODE_UNSPECIFIED",
+        "SETTLEMENT_MODE_TRUSTED_AS",
+        "SETTLEMENT_MODE_SELECTED_PARTICIPANTS",
+        "SETTLEMENT_MODE_OPERATOR_ONLY"
+      ],
+      "default": "SETTLEMENT_MODE_UNSPECIFIED",
+      "description": "Enum numeric values are permanent after release. Future upgrades may add\nvalues but must not reuse, reorder, or change existing numeric values.\n\nThe technical mode a materialized settlement was created under. It is immutable\nonce materialized and decides whether participant chunks are admissible at all:\nOPERATOR_ONLY admits none. Only TRUSTED_AS is reachable in POC 1; the other two\nexist as structure for the Selection tranche and must not acquire an\napplicability rule here."
     },
     "v1SlotActiveBlocks": {
       "type": "object",

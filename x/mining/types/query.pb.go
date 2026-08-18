@@ -270,8 +270,12 @@ func (m *QueryOpenSettlementsRequest) GetPagination() *query.PageRequest {
 	return nil
 }
 
-// QueryOpenSettlementsResponse returns canonical settlement rows, not index
-// entries. The index locates them; it never decides whether one is open.
+// QueryOpenSettlementsResponse returns canonical settlement rows.
+//
+// The per-request bound is on canonical rows INSPECTED, not on results returned, so
+// a page may contain fewer results than the limit — or none — while more open
+// settlements exist further on. Follow next_key until it comes back empty; an empty
+// page is not proof that a Slot has no outstanding work.
 type QueryOpenSettlementsResponse struct {
 	Settlements []*Settlement       `protobuf:"bytes,1,rep,name=settlements,proto3" json:"settlements,omitempty"`
 	Pagination  *query.PageResponse `protobuf:"bytes,2,opt,name=pagination,proto3" json:"pagination,omitempty"`
@@ -1068,8 +1072,10 @@ type QueryClient interface {
 	// Settlement returns one settlement with everything needed to decide the next
 	// operation against it.
 	Settlement(ctx context.Context, in *QuerySettlementRequest, opts ...grpc.CallOption) (*QuerySettlementResponse, error)
-	// OpenSettlements lists a Slot's outstanding settlements, bounded and
-	// index-backed.
+	// OpenSettlements lists a Slot's outstanding settlements from canonical rows,
+	// bounded per request. The derived open-settlement index is deliberately NOT the
+	// completeness authority here: a missing index entry is indistinguishable from a
+	// lost one, so traversing it could hide an obligation the chain still owes.
 	OpenSettlements(ctx context.Context, in *QueryOpenSettlementsRequest, opts ...grpc.CallOption) (*QueryOpenSettlementsResponse, error)
 	// SettlementClock returns the canonical settlement clock. It is NOT a block
 	// height: it advances only on blocks whose beginning-of-block pause state
@@ -1182,8 +1188,10 @@ type QueryServer interface {
 	// Settlement returns one settlement with everything needed to decide the next
 	// operation against it.
 	Settlement(context.Context, *QuerySettlementRequest) (*QuerySettlementResponse, error)
-	// OpenSettlements lists a Slot's outstanding settlements, bounded and
-	// index-backed.
+	// OpenSettlements lists a Slot's outstanding settlements from canonical rows,
+	// bounded per request. The derived open-settlement index is deliberately NOT the
+	// completeness authority here: a missing index entry is indistinguishable from a
+	// lost one, so traversing it could hide an obligation the chain still owes.
 	OpenSettlements(context.Context, *QueryOpenSettlementsRequest) (*QueryOpenSettlementsResponse, error)
 	// SettlementClock returns the canonical settlement clock. It is NOT a block
 	// height: it advances only on blocks whose beginning-of-block pause state
