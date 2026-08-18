@@ -672,3 +672,136 @@ func eventAttr(t *testing.T, event sdk.Event, key string) string {
 	t.Fatalf("event %s has no attribute %s", event.Type, key)
 	return ""
 }
+
+// TestOperatorOnlyFinalizationRequiresItsEpochAnchor closes the gap the independent
+// review found.
+//
+// The anchor is not consulted to CHOOSE the operator-only arm — no deadline enters
+// into it — but it is mandatory companion state: a settlement exists only because
+// its epoch materialized at least one, and the two are created in the same
+// transition. Its absence means the pair came apart, so driving a terminal money
+// movement out of that settlement would be finalizing against canonical state
+// already known to be broken.
+//
+// Each subtest first proves the settlement finalizes cleanly WITH its anchor, so the
+// refusal that follows is demonstrably caused by anchor integrity and not by some
+// earlier admission condition.
+func TestOperatorOnlyFinalizationRequiresItsEpochAnchor(t *testing.T) {
+	operatorOnly := func(t *testing.T) (keeper.Keeper, sdk.Context, *rewardsKeeperMock) {
+		t.Helper()
+		k, ctx, rewards := settlementFixture(t)
+		setSettlementMode(t, k, ctx, types.SettlementMode_SETTLEMENT_MODE_OPERATOR_ONLY)
+		return k, ctx, rewards
+	}
+
+	t.Run("the same settlement finalizes with its anchor present", func(t *testing.T) {
+		k, ctx, rewards := operatorOnly(t)
+		reason, _, err := k.FinalizeSettlement(ctx, finalize(outsider))
+		require.NoError(t, err, "every other admission condition is satisfied")
+		require.Equal(t,
+			types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_OPERATOR_ONLY,
+			reason)
+		require.Equal(t, 1, rewards.remainderCalls)
+	})
+
+	t.Run("absent anchor", func(t *testing.T) {
+		k, ctx, rewards := operatorOnly(t)
+		require.NoError(t, k.SettlementEpochAnchors.Remove(ctx, 1))
+
+		_, _, err := k.FinalizeSettlement(ctx, finalize(outsider))
+		require.ErrorIs(t, err, types.ErrInvalidState)
+		require.Contains(t, err.Error(), "no settlement epoch anchor")
+		assertOperatorOnlyUntouched(t, k, ctx, rewards)
+	})
+
+	t.Run("anchor disagreeing with the key it is filed under", func(t *testing.T) {
+		k, ctx, rewards := operatorOnly(t)
+		// Structurally present but not canonical: the row at epoch 1 declares another
+		// epoch, so it is an anchor for a different obligation.
+		require.NoError(t, k.SettlementEpochAnchors.Set(ctx, 1, types.SettlementEpochAnchor{
+			Epoch: 5, CreatedSettlementClock: 0,
+		}))
+
+		_, _, err := k.FinalizeSettlement(ctx, finalize(outsider))
+		require.ErrorIs(t, err, types.ErrInvalidState)
+		require.Contains(t, err.Error(), "declares epoch 5")
+		assertOperatorOnlyUntouched(t, k, ctx, rewards)
+	})
+}
+
+// assertOperatorOnlyUntouched proves a refused finalization left nothing behind.
+func assertOperatorOnlyUntouched(
+	t *testing.T, k keeper.Keeper, ctx sdk.Context, rewards *rewardsKeeperMock,
+) {
+	t.Helper()
+	require.Zero(t, rewards.remainderCalls, "no remainder release call")
+	require.Equal(t, "0", releasedAmount(t, rewards, 1, 1), "released amount unchanged")
+
+	settlement := settlementRow(t, k, ctx)
+	require.False(t, settlement.Finalized, "settlement remains open")
+	require.Zero(t, settlement.FinalizedHeight, "finalized height remains 0")
+	require.Equal(t,
+		types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_UNSPECIFIED,
+		settlement.FinalizationReason, "finalization reason remains unspecified")
+
+	has, err := k.OpenSettlementsBySlot.Has(ctx, collections.Join(uint64(1), uint64(1)))
+	require.NoError(t, err)
+	require.True(t, has, "the OPEN index entry remains present")
+}
+
+// TestOperatorOnlyStillIgnoresTimeAndBoundParameters is the regression the anchor
+// correction must not break.
+//
+// Requiring the anchor to EXIST must not smuggle in a dependency on what it
+// CONTAINS, nor on the settlement parameters or the clock. Each condition below
+// would refuse a participant-capable settlement, and each must be irrelevant here:
+// the operator-only arm derives nothing from any of them.
+func TestOperatorOnlyStillIgnoresTimeAndBoundParameters(t *testing.T) {
+	corrupt := map[string]func(*testing.T, keeper.Keeper, sdk.Context){
+		"bound parameters disagreeing with the settlement": func(
+			t *testing.T, k keeper.Keeper, ctx sdk.Context,
+		) {
+			settlement := settlementRow(t, k, ctx)
+			settlement.SettlementParamsVersion = 7
+			require.NoError(t, k.Settlements.Set(ctx, collections.Join(uint64(1), uint64(1)), settlement))
+		},
+		"an anchor ahead of the canonical clock": func(
+			t *testing.T, k keeper.Keeper, ctx sdk.Context,
+		) {
+			clock, err := k.GetSettlementClock(ctx)
+			require.NoError(t, err)
+			anchor, _, err := k.GetSettlementEpochAnchor(ctx, 1)
+			require.NoError(t, err)
+			anchor.CreatedSettlementClock = clock + 5_000
+			require.NoError(t, k.SettlementEpochAnchors.Set(ctx, 1, anchor))
+		},
+		"a clock far inside the participant window": func(
+			t *testing.T, k keeper.Keeper, ctx sdk.Context,
+		) {
+			require.NoError(t, k.SettlementClock.Set(ctx, 1))
+		},
+	}
+
+	for name, breakIt := range corrupt {
+		t.Run(name, func(t *testing.T) {
+			// A participant-capable settlement refuses under this condition...
+			k, ctx, _ := settlementFixture(t)
+			breakIt(t, k, ctx)
+			_, _, err := k.FinalizeSettlement(ctx, finalize(outsider))
+			require.Error(t, err, "the condition really would refuse a deadline-bound settlement")
+
+			// ...and an operator-only one does not even look.
+			k, ctx, rewards := settlementFixture(t)
+			setSettlementMode(t, k, ctx, types.SettlementMode_SETTLEMENT_MODE_OPERATOR_ONLY)
+			breakIt(t, k, ctx)
+
+			reason, remainder, err := k.FinalizeSettlement(ctx, finalize(outsider))
+			require.NoError(t, err)
+			require.Equal(t,
+				types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_PERMISSIONLESS_OPERATOR_ONLY,
+				reason)
+			require.Equal(t, fixtureEntitlement, remainder.String())
+			require.Equal(t, 1, rewards.remainderCalls)
+		})
+	}
+}

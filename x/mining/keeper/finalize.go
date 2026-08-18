@@ -164,6 +164,24 @@ func (k Keeper) resolveFinalizationArm(
 ) (types.SettlementFinalizationReason, error) {
 	unspecified := types.SettlementFinalizationReason_SETTLEMENT_FINALIZATION_REASON_UNSPECIFIED
 
+	// The epoch anchor is proven to EXIST and be canonical before any arm is
+	// resolved, for every mode.
+	//
+	// It is mandatory companion state: a settlement exists only because its epoch
+	// materialized at least one, and the two are created in the same transition. So
+	// its absence means the pair came apart, and finalizing anyway would drive a
+	// terminal money movement out of a settlement whose canonical state is already
+	// known to be broken.
+	//
+	// This is deliberately a check on EXISTENCE and integrity, not on the anchor's
+	// clock value. Whether the anchor describes an elapsed moment matters only where
+	// something is derived from it, which is why that check lives on the path that
+	// derives a deadline and not here.
+	anchor, err := k.requireEpochAnchor(ctx, settlement.Epoch)
+	if err != nil {
+		return unspecified, err
+	}
+
 	// A total switch over every settlement mode. Admitting a finalization is a
 	// monetary authorization, so a default arm would silently answer for a mode
 	// nobody had considered. Two arms are unreachable in this profile and are
@@ -185,7 +203,7 @@ func (k Keeper) resolveFinalizationArm(
 			settlement.SlotId, settlement.Epoch)
 	}
 
-	deadline, clock, err := k.finalizationDeadline(ctx, settlement)
+	deadline, clock, err := k.finalizationDeadline(ctx, settlement, anchor)
 	if err != nil {
 		return unspecified, err
 	}
@@ -214,15 +232,18 @@ func (k Keeper) resolveFinalizationArm(
 // finalizationDeadline resolves the deadline that decides the arm, and the clock it
 // is measured against.
 //
-// The anchor is required to describe a moment the chain has already reached, on the
-// same terms as chunk admission and through the same rule. It matters here for a
+// The anchor is supplied already proven to exist and be canonical; what this adds is
+// that it must describe a moment the chain has already reached, on the same terms as
+// chunk admission and through the same rule. That distinction is the whole reason the
+// two checks are separated: existence is mandatory for every mode, while the temporal
+// property is consequential only where a deadline is derived. It matters here for a
 // different reason: a future anchor pushes the deadline forward, which can flip a
 // settlement from permissionless back to authorized-signer-only. That is an
 // authorization failure even though the remainder destination is immutable — it
 // hands one party a veto over a transition the protocol had already opened to
 // everyone.
 func (k Keeper) finalizationDeadline(
-	ctx context.Context, settlement types.Settlement,
+	ctx context.Context, settlement types.Settlement, anchor types.SettlementEpochAnchor,
 ) (deadline, clock uint64, err error) {
 	params, err := k.SettlementParamsForTarget(ctx, settlement.Epoch)
 	if err != nil {
@@ -234,10 +255,6 @@ func (k Keeper) finalizationDeadline(
 				"but epoch %d binds version %d",
 			settlement.SlotId, settlement.Epoch, settlement.SettlementParamsVersion,
 			settlement.Epoch, params.Version)
-	}
-	anchor, err := k.requireEpochAnchor(ctx, settlement.Epoch)
-	if err != nil {
-		return 0, 0, err
 	}
 	clock, err = k.GetSettlementClock(ctx)
 	if err != nil {
