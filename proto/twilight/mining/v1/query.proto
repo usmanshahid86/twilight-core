@@ -72,6 +72,30 @@ service Query {
   rpc SettlementParamsVersions(QuerySettlementParamsVersionsRequest) returns (QuerySettlementParamsVersionsResponse) {
     option (google.api.http).get = "/twilight/mining/v1/settlement-params-versions";
   }
+
+  // TargetEpochInterpretation returns the chain's own reading of a target epoch:
+  // which boundary binds it, which distribution-mode row governs that boundary, and
+  // whether the target is canonically a Selection target.
+  //
+  // It exists so a consumer reads an interpretation instead of deriving one. The N-2
+  // rule and the bootstrap exception are consensus rules; a second copy of them
+  // outside the chain can drift from the arm settlement actually takes without
+  // anything failing loudly.
+  rpc TargetEpochInterpretation(QueryTargetEpochInterpretationRequest) returns (QueryTargetEpochInterpretationResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/target-epochs/{target_epoch}";
+  }
+
+  // ValidateEconomicAddress reports whether an address may receive protocol value,
+  // under the same canonical rule settlement execution enforces.
+  //
+  // The address is a QUERY PARAMETER, not a path segment. A gateway path segment must
+  // be non-empty to match its pattern, so a path form could not express the empty
+  // address — which is a successful domain rejection here, not a malformed request.
+  // Every enumerated case has to be reachable on every surface or the surfaces
+  // disagree.
+  rpc ValidateEconomicAddress(QueryValidateEconomicAddressRequest) returns (QueryValidateEconomicAddressResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/economic-address";
+  }
 }
 
 message QuerySettlementRequest {
@@ -167,4 +191,65 @@ message QuerySettlementParamsVersionsRequest {
 message QuerySettlementParamsVersionsResponse {
   repeated SettlementParamsVersion versions = 1;
   cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// The chain's canonical reading of one target epoch.
+//
+// binding_epoch is DIAGNOSTIC. It reports which boundary the answer came from so an
+// operator can audit the interpretation; it is not a second authority, and a consumer
+// that recomputes anything from it has reintroduced the copy this query removes.
+message QueryTargetEpochInterpretationRequest {
+  uint64 target_epoch = 1;
+}
+message QueryTargetEpochInterpretationResponse {
+  uint64 target_epoch = 1;
+  // 0 for bootstrap targets, target_epoch - 2 otherwise.
+  uint64 binding_epoch = 2;
+  // The full governing record, so a consumer maps mode and version into its own
+  // snapshot rather than reading fields this response chose to duplicate.
+  MiningDistributionModeVersion distribution_mode_version = 3;
+  // Whether the target is canonically bound to the PROTOCOL_SELECTION arm with a
+  // complete N-2 binding.
+  //
+  // This is a statement about binding, NOT about runtime readiness: it does not assert
+  // that a Selection producer is enabled in the current deployment or profile.
+  bool selection_applicable = 4;
+  // True for targets 1 and 2, which have no N-2 boundary inside chain history and
+  // resolve from the genesis anchor.
+  bool bootstrap_mode_without_full_n_minus_2_binding = 5;
+}
+
+// Why an address may not receive protocol value.
+//
+// Declared here rather than in mining.proto because it is query-only and must never
+// become stored state. Keeping it out of the stored-state file makes that structural
+// instead of a convention someone has to remember.
+//
+// The economic-address validator's sentinels are the sole authority for these values.
+// A handler may only map those sentinels onto this enum; it may not infer a cause of
+// its own, and an unrecognised failure is an RPC error rather than a guessed value.
+enum EconomicAddressRejectionReason {
+  ECONOMIC_ADDRESS_REJECTION_REASON_UNSPECIFIED = 0;
+  // Admissible: no rejection.
+  ECONOMIC_ADDRESS_REJECTION_REASON_NONE = 1;
+  ECONOMIC_ADDRESS_REJECTION_REASON_EMPTY = 2;
+  // Not an account address for this chain: malformed, foreign prefix, or all-zero.
+  ECONOMIC_ADDRESS_REJECTION_REASON_INVALID = 3;
+  ECONOMIC_ADDRESS_REJECTION_REASON_MODULE_ACCOUNT = 4;
+  ECONOMIC_ADDRESS_REJECTION_REASON_BANK_BLOCKED = 5;
+}
+
+message QueryValidateEconomicAddressRequest {
+  string address = 1;
+}
+message QueryValidateEconomicAddressResponse {
+  bool admissible = 1;
+  EconomicAddressRejectionReason rejection_reason = 2;
+  // The parsed address, populated ONLY when admissible.
+  //
+  // It stays empty on every rejection, including the ones that parse perfectly well —
+  // a module account or a bank-blocked address is syntactically fine and still
+  // inadmissible. Emitting a canonical-looking value there would give downstream code
+  // something it could mistake for acceptance.
+  string canonical_address = 3;
 }

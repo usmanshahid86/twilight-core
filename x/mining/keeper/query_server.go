@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 
 	"cosmossdk.io/collections"
 
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/twilight-project/twilight-core/internal/economicaddress"
 	"github.com/twilight-project/twilight-core/x/mining/types"
 )
 
@@ -592,4 +594,141 @@ func listVersions[V any](
 		return nil, nil, corrupt(err)
 	}
 	return records, pageRes, nil
+}
+
+// TargetEpochInterpretation returns the chain's own reading of a target epoch.
+//
+// # Why this is a query at all
+//
+// The N-2 binding rule and its bootstrap exception are consensus rules. A consumer
+// that recomputes them holds a second copy which can disagree with the arm settlement
+// actually takes, and nothing fails loudly when it does — the chain keeps settling
+// correctly while the consumer acts on a different reading. This hands back the
+// chain's own answer so there is only ever one.
+//
+// # The two orderings below are load-bearing
+//
+// A zero target is rejected BEFORE any canonical read. bindingEpochForTarget reports
+// a zero target as ErrInvalidState — a state error for what is purely a request
+// defect — so reaching it first would classify a malformed request as a damaged
+// chain. Request classification precedes chain state.
+//
+// A missing distribution-mode history is Internal, NOT NotFound, inverting the usual
+// mapping. Every initialized chain has this history; its absence means the chain is
+// damaged, not that an object the caller asked about does not exist. A consumer told
+// NotFound would reasonably read it as "no mode configured yet" and carry on, which
+// is precisely the wrong response to a chain that cannot say how it distributes.
+//
+// The handler performs no epoch arithmetic of its own. It calls the same two helpers
+// settlement resolution calls and reports what they return.
+func (q queryServer) TargetEpochInterpretation(
+	ctx context.Context, req *types.QueryTargetEpochInterpretationRequest,
+) (*types.QueryTargetEpochInterpretationResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "a request is required")
+	}
+	if req.TargetEpoch == 0 {
+		return nil, status.Error(codes.InvalidArgument, "epoch numbers start at 1")
+	}
+
+	bindingEpoch, bootstrap, err := bindingEpochForTarget(req.TargetEpoch)
+	if err != nil {
+		// Unreachable for a nonzero target: the only other failure is a subtraction
+		// overflow, and target >= 3 guarantees target-2 is representable. Classified
+		// as corruption rather than ignored, because a future change to the helper
+		// must surface here instead of being silently absorbed.
+		return nil, corrupt(err)
+	}
+
+	version, err := q.DistributionModeForTarget(ctx, req.TargetEpoch)
+	if err != nil {
+		return nil, corrupt(err)
+	}
+
+	return &types.QueryTargetEpochInterpretationResponse{
+		TargetEpoch:             req.TargetEpoch,
+		BindingEpoch:            bindingEpoch,
+		DistributionModeVersion: &version,
+		// A statement about canonical binding, not about runtime readiness: it does
+		// not claim a Selection producer is enabled in this deployment.
+		SelectionApplicable: !bootstrap &&
+			version.Mode == types.MiningDistributionMode_MINING_DISTRIBUTION_MODE_PROTOCOL_SELECTION,
+		BootstrapModeWithoutFullNMinus_2Binding: bootstrap,
+	}, nil
+}
+
+// ValidateEconomicAddress reports whether an address may receive protocol value.
+//
+// # One rule, asked rather than copied
+//
+// This asks the same injected validator settlement execution enforces. It does not
+// parse bech32 itself, keep its own module-account list, rebuild the bank-blocked set
+// or hold any denylist. A consumer needs the answer the release boundary will give,
+// and the only way to guarantee that is to ask the boundary's own rule.
+//
+// # Rejections are results, not errors
+//
+// An inadmissible address is a successful answer about the address. Only a defective
+// request, or a validator that cannot answer at all, is an RPC error. That separation
+// is what lets a caller distinguish "this participant is excluded" from "the chain
+// could not tell me", and the second must never collapse into the first.
+//
+// Classification maps the validator's sentinels and nothing else. An unrecognised
+// error becomes Internal rather than a guessed enum value, so a sentinel added
+// upstream later surfaces as an explicit failure instead of landing in whichever
+// bucket happened to be nearest.
+func (q queryServer) ValidateEconomicAddress(
+	_ context.Context, req *types.QueryValidateEconomicAddressRequest,
+) (*types.QueryValidateEconomicAddressResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "a request is required")
+	}
+
+	parsed, err := q.economicAddresses.Validate(req.Address)
+	if err == nil {
+		return &types.QueryValidateEconomicAddressResponse{
+			Admissible:       true,
+			RejectionReason:  types.EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_NONE,
+			CanonicalAddress: parsed.String(),
+		}, nil
+	}
+
+	reason, classified := economicAddressRejectionReason(err)
+	if !classified {
+		// Includes an unconfigured validator: the node cannot apply the canonical
+		// rule, so it has no admissibility answer to give. Reporting inadmissible
+		// would turn a node misconfiguration into a participant exclusion.
+		return nil, corrupt(err)
+	}
+
+	// CanonicalAddress is deliberately left empty on every rejection, including the
+	// ones that parse perfectly well. A module account or a blocked address is
+	// syntactically valid and still inadmissible; returning its canonical form would
+	// hand downstream code a value it could mistake for acceptance.
+	return &types.QueryValidateEconomicAddressResponse{
+		Admissible:      false,
+		RejectionReason: reason,
+	}, nil
+}
+
+// economicAddressRejectionReason maps a validator sentinel onto the public enum.
+//
+// The second return reports whether the error was recognised at all. A caller must
+// not treat an unrecognised failure as a rejection: the enum describes reasons an
+// address is inadmissible, and "the rule could not be applied" is not one of them.
+func economicAddressRejectionReason(err error) (types.EconomicAddressRejectionReason, bool) {
+	switch {
+	case errors.Is(err, economicaddress.ErrEmptyAddress):
+		return types.EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_EMPTY, true
+	case errors.Is(err, economicaddress.ErrInvalidAddress):
+		// Covers malformed encodings, a foreign prefix, and the all-zero address,
+		// which the validator already folds into this sentinel.
+		return types.EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_INVALID, true
+	case errors.Is(err, economicaddress.ErrModuleAccount):
+		return types.EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_MODULE_ACCOUNT, true
+	case errors.Is(err, economicaddress.ErrBlockedAddress):
+		return types.EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_BANK_BLOCKED, true
+	default:
+		return types.EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_UNSPECIFIED, false
+	}
 }

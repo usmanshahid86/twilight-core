@@ -29,6 +29,54 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
+// Why an address may not receive protocol value.
+//
+// Declared here rather than in mining.proto because it is query-only and must never
+// become stored state. Keeping it out of the stored-state file makes that structural
+// instead of a convention someone has to remember.
+//
+// The economic-address validator's sentinels are the sole authority for these values.
+// A handler may only map those sentinels onto this enum; it may not infer a cause of
+// its own, and an unrecognised failure is an RPC error rather than a guessed value.
+type EconomicAddressRejectionReason int32
+
+const (
+	EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_UNSPECIFIED EconomicAddressRejectionReason = 0
+	// Admissible: no rejection.
+	EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_NONE  EconomicAddressRejectionReason = 1
+	EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_EMPTY EconomicAddressRejectionReason = 2
+	// Not an account address for this chain: malformed, foreign prefix, or all-zero.
+	EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_INVALID        EconomicAddressRejectionReason = 3
+	EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_MODULE_ACCOUNT EconomicAddressRejectionReason = 4
+	EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_BANK_BLOCKED   EconomicAddressRejectionReason = 5
+)
+
+var EconomicAddressRejectionReason_name = map[int32]string{
+	0: "ECONOMIC_ADDRESS_REJECTION_REASON_UNSPECIFIED",
+	1: "ECONOMIC_ADDRESS_REJECTION_REASON_NONE",
+	2: "ECONOMIC_ADDRESS_REJECTION_REASON_EMPTY",
+	3: "ECONOMIC_ADDRESS_REJECTION_REASON_INVALID",
+	4: "ECONOMIC_ADDRESS_REJECTION_REASON_MODULE_ACCOUNT",
+	5: "ECONOMIC_ADDRESS_REJECTION_REASON_BANK_BLOCKED",
+}
+
+var EconomicAddressRejectionReason_value = map[string]int32{
+	"ECONOMIC_ADDRESS_REJECTION_REASON_UNSPECIFIED":    0,
+	"ECONOMIC_ADDRESS_REJECTION_REASON_NONE":           1,
+	"ECONOMIC_ADDRESS_REJECTION_REASON_EMPTY":          2,
+	"ECONOMIC_ADDRESS_REJECTION_REASON_INVALID":        3,
+	"ECONOMIC_ADDRESS_REJECTION_REASON_MODULE_ACCOUNT": 4,
+	"ECONOMIC_ADDRESS_REJECTION_REASON_BANK_BLOCKED":   5,
+}
+
+func (x EconomicAddressRejectionReason) String() string {
+	return proto.EnumName(EconomicAddressRejectionReason_name, int32(x))
+}
+
+func (EconomicAddressRejectionReason) EnumDescriptor() ([]byte, []int) {
+	return fileDescriptor_6d600a6eaf99936a, []int{0}
+}
+
 type QuerySettlementRequest struct {
 	SlotId uint64 `protobuf:"varint,1,opt,name=slot_id,json=slotId,proto3" json:"slot_id,omitempty"`
 	Epoch  uint64 `protobuf:"varint,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
@@ -960,7 +1008,255 @@ func (m *QuerySettlementParamsVersionsResponse) GetPagination() *query.PageRespo
 	return nil
 }
 
+// The chain's canonical reading of one target epoch.
+//
+// binding_epoch is DIAGNOSTIC. It reports which boundary the answer came from so an
+// operator can audit the interpretation; it is not a second authority, and a consumer
+// that recomputes anything from it has reintroduced the copy this query removes.
+type QueryTargetEpochInterpretationRequest struct {
+	TargetEpoch uint64 `protobuf:"varint,1,opt,name=target_epoch,json=targetEpoch,proto3" json:"target_epoch,omitempty"`
+}
+
+func (m *QueryTargetEpochInterpretationRequest) Reset()         { *m = QueryTargetEpochInterpretationRequest{} }
+func (m *QueryTargetEpochInterpretationRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryTargetEpochInterpretationRequest) ProtoMessage()    {}
+func (*QueryTargetEpochInterpretationRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6d600a6eaf99936a, []int{18}
+}
+func (m *QueryTargetEpochInterpretationRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryTargetEpochInterpretationRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryTargetEpochInterpretationRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryTargetEpochInterpretationRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryTargetEpochInterpretationRequest.Merge(m, src)
+}
+func (m *QueryTargetEpochInterpretationRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryTargetEpochInterpretationRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryTargetEpochInterpretationRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryTargetEpochInterpretationRequest proto.InternalMessageInfo
+
+func (m *QueryTargetEpochInterpretationRequest) GetTargetEpoch() uint64 {
+	if m != nil {
+		return m.TargetEpoch
+	}
+	return 0
+}
+
+type QueryTargetEpochInterpretationResponse struct {
+	TargetEpoch uint64 `protobuf:"varint,1,opt,name=target_epoch,json=targetEpoch,proto3" json:"target_epoch,omitempty"`
+	// 0 for bootstrap targets, target_epoch - 2 otherwise.
+	BindingEpoch uint64 `protobuf:"varint,2,opt,name=binding_epoch,json=bindingEpoch,proto3" json:"binding_epoch,omitempty"`
+	// The full governing record, so a consumer maps mode and version into its own
+	// snapshot rather than reading fields this response chose to duplicate.
+	DistributionModeVersion *MiningDistributionModeVersion `protobuf:"bytes,3,opt,name=distribution_mode_version,json=distributionModeVersion,proto3" json:"distribution_mode_version,omitempty"`
+	// Whether the target is canonically bound to the PROTOCOL_SELECTION arm with a
+	// complete N-2 binding.
+	//
+	// This is a statement about binding, NOT about runtime readiness: it does not assert
+	// that a Selection producer is enabled in the current deployment or profile.
+	SelectionApplicable bool `protobuf:"varint,4,opt,name=selection_applicable,json=selectionApplicable,proto3" json:"selection_applicable,omitempty"`
+	// True for targets 1 and 2, which have no N-2 boundary inside chain history and
+	// resolve from the genesis anchor.
+	BootstrapModeWithoutFullNMinus_2Binding bool `protobuf:"varint,5,opt,name=bootstrap_mode_without_full_n_minus_2_binding,json=bootstrapModeWithoutFullNMinus2Binding,proto3" json:"bootstrap_mode_without_full_n_minus_2_binding,omitempty"`
+}
+
+func (m *QueryTargetEpochInterpretationResponse) Reset() {
+	*m = QueryTargetEpochInterpretationResponse{}
+}
+func (m *QueryTargetEpochInterpretationResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryTargetEpochInterpretationResponse) ProtoMessage()    {}
+func (*QueryTargetEpochInterpretationResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6d600a6eaf99936a, []int{19}
+}
+func (m *QueryTargetEpochInterpretationResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryTargetEpochInterpretationResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryTargetEpochInterpretationResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryTargetEpochInterpretationResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryTargetEpochInterpretationResponse.Merge(m, src)
+}
+func (m *QueryTargetEpochInterpretationResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryTargetEpochInterpretationResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryTargetEpochInterpretationResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryTargetEpochInterpretationResponse proto.InternalMessageInfo
+
+func (m *QueryTargetEpochInterpretationResponse) GetTargetEpoch() uint64 {
+	if m != nil {
+		return m.TargetEpoch
+	}
+	return 0
+}
+
+func (m *QueryTargetEpochInterpretationResponse) GetBindingEpoch() uint64 {
+	if m != nil {
+		return m.BindingEpoch
+	}
+	return 0
+}
+
+func (m *QueryTargetEpochInterpretationResponse) GetDistributionModeVersion() *MiningDistributionModeVersion {
+	if m != nil {
+		return m.DistributionModeVersion
+	}
+	return nil
+}
+
+func (m *QueryTargetEpochInterpretationResponse) GetSelectionApplicable() bool {
+	if m != nil {
+		return m.SelectionApplicable
+	}
+	return false
+}
+
+func (m *QueryTargetEpochInterpretationResponse) GetBootstrapModeWithoutFullNMinus_2Binding() bool {
+	if m != nil {
+		return m.BootstrapModeWithoutFullNMinus_2Binding
+	}
+	return false
+}
+
+type QueryValidateEconomicAddressRequest struct {
+	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+}
+
+func (m *QueryValidateEconomicAddressRequest) Reset()         { *m = QueryValidateEconomicAddressRequest{} }
+func (m *QueryValidateEconomicAddressRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryValidateEconomicAddressRequest) ProtoMessage()    {}
+func (*QueryValidateEconomicAddressRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6d600a6eaf99936a, []int{20}
+}
+func (m *QueryValidateEconomicAddressRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryValidateEconomicAddressRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryValidateEconomicAddressRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryValidateEconomicAddressRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryValidateEconomicAddressRequest.Merge(m, src)
+}
+func (m *QueryValidateEconomicAddressRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryValidateEconomicAddressRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryValidateEconomicAddressRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryValidateEconomicAddressRequest proto.InternalMessageInfo
+
+func (m *QueryValidateEconomicAddressRequest) GetAddress() string {
+	if m != nil {
+		return m.Address
+	}
+	return ""
+}
+
+type QueryValidateEconomicAddressResponse struct {
+	Admissible      bool                           `protobuf:"varint,1,opt,name=admissible,proto3" json:"admissible,omitempty"`
+	RejectionReason EconomicAddressRejectionReason `protobuf:"varint,2,opt,name=rejection_reason,json=rejectionReason,proto3,enum=twilight.mining.v1.EconomicAddressRejectionReason" json:"rejection_reason,omitempty"`
+	// The parsed address, populated ONLY when admissible.
+	//
+	// It stays empty on every rejection, including the ones that parse perfectly well —
+	// a module account or a bank-blocked address is syntactically fine and still
+	// inadmissible. Emitting a canonical-looking value there would give downstream code
+	// something it could mistake for acceptance.
+	CanonicalAddress string `protobuf:"bytes,3,opt,name=canonical_address,json=canonicalAddress,proto3" json:"canonical_address,omitempty"`
+}
+
+func (m *QueryValidateEconomicAddressResponse) Reset()         { *m = QueryValidateEconomicAddressResponse{} }
+func (m *QueryValidateEconomicAddressResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryValidateEconomicAddressResponse) ProtoMessage()    {}
+func (*QueryValidateEconomicAddressResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6d600a6eaf99936a, []int{21}
+}
+func (m *QueryValidateEconomicAddressResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryValidateEconomicAddressResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryValidateEconomicAddressResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryValidateEconomicAddressResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryValidateEconomicAddressResponse.Merge(m, src)
+}
+func (m *QueryValidateEconomicAddressResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryValidateEconomicAddressResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryValidateEconomicAddressResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryValidateEconomicAddressResponse proto.InternalMessageInfo
+
+func (m *QueryValidateEconomicAddressResponse) GetAdmissible() bool {
+	if m != nil {
+		return m.Admissible
+	}
+	return false
+}
+
+func (m *QueryValidateEconomicAddressResponse) GetRejectionReason() EconomicAddressRejectionReason {
+	if m != nil {
+		return m.RejectionReason
+	}
+	return EconomicAddressRejectionReason_ECONOMIC_ADDRESS_REJECTION_REASON_UNSPECIFIED
+}
+
+func (m *QueryValidateEconomicAddressResponse) GetCanonicalAddress() string {
+	if m != nil {
+		return m.CanonicalAddress
+	}
+	return ""
+}
+
 func init() {
+	proto.RegisterEnum("twilight.mining.v1.EconomicAddressRejectionReason", EconomicAddressRejectionReason_name, EconomicAddressRejectionReason_value)
 	proto.RegisterType((*QuerySettlementRequest)(nil), "twilight.mining.v1.QuerySettlementRequest")
 	proto.RegisterType((*QuerySettlementResponse)(nil), "twilight.mining.v1.QuerySettlementResponse")
 	proto.RegisterType((*QueryOpenSettlementsRequest)(nil), "twilight.mining.v1.QueryOpenSettlementsRequest")
@@ -979,82 +1275,116 @@ func init() {
 	proto.RegisterType((*QuerySettlementParamsVersionResponse)(nil), "twilight.mining.v1.QuerySettlementParamsVersionResponse")
 	proto.RegisterType((*QuerySettlementParamsVersionsRequest)(nil), "twilight.mining.v1.QuerySettlementParamsVersionsRequest")
 	proto.RegisterType((*QuerySettlementParamsVersionsResponse)(nil), "twilight.mining.v1.QuerySettlementParamsVersionsResponse")
+	proto.RegisterType((*QueryTargetEpochInterpretationRequest)(nil), "twilight.mining.v1.QueryTargetEpochInterpretationRequest")
+	proto.RegisterType((*QueryTargetEpochInterpretationResponse)(nil), "twilight.mining.v1.QueryTargetEpochInterpretationResponse")
+	proto.RegisterType((*QueryValidateEconomicAddressRequest)(nil), "twilight.mining.v1.QueryValidateEconomicAddressRequest")
+	proto.RegisterType((*QueryValidateEconomicAddressResponse)(nil), "twilight.mining.v1.QueryValidateEconomicAddressResponse")
 }
 
 func init() { proto.RegisterFile("twilight/mining/v1/query.proto", fileDescriptor_6d600a6eaf99936a) }
 
 var fileDescriptor_6d600a6eaf99936a = []byte{
-	// 1119 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xb4, 0x58, 0x4d, 0x6f, 0xdc, 0x44,
-	0x18, 0x8e, 0xdb, 0x7c, 0x75, 0xa2, 0x74, 0xcb, 0x08, 0x25, 0xd6, 0xd2, 0x6e, 0x23, 0xd3, 0xef,
-	0xb2, 0x76, 0x37, 0x85, 0x7c, 0x20, 0xd4, 0xb4, 0xb4, 0x24, 0x54, 0x28, 0x50, 0x16, 0x89, 0x03,
-	0x97, 0xd5, 0xac, 0x3d, 0x6c, 0x86, 0xda, 0x33, 0xae, 0x67, 0x36, 0x21, 0x44, 0xe1, 0xc0, 0x2f,
-	0x40, 0xe2, 0x0f, 0x20, 0x6e, 0xdc, 0x10, 0x17, 0xc4, 0x89, 0x03, 0x07, 0x10, 0x12, 0xa8, 0x12,
-	0x17, 0x8e, 0x28, 0xe1, 0x87, 0x20, 0x8f, 0xc7, 0x5e, 0xef, 0xae, 0xed, 0x5d, 0x47, 0xe9, 0x2d,
-	0x9e, 0xf7, 0xeb, 0x79, 0xe6, 0x7d, 0xde, 0x7d, 0x47, 0x01, 0x35, 0xb1, 0x47, 0x5c, 0xd2, 0xd9,
-	0x11, 0x96, 0x47, 0x28, 0xa1, 0x1d, 0x6b, 0xb7, 0x61, 0x3d, 0xeb, 0xe2, 0x60, 0xdf, 0xf4, 0x03,
-	0x26, 0x18, 0x84, 0xb1, 0xdd, 0x8c, 0xec, 0xe6, 0x6e, 0xa3, 0x7a, 0xcb, 0x66, 0xdc, 0x63, 0xdc,
-	0x6a, 0x23, 0x8e, 0x23, 0x67, 0x6b, 0xb7, 0xd1, 0xc6, 0x02, 0x35, 0x2c, 0x1f, 0x75, 0x08, 0x45,
-	0x82, 0x30, 0x1a, 0xc5, 0x57, 0x2f, 0x76, 0x18, 0xeb, 0xb8, 0xd8, 0x42, 0x3e, 0xb1, 0x10, 0xa5,
-	0x4c, 0x48, 0x23, 0x57, 0xd6, 0xcb, 0x19, 0xd5, 0x55, 0x1d, 0xe9, 0x60, 0x6c, 0x81, 0x85, 0x0f,
-	0xc3, 0x02, 0x1f, 0x61, 0x21, 0x5c, 0xec, 0x61, 0x2a, 0x9a, 0xf8, 0x59, 0x17, 0x73, 0x01, 0x17,
-	0xc1, 0x0c, 0x77, 0x99, 0x68, 0x11, 0x47, 0xd7, 0x96, 0xb4, 0x1b, 0x93, 0xcd, 0xe9, 0xf0, 0xf3,
-	0xb1, 0x03, 0x5f, 0x06, 0x53, 0xd8, 0x67, 0xf6, 0x8e, 0x7e, 0x46, 0x1e, 0x47, 0x1f, 0xc6, 0x0f,
-	0x93, 0x60, 0x71, 0x28, 0x13, 0xf7, 0x19, 0xe5, 0x18, 0xde, 0x03, 0x80, 0x27, 0xa7, 0x32, 0xdb,
-	0xdc, 0x72, 0xcd, 0x1c, 0x26, 0x6e, 0xa6, 0x62, 0x53, 0x11, 0xb0, 0x0e, 0x20, 0xa6, 0x82, 0xa8,
-	0xcf, 0x16, 0xf2, 0x58, 0x97, 0x0a, 0x59, 0xfe, 0x5c, 0xf3, 0xa5, 0x94, 0xe5, 0x81, 0x34, 0xc0,
-	0xeb, 0xa0, 0x12, 0x60, 0x17, 0x23, 0x8e, 0x9d, 0xd8, 0xf7, 0xac, 0xf4, 0x3d, 0x1f, 0x1f, 0x2b,
-	0xc7, 0xab, 0xe0, 0xbc, 0x8f, 0xf6, 0x59, 0x57, 0xb4, 0x90, 0xe3, 0x04, 0x98, 0x73, 0x7d, 0x52,
-	0xfa, 0xcd, 0x47, 0xa7, 0x0f, 0xa2, 0x43, 0x78, 0x13, 0x5c, 0x08, 0xb0, 0x87, 0x24, 0xca, 0x38,
-	0xe1, 0x94, 0x74, 0xac, 0x24, 0xe7, 0x2a, 0xe3, 0xbb, 0x60, 0xc9, 0x47, 0x81, 0x20, 0x36, 0xf1,
-	0x11, 0x15, 0x2d, 0x87, 0x70, 0x11, 0x90, 0x76, 0x37, 0x6c, 0x49, 0xcb, 0xc6, 0xc4, 0x25, 0xb4,
-	0xa3, 0x4f, 0xcb, 0xd0, 0x5a, 0xca, 0xef, 0x51, 0xca, 0xed, 0x61, 0xe4, 0x05, 0xd7, 0x80, 0x6e,
-	0x07, 0x18, 0x09, 0xec, 0xb4, 0x7a, 0x37, 0xd1, 0xb2, 0x5d, 0x66, 0x3f, 0xd5, 0x67, 0xe4, 0xc5,
-	0x2f, 0x28, 0x7b, 0xef, 0xd2, 0x1e, 0x86, 0xd6, 0x90, 0x95, 0x83, 0x91, 0xe3, 0x12, 0x8a, 0x95,
-	0xff, 0xac, 0xf4, 0x9f, 0x8f, 0x4f, 0x23, 0xb7, 0x4d, 0x70, 0xd9, 0xc7, 0x81, 0x47, 0x38, 0x27,
-	0x8c, 0xba, 0x98, 0xf3, 0xd6, 0xa7, 0x84, 0x22, 0x97, 0x7c, 0x21, 0x05, 0xd4, 0xa2, 0x6c, 0x4f,
-	0x3f, 0xb7, 0xa4, 0xdd, 0x98, 0x6d, 0x5e, 0xea, 0x77, 0xdb, 0x4c, 0x79, 0xbd, 0xcf, 0xf6, 0x24,
-	0xd0, 0x6e, 0x10, 0x84, 0xe8, 0x86, 0x80, 0x02, 0x05, 0x34, 0xb2, 0x0f, 0x00, 0x35, 0xbe, 0x04,
-	0xaf, 0x48, 0xc5, 0x7c, 0xe0, 0x63, 0xda, 0xb3, 0xf1, 0x91, 0x02, 0xdc, 0x04, 0xa0, 0x37, 0x06,
-	0x52, 0x06, 0x73, 0xcb, 0xd7, 0xcc, 0x68, 0x66, 0xcc, 0x70, 0x66, 0xcc, 0x68, 0xc0, 0xd4, 0xcc,
-	0x98, 0x4f, 0x50, 0x07, 0xab, 0xa4, 0xcd, 0x54, 0xa4, 0xf1, 0xbd, 0x06, 0x2e, 0x66, 0x03, 0x50,
-	0xba, 0xbd, 0x0f, 0xe6, 0x7a, 0x94, 0xb8, 0xae, 0x2d, 0x9d, 0x1d, 0x43, 0xb8, 0xe9, 0x10, 0xb8,
-	0x95, 0x01, 0xf5, 0xfa, 0x48, 0xa8, 0x51, 0xf9, 0x3e, 0xac, 0x97, 0xd4, 0x5d, 0x0d, 0xdc, 0xa1,
-	0xa2, 0x65, 0x3c, 0x56, 0x4c, 0x86, 0xcc, 0x8a, 0xc9, 0x4d, 0x70, 0x61, 0xa8, 0x39, 0xd1, 0xa5,
-	0x56, 0xf8, 0x40, 0x57, 0x36, 0xc0, 0xab, 0x32, 0x55, 0x5a, 0x94, 0xdb, 0xcc, 0xc1, 0x1f, 0xe3,
-	0x20, 0x94, 0x40, 0xdc, 0x1d, 0x1d, 0xcc, 0xec, 0x46, 0x27, 0x2a, 0x51, 0xfc, 0x69, 0x70, 0x70,
-	0xa5, 0x38, 0x81, 0xc2, 0xf4, 0x5e, 0x7f, 0x86, 0xb9, 0xe5, 0x46, 0xd6, 0xcd, 0x6e, 0xcb, 0xbf,
-	0xf2, 0x72, 0x25, 0x45, 0x69, 0x71, 0xd1, 0x44, 0x54, 0xfd, 0xda, 0xd1, 0x4e, 0xac, 0x9d, 0x5f,
-	0x34, 0x70, 0x75, 0x44, 0x41, 0x45, 0x73, 0x1b, 0xcc, 0x2a, 0x90, 0xb1, 0x82, 0x4e, 0xc0, 0x33,
-	0x49, 0x71, 0x7a, 0x8a, 0xba, 0x07, 0x0c, 0x25, 0x19, 0x17, 0xdb, 0xe1, 0xc9, 0x13, 0x14, 0x20,
-	0x8f, 0x8f, 0xdd, 0xe6, 0xa7, 0x4a, 0x27, 0x79, 0xf1, 0x8a, 0xfe, 0xa3, 0xc1, 0x2e, 0xdf, 0xca,
-	0x9e, 0x9f, 0xcc, 0x24, 0x49, 0x31, 0xaf, 0xb0, 0xd8, 0xa9, 0x77, 0xf7, 0x27, 0x4d, 0xc9, 0x29,
-	0xb7, 0x9e, 0x62, 0xb7, 0x39, 0xd4, 0xdc, 0x32, 0xf4, 0x5e, 0x40, 0x57, 0x37, 0x92, 0x8b, 0x8a,
-	0xa7, 0xba, 0x64, 0x5b, 0xbd, 0x84, 0x79, 0x4e, 0x02, 0xc5, 0xfc, 0x9d, 0xc1, 0xbe, 0xde, 0x2e,
-	0xfe, 0x5d, 0xcc, 0x69, 0x2c, 0x2d, 0x2e, 0x77, 0xea, 0x9d, 0xfd, 0x39, 0x9e, 0xdb, 0xfc, 0x82,
-	0x8a, 0xe0, 0xd6, 0x50, 0x6b, 0x4b, 0x31, 0x3c, 0xfd, 0xde, 0x2e, 0xff, 0x39, 0x0f, 0xa6, 0x24,
-	0x76, 0xf8, 0xad, 0x06, 0x40, 0xaf, 0x30, 0xcc, 0xd4, 0x5c, 0xf6, 0xb3, 0xae, 0x7a, 0x7b, 0x2c,
-	0xdf, 0xa8, 0xba, 0xb1, 0xfe, 0xd5, 0xdf, 0xff, 0x7d, 0x73, 0xe6, 0x2e, 0x6c, 0x58, 0x19, 0xef,
-	0xc8, 0xd4, 0x9e, 0xb3, 0x0e, 0xd4, 0xa6, 0x3e, 0xb4, 0x0e, 0xe4, 0x73, 0xf0, 0x10, 0xfe, 0xa8,
-	0x81, 0xca, 0xc0, 0x5e, 0x85, 0x56, 0x6e, 0xed, 0xec, 0x27, 0x40, 0xf5, 0xce, 0xf8, 0x01, 0x0a,
-	0xf1, 0x5b, 0x12, 0xf1, 0x0a, 0x7c, 0x3d, 0x13, 0xb1, 0xcb, 0xfa, 0xb0, 0x32, 0x1f, 0xd3, 0x7a,
-	0x7a, 0x5d, 0x7f, 0xa7, 0x81, 0xca, 0xe0, 0x73, 0xca, 0x1a, 0xe3, 0xc2, 0xd2, 0xbb, 0xb8, 0x00,
-	0x74, 0xce, 0x76, 0x36, 0x5e, 0x93, 0xa0, 0xaf, 0xc1, 0x2b, 0xc5, 0xd7, 0x5c, 0x97, 0x7b, 0x1b,
-	0xfe, 0xa5, 0x81, 0xc5, 0x9c, 0x3d, 0x01, 0x57, 0x73, 0x6b, 0x17, 0xaf, 0xf3, 0xea, 0x5a, 0xf9,
-	0x40, 0x05, 0xfe, 0xbe, 0x04, 0xff, 0x26, 0x5c, 0xcb, 0x02, 0x9f, 0x7e, 0x00, 0xd7, 0x3d, 0xe6,
-	0xe0, 0x7a, 0x3c, 0x16, 0xd6, 0x81, 0xfa, 0xeb, 0x10, 0xfe, 0xa6, 0x01, 0x3d, 0x6f, 0x8d, 0xc2,
-	0xd2, 0xc0, 0x12, 0xf1, 0xac, 0x9f, 0x20, 0x52, 0x71, 0x5a, 0x91, 0x9c, 0xee, 0x40, 0xb3, 0x1c,
-	0x27, 0xf8, 0x87, 0x06, 0x16, 0xb2, 0x7f, 0xeb, 0xe1, 0x4a, 0x81, 0x2a, 0x0a, 0x16, 0x70, 0x75,
-	0xb5, 0x74, 0x9c, 0xe2, 0xb0, 0x21, 0x39, 0xac, 0xc3, 0xd5, 0x6c, 0x51, 0xa9, 0xd8, 0xba, 0x2f,
-	0x83, 0xb3, 0xda, 0xf2, 0xab, 0x06, 0x16, 0x73, 0xf6, 0x1f, 0x2c, 0x8b, 0x8a, 0x8f, 0xd6, 0xd9,
-	0x88, 0x55, 0x6b, 0xbc, 0x21, 0xf9, 0x58, 0xb0, 0x5e, 0x8a, 0x8f, 0x9c, 0x96, 0x9c, 0xdf, 0xe8,
-	0x42, 0x16, 0x45, 0xeb, 0xb3, 0x90, 0x45, 0xe1, 0xda, 0x2c, 0x9e, 0x96, 0xd4, 0xa8, 0xe7, 0xb7,
-	0x25, 0x9c, 0x96, 0xbc, 0xe5, 0x05, 0x4b, 0x03, 0x1b, 0x63, 0x5a, 0x46, 0x6d, 0xca, 0xe2, 0x69,
-	0xc9, 0xe7, 0xf4, 0x76, 0xf3, 0xf7, 0xa3, 0x9a, 0xf6, 0xfc, 0xa8, 0xa6, 0xfd, 0x7b, 0x54, 0xd3,
-	0xbe, 0x3e, 0xae, 0x4d, 0x3c, 0x3f, 0xae, 0x4d, 0xfc, 0x73, 0x5c, 0x9b, 0xf8, 0x64, 0xad, 0x43,
-	0xc4, 0x4e, 0xb7, 0x6d, 0xda, 0xcc, 0x4b, 0x72, 0xd6, 0xfd, 0x80, 0x7d, 0x86, 0x6d, 0xd1, 0x3b,
-	0xb0, 0x59, 0x80, 0xad, 0xcf, 0xe3, 0x5a, 0x62, 0xdf, 0xc7, 0xbc, 0x3d, 0x2d, 0xff, 0xad, 0x71,
-	0xf7, 0xff, 0x00, 0x00, 0x00, 0xff, 0xff, 0xa6, 0xe5, 0x31, 0x77, 0x77, 0x11, 0x00, 0x00,
+	// 1585 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xb4, 0x58, 0x5f, 0x6f, 0xd3, 0x56,
+	0x1b, 0xaf, 0xfb, 0x07, 0xca, 0x29, 0xd0, 0x70, 0x5e, 0x44, 0x43, 0x5f, 0x08, 0x7d, 0x03, 0x14,
+	0x68, 0xdf, 0xc4, 0x4d, 0x60, 0x50, 0xd0, 0x04, 0xa4, 0x49, 0xca, 0x02, 0x34, 0xe9, 0xd2, 0xc2,
+	0xb4, 0x49, 0xc8, 0x3a, 0xb1, 0x0f, 0xa9, 0x87, 0xed, 0x63, 0x7c, 0x9c, 0x76, 0xac, 0xea, 0x2e,
+	0xf6, 0x09, 0x26, 0xed, 0x0b, 0x4c, 0xbb, 0xdb, 0xdd, 0xb4, 0x9b, 0x69, 0xbb, 0xd9, 0xc5, 0x34,
+	0x6d, 0x9a, 0xa6, 0x09, 0x6d, 0x37, 0xdb, 0xdd, 0x04, 0xfb, 0x02, 0xfb, 0x06, 0x93, 0x8f, 0x8f,
+	0x1d, 0x37, 0xf1, 0x9f, 0xa6, 0x82, 0xbb, 0xfa, 0x3c, 0xff, 0x7e, 0xbf, 0xf3, 0x3c, 0x8f, 0xfd,
+	0x4b, 0x41, 0xc6, 0xde, 0x52, 0x35, 0xb5, 0xbd, 0x61, 0x8b, 0xba, 0x6a, 0xa8, 0x46, 0x5b, 0xdc,
+	0x2c, 0x88, 0x4f, 0x3b, 0xd8, 0x7a, 0x96, 0x37, 0x2d, 0x62, 0x13, 0x08, 0x3d, 0x7b, 0xde, 0xb5,
+	0xe7, 0x37, 0x0b, 0xd3, 0x73, 0x32, 0xa1, 0x3a, 0xa1, 0x62, 0x0b, 0x51, 0xec, 0x3a, 0x8b, 0x9b,
+	0x85, 0x16, 0xb6, 0x51, 0x41, 0x34, 0x51, 0x5b, 0x35, 0x90, 0xad, 0x12, 0xc3, 0x8d, 0x9f, 0x3e,
+	0xd5, 0x26, 0xa4, 0xad, 0x61, 0x11, 0x99, 0xaa, 0x88, 0x0c, 0x83, 0xd8, 0xcc, 0x48, 0xb9, 0xf5,
+	0x4c, 0x48, 0x75, 0x5e, 0x87, 0x39, 0x64, 0xef, 0x80, 0x13, 0x6f, 0x3b, 0x05, 0xd6, 0xb0, 0x6d,
+	0x6b, 0x58, 0xc7, 0x86, 0xdd, 0xc4, 0x4f, 0x3b, 0x98, 0xda, 0x70, 0x0a, 0x1c, 0xa4, 0x1a, 0xb1,
+	0x25, 0x55, 0x49, 0x0b, 0x33, 0xc2, 0xc5, 0xd1, 0xe6, 0x01, 0xe7, 0xb1, 0xa6, 0xc0, 0xe3, 0x60,
+	0x0c, 0x9b, 0x44, 0xde, 0x48, 0x0f, 0xb3, 0x63, 0xf7, 0x21, 0xfb, 0xe5, 0x28, 0x98, 0xea, 0xcb,
+	0x44, 0x4d, 0x62, 0x50, 0x0c, 0x6f, 0x02, 0x40, 0xfd, 0x53, 0x96, 0x6d, 0xa2, 0x98, 0xc9, 0xf7,
+	0x13, 0xcf, 0x07, 0x62, 0x03, 0x11, 0x30, 0x07, 0x20, 0x36, 0x6c, 0x95, 0x3f, 0x4a, 0x48, 0x27,
+	0x1d, 0xc3, 0x66, 0xe5, 0x0f, 0x35, 0x8f, 0x05, 0x2c, 0x25, 0x66, 0x80, 0x17, 0xc0, 0xa4, 0x85,
+	0x35, 0x8c, 0x28, 0x56, 0x3c, 0xdf, 0x11, 0xe6, 0x7b, 0xd4, 0x3b, 0xe6, 0x8e, 0xe7, 0xc1, 0x51,
+	0x13, 0x3d, 0x23, 0x1d, 0x5b, 0x42, 0x8a, 0x62, 0x61, 0x4a, 0xd3, 0xa3, 0xcc, 0xef, 0x88, 0x7b,
+	0x5a, 0x72, 0x0f, 0xe1, 0x25, 0x90, 0xb2, 0xb0, 0x8e, 0x18, 0x4a, 0x2f, 0xe1, 0x18, 0x73, 0x9c,
+	0xf4, 0xcf, 0x79, 0xc6, 0xb7, 0xc0, 0x8c, 0x89, 0x2c, 0x5b, 0x95, 0x55, 0x13, 0x19, 0xb6, 0xa4,
+	0xa8, 0xd4, 0xb6, 0xd4, 0x56, 0xc7, 0x69, 0x89, 0x24, 0x63, 0x55, 0x53, 0x8d, 0x76, 0xfa, 0x00,
+	0x0b, 0xcd, 0x04, 0xfc, 0x2a, 0x01, 0xb7, 0xb2, 0xeb, 0x05, 0x17, 0x41, 0x5a, 0xb6, 0x30, 0xb2,
+	0xb1, 0x22, 0x75, 0x6f, 0x42, 0x92, 0x35, 0x22, 0x3f, 0x49, 0x1f, 0x64, 0x17, 0x7f, 0x82, 0xdb,
+	0xbb, 0x97, 0x56, 0x76, 0xac, 0x0e, 0x2b, 0x05, 0x23, 0x45, 0x53, 0x0d, 0xcc, 0xfd, 0xc7, 0x99,
+	0xff, 0x11, 0xef, 0xd4, 0x75, 0x5b, 0x06, 0x67, 0x4c, 0x6c, 0xe9, 0x2a, 0xa5, 0x2a, 0x31, 0x34,
+	0x4c, 0xa9, 0xf4, 0x58, 0x35, 0x90, 0xa6, 0x7e, 0xc8, 0x06, 0x48, 0x32, 0xc8, 0x56, 0xfa, 0xd0,
+	0x8c, 0x70, 0x71, 0xbc, 0x79, 0x7a, 0xb7, 0xdb, 0x72, 0xc0, 0xab, 0x4e, 0xb6, 0x18, 0xd0, 0x8e,
+	0x65, 0x39, 0xe8, 0xfa, 0x80, 0x02, 0x0e, 0xd4, 0xb5, 0xf7, 0x00, 0xcd, 0x7e, 0x04, 0xfe, 0xcb,
+	0x26, 0xa6, 0x61, 0x62, 0xa3, 0x6b, 0xa3, 0x89, 0x03, 0xb8, 0x0c, 0x40, 0x77, 0x0d, 0xd8, 0x18,
+	0x4c, 0x14, 0x67, 0xf3, 0xee, 0xce, 0xe4, 0x9d, 0x9d, 0xc9, 0xbb, 0x0b, 0xc6, 0x77, 0x26, 0xbf,
+	0x8a, 0xda, 0x98, 0x27, 0x6d, 0x06, 0x22, 0xb3, 0x5f, 0x08, 0xe0, 0x54, 0x38, 0x00, 0x3e, 0xb7,
+	0xb7, 0xc1, 0x44, 0x97, 0x12, 0x4d, 0x0b, 0x33, 0x23, 0x7b, 0x18, 0xdc, 0x60, 0x08, 0xbc, 0x13,
+	0x02, 0xf5, 0x42, 0x22, 0x54, 0xb7, 0xfc, 0x2e, 0xac, 0xa7, 0xf9, 0x5d, 0xf5, 0xdc, 0x21, 0xa7,
+	0x95, 0xad, 0x71, 0x26, 0x7d, 0x66, 0xce, 0xe4, 0x12, 0x48, 0xf5, 0x35, 0xc7, 0xbd, 0xd4, 0x49,
+	0xda, 0xd3, 0x95, 0x5b, 0xe0, 0x2c, 0x4b, 0x15, 0x1c, 0xca, 0x15, 0xa2, 0xe0, 0x87, 0xd8, 0x72,
+	0x46, 0xc0, 0xeb, 0x4e, 0x1a, 0x1c, 0xdc, 0x74, 0x4f, 0x78, 0x22, 0xef, 0x31, 0x4b, 0xc1, 0xb9,
+	0xf8, 0x04, 0x1c, 0xd3, 0xbd, 0xdd, 0x19, 0x26, 0x8a, 0x85, 0xb0, 0x9b, 0x5d, 0x61, 0x7f, 0x45,
+	0xe5, 0xf2, 0x8b, 0x1a, 0xf1, 0x45, 0xfd, 0xa1, 0xda, 0x3d, 0x3b, 0xc2, 0xbe, 0x67, 0xe7, 0x3b,
+	0x01, 0x9c, 0x4f, 0x28, 0xc8, 0x69, 0xae, 0x80, 0x71, 0x0e, 0xd2, 0x9b, 0xa0, 0x7d, 0xf0, 0xf4,
+	0x53, 0xbc, 0xba, 0x89, 0xba, 0x09, 0xb2, 0x7c, 0x64, 0x34, 0x2c, 0x3b, 0x27, 0xab, 0xc8, 0x42,
+	0x3a, 0xdd, 0x73, 0x9b, 0x9f, 0xf0, 0x39, 0x89, 0x8a, 0xe7, 0xf4, 0x2b, 0xbd, 0x5d, 0x9e, 0x0b,
+	0xdf, 0x9f, 0xd0, 0x24, 0x7e, 0x31, 0x3d, 0xb6, 0xd8, 0x2b, 0xef, 0xee, 0xd7, 0x02, 0x1f, 0xa7,
+	0xc8, 0x7a, 0x9c, 0xdd, 0x72, 0x5f, 0x73, 0x07, 0xa1, 0xf7, 0x1a, 0xba, 0x7a, 0xcb, 0xbf, 0x28,
+	0x6f, 0xab, 0x07, 0x6c, 0xab, 0xee, 0x33, 0x8f, 0x48, 0xc0, 0x99, 0x57, 0x7b, 0xfb, 0x3a, 0x1f,
+	0xff, 0x5e, 0x8c, 0x68, 0xac, 0x11, 0x5f, 0xee, 0x95, 0x77, 0xf6, 0x1b, 0x6f, 0x6f, 0xa3, 0x0b,
+	0x72, 0x82, 0x77, 0xfa, 0x5a, 0x3b, 0x10, 0xc3, 0xd7, 0xd0, 0xdb, 0xbb, 0x1c, 0xfa, 0x3a, 0xb2,
+	0xda, 0xd8, 0xae, 0x3a, 0xb2, 0xab, 0x66, 0xd8, 0xd8, 0x32, 0x2d, 0xec, 0xaa, 0x3e, 0xef, 0xb2,
+	0xfe, 0x07, 0x0e, 0xdb, 0xcc, 0x47, 0x72, 0x85, 0x9a, 0xdb, 0xe2, 0x09, 0xbb, 0x1b, 0x97, 0xfd,
+	0x67, 0x18, 0xcc, 0x26, 0x25, 0xe3, 0x17, 0x91, 0x9c, 0x0d, 0x9e, 0x05, 0x47, 0x5a, 0xaa, 0xa1,
+	0x38, 0xfa, 0x28, 0x28, 0x0d, 0x0f, 0xf3, 0x43, 0xd7, 0x49, 0x07, 0x27, 0x77, 0xe9, 0x21, 0x9d,
+	0x28, 0x58, 0xf2, 0x66, 0x68, 0x64, 0xbf, 0x5f, 0x80, 0x29, 0x25, 0xdc, 0x00, 0x0b, 0xe0, 0x38,
+	0xf5, 0xd6, 0x4e, 0x42, 0xa6, 0xa9, 0xa9, 0x32, 0x6a, 0x69, 0x98, 0x49, 0xbc, 0xf1, 0xe6, 0x7f,
+	0x7c, 0x5b, 0xc9, 0x37, 0xc1, 0x47, 0x20, 0xd7, 0x22, 0xc4, 0xa6, 0xb6, 0x85, 0x4c, 0x17, 0xde,
+	0x96, 0x6a, 0x6f, 0x38, 0xfa, 0xf0, 0x71, 0x47, 0xd3, 0x24, 0x43, 0xd2, 0x55, 0xa3, 0x43, 0xa5,
+	0xa2, 0xc4, 0x79, 0x31, 0x15, 0x38, 0xde, 0x9c, 0xf5, 0x83, 0x9c, 0xfa, 0xef, 0xb8, 0x21, 0xcb,
+	0x1d, 0x4d, 0xab, 0xaf, 0x38, 0xfe, 0xc5, 0x25, 0xd7, 0xdb, 0xdf, 0xcd, 0x87, 0x48, 0x53, 0x15,
+	0x64, 0xe3, 0xaa, 0x4c, 0x0c, 0xa2, 0xab, 0x32, 0xd7, 0x99, 0x81, 0xdd, 0xf4, 0xe4, 0xa8, 0xc0,
+	0xa4, 0xa2, 0xf7, 0x98, 0xfd, 0xcd, 0x7b, 0x2d, 0x45, 0x66, 0xe0, 0x2d, 0xcb, 0x00, 0x80, 0x14,
+	0xa6, 0xd9, 0x1c, 0xc6, 0x02, 0x43, 0x19, 0x38, 0x81, 0x8f, 0x1c, 0x45, 0xfb, 0x3e, 0xbf, 0x1b,
+	0x0b, 0x23, 0xca, 0x07, 0xf3, 0x68, 0xb1, 0x18, 0xd6, 0x81, 0xbe, 0x32, 0x3c, 0xb4, 0xc9, 0x22,
+	0x1d, 0x15, 0xbc, 0xeb, 0x00, 0xce, 0x83, 0x63, 0x32, 0x32, 0x88, 0xa1, 0xca, 0x48, 0xf3, 0xa5,
+	0xb5, 0x2b, 0xc1, 0x53, 0xbe, 0x81, 0x27, 0x9b, 0xfb, 0x61, 0x18, 0x64, 0xe2, 0x0b, 0xc0, 0x02,
+	0xc8, 0x55, 0xcb, 0x8d, 0x7a, 0x63, 0xa5, 0x56, 0x96, 0x4a, 0x95, 0x4a, 0xb3, 0xba, 0xb6, 0x26,
+	0x35, 0xab, 0x77, 0xab, 0xe5, 0xf5, 0x5a, 0xa3, 0x2e, 0x35, 0xab, 0xa5, 0xb5, 0x46, 0x5d, 0x7a,
+	0x50, 0x5f, 0x5b, 0xad, 0x96, 0x6b, 0xcb, 0xb5, 0x6a, 0x25, 0x35, 0x04, 0xe7, 0xc0, 0x6c, 0x72,
+	0x48, 0xbd, 0x51, 0xaf, 0xa6, 0x04, 0x38, 0x0f, 0x2e, 0x24, 0xfb, 0x56, 0x57, 0x56, 0xd7, 0xdf,
+	0x4d, 0x0d, 0xc3, 0x1c, 0xb8, 0x94, 0xec, 0x5c, 0xab, 0x3f, 0x2c, 0xdd, 0xaf, 0x55, 0x52, 0x23,
+	0xf0, 0x0a, 0x58, 0x48, 0x76, 0x5f, 0x69, 0x54, 0x1e, 0xdc, 0xaf, 0x4a, 0xa5, 0x72, 0xb9, 0xf1,
+	0xa0, 0xbe, 0x9e, 0x1a, 0x85, 0x45, 0x90, 0x4f, 0x8e, 0x5a, 0x2a, 0xd5, 0xef, 0x49, 0x4b, 0xf7,
+	0x1b, 0xe5, 0x7b, 0xd5, 0x4a, 0x6a, 0xac, 0xf8, 0x67, 0x0a, 0x8c, 0xb1, 0xe1, 0x80, 0x9f, 0x09,
+	0x00, 0x74, 0x5f, 0x4b, 0x30, 0xf4, 0x8b, 0x14, 0xfe, 0xa3, 0x6f, 0x7a, 0x7e, 0x4f, 0xbe, 0xee,
+	0x94, 0x65, 0xaf, 0x7f, 0xfc, 0xfb, 0xdf, 0x9f, 0x0e, 0x5f, 0x86, 0x05, 0x31, 0xe4, 0x57, 0x66,
+	0x40, 0x05, 0x8b, 0xdb, 0x5c, 0xc7, 0xef, 0x88, 0xdb, 0xec, 0xf5, 0xb0, 0x03, 0xbf, 0x12, 0xc0,
+	0x64, 0x8f, 0xea, 0x86, 0x62, 0x64, 0xed, 0xf0, 0x1f, 0x08, 0xd3, 0x0b, 0x7b, 0x0f, 0xe0, 0x88,
+	0xdf, 0x64, 0x88, 0xaf, 0xc2, 0x2b, 0xa1, 0x88, 0x35, 0xb2, 0x0b, 0x2b, 0x31, 0xb1, 0x91, 0x0b,
+	0x8a, 0xf9, 0xcf, 0x05, 0x30, 0xd9, 0xfb, 0x63, 0x4b, 0xdc, 0xc3, 0x85, 0x05, 0x95, 0x7a, 0x0c,
+	0xe8, 0x08, 0xed, 0x9e, 0xfd, 0x3f, 0x03, 0x3d, 0x0b, 0xcf, 0xc5, 0x5f, 0x73, 0x8e, 0xa9, 0x7a,
+	0xf8, 0xab, 0x00, 0xa6, 0x22, 0xde, 0x95, 0xf0, 0x5a, 0x64, 0xed, 0x78, 0xb1, 0x3f, 0xbd, 0x38,
+	0x78, 0x20, 0x07, 0x7f, 0x9b, 0x81, 0xbf, 0x01, 0x17, 0xc3, 0xc0, 0x07, 0x5f, 0xdd, 0x39, 0xe7,
+	0x7d, 0x9b, 0xf3, 0x3e, 0x9a, 0xe2, 0x36, 0xff, 0x6b, 0x07, 0xfe, 0x28, 0x80, 0x74, 0x94, 0xc8,
+	0x86, 0x03, 0x03, 0xf3, 0x87, 0xe7, 0xfa, 0x3e, 0x22, 0x39, 0xa7, 0xab, 0x8c, 0xd3, 0x02, 0xcc,
+	0x0f, 0xc6, 0x09, 0xfe, 0x2c, 0x80, 0x13, 0xe1, 0x4a, 0x10, 0x5e, 0x8d, 0x99, 0x8a, 0x18, 0x79,
+	0x3e, 0x7d, 0x6d, 0xe0, 0x38, 0xce, 0xe1, 0x16, 0xe3, 0x70, 0x1d, 0x5e, 0x0b, 0x1f, 0x2a, 0x1e,
+	0x9b, 0x33, 0x59, 0x70, 0x58, 0x5b, 0xbe, 0x17, 0xc0, 0x54, 0x84, 0x3a, 0x86, 0x83, 0xa2, 0xa2,
+	0xc9, 0x73, 0x96, 0x20, 0xc4, 0xb3, 0x6f, 0x30, 0x3e, 0x22, 0xcc, 0x0d, 0xc4, 0x87, 0x6d, 0x4b,
+	0x84, 0x82, 0x8b, 0x65, 0x11, 0x27, 0xae, 0x63, 0x59, 0xc4, 0x8a, 0xea, 0xf8, 0x6d, 0x09, 0xac,
+	0x7a, 0x74, 0x5b, 0x9c, 0x6d, 0x89, 0x92, 0xb6, 0x70, 0x60, 0x60, 0x7b, 0xd8, 0x96, 0x24, 0x1d,
+	0x1d, 0xbf, 0x2d, 0xd1, 0x9c, 0xe0, 0x2f, 0x02, 0x38, 0x19, 0x29, 0x4e, 0x61, 0x34, 0xa0, 0x24,
+	0x75, 0x3c, 0x7d, 0x63, 0x3f, 0xa1, 0x9c, 0xcc, 0x22, 0x23, 0x53, 0x84, 0x0b, 0x61, 0x64, 0x5c,
+	0x45, 0x9c, 0x63, 0x9f, 0x38, 0x2a, 0x6e, 0x07, 0x45, 0xf3, 0x0e, 0xfc, 0x56, 0x00, 0x53, 0x11,
+	0xb2, 0x2d, 0x66, 0xd2, 0xe2, 0xa5, 0x62, 0xcc, 0xa4, 0x25, 0x28, 0xc4, 0xf8, 0x8f, 0x0a, 0xe6,
+	0x41, 0x39, 0xae, 0xdd, 0x96, 0x9a, 0x3f, 0xbd, 0xc8, 0x08, 0xcf, 0x5f, 0x64, 0x84, 0xbf, 0x5e,
+	0x64, 0x84, 0x4f, 0x5e, 0x66, 0x86, 0x9e, 0xbf, 0xcc, 0x0c, 0xfd, 0xf1, 0x32, 0x33, 0xf4, 0xde,
+	0x62, 0x5b, 0xb5, 0x37, 0x3a, 0xad, 0xbc, 0x4c, 0x74, 0x3f, 0x53, 0xce, 0xb4, 0x88, 0x23, 0xe0,
+	0xba, 0x07, 0x32, 0xb1, 0xb0, 0xf8, 0x81, 0x57, 0xc1, 0x7e, 0x66, 0x62, 0xda, 0x3a, 0xc0, 0xfe,
+	0x01, 0x7d, 0xf9, 0xdf, 0x00, 0x00, 0x00, 0xff, 0xff, 0x2c, 0x68, 0x1c, 0xc3, 0x21, 0x17, 0x00,
+	0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -1092,6 +1422,24 @@ type QueryClient interface {
 	// version.
 	SettlementParamsVersion(ctx context.Context, in *QuerySettlementParamsVersionRequest, opts ...grpc.CallOption) (*QuerySettlementParamsVersionResponse, error)
 	SettlementParamsVersions(ctx context.Context, in *QuerySettlementParamsVersionsRequest, opts ...grpc.CallOption) (*QuerySettlementParamsVersionsResponse, error)
+	// TargetEpochInterpretation returns the chain's own reading of a target epoch:
+	// which boundary binds it, which distribution-mode row governs that boundary, and
+	// whether the target is canonically a Selection target.
+	//
+	// It exists so a consumer reads an interpretation instead of deriving one. The N-2
+	// rule and the bootstrap exception are consensus rules; a second copy of them
+	// outside the chain can drift from the arm settlement actually takes without
+	// anything failing loudly.
+	TargetEpochInterpretation(ctx context.Context, in *QueryTargetEpochInterpretationRequest, opts ...grpc.CallOption) (*QueryTargetEpochInterpretationResponse, error)
+	// ValidateEconomicAddress reports whether an address may receive protocol value,
+	// under the same canonical rule settlement execution enforces.
+	//
+	// The address is a QUERY PARAMETER, not a path segment. A gateway path segment must
+	// be non-empty to match its pattern, so a path form could not express the empty
+	// address — which is a successful domain rejection here, not a malformed request.
+	// Every enumerated case has to be reachable on every surface or the surfaces
+	// disagree.
+	ValidateEconomicAddress(ctx context.Context, in *QueryValidateEconomicAddressRequest, opts ...grpc.CallOption) (*QueryValidateEconomicAddressResponse, error)
 }
 
 type queryClient struct {
@@ -1183,6 +1531,24 @@ func (c *queryClient) SettlementParamsVersions(ctx context.Context, in *QuerySet
 	return out, nil
 }
 
+func (c *queryClient) TargetEpochInterpretation(ctx context.Context, in *QueryTargetEpochInterpretationRequest, opts ...grpc.CallOption) (*QueryTargetEpochInterpretationResponse, error) {
+	out := new(QueryTargetEpochInterpretationResponse)
+	err := c.cc.Invoke(ctx, "/twilight.mining.v1.Query/TargetEpochInterpretation", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) ValidateEconomicAddress(ctx context.Context, in *QueryValidateEconomicAddressRequest, opts ...grpc.CallOption) (*QueryValidateEconomicAddressResponse, error) {
+	out := new(QueryValidateEconomicAddressResponse)
+	err := c.cc.Invoke(ctx, "/twilight.mining.v1.Query/ValidateEconomicAddress", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 type QueryServer interface {
 	// Settlement returns one settlement with everything needed to decide the next
@@ -1208,6 +1574,24 @@ type QueryServer interface {
 	// version.
 	SettlementParamsVersion(context.Context, *QuerySettlementParamsVersionRequest) (*QuerySettlementParamsVersionResponse, error)
 	SettlementParamsVersions(context.Context, *QuerySettlementParamsVersionsRequest) (*QuerySettlementParamsVersionsResponse, error)
+	// TargetEpochInterpretation returns the chain's own reading of a target epoch:
+	// which boundary binds it, which distribution-mode row governs that boundary, and
+	// whether the target is canonically a Selection target.
+	//
+	// It exists so a consumer reads an interpretation instead of deriving one. The N-2
+	// rule and the bootstrap exception are consensus rules; a second copy of them
+	// outside the chain can drift from the arm settlement actually takes without
+	// anything failing loudly.
+	TargetEpochInterpretation(context.Context, *QueryTargetEpochInterpretationRequest) (*QueryTargetEpochInterpretationResponse, error)
+	// ValidateEconomicAddress reports whether an address may receive protocol value,
+	// under the same canonical rule settlement execution enforces.
+	//
+	// The address is a QUERY PARAMETER, not a path segment. A gateway path segment must
+	// be non-empty to match its pattern, so a path form could not express the empty
+	// address — which is a successful domain rejection here, not a malformed request.
+	// Every enumerated case has to be reachable on every surface or the surfaces
+	// disagree.
+	ValidateEconomicAddress(context.Context, *QueryValidateEconomicAddressRequest) (*QueryValidateEconomicAddressResponse, error)
 }
 
 // UnimplementedQueryServer can be embedded to have forward compatible implementations.
@@ -1240,6 +1624,12 @@ func (*UnimplementedQueryServer) SettlementParamsVersion(ctx context.Context, re
 }
 func (*UnimplementedQueryServer) SettlementParamsVersions(ctx context.Context, req *QuerySettlementParamsVersionsRequest) (*QuerySettlementParamsVersionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SettlementParamsVersions not implemented")
+}
+func (*UnimplementedQueryServer) TargetEpochInterpretation(ctx context.Context, req *QueryTargetEpochInterpretationRequest) (*QueryTargetEpochInterpretationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TargetEpochInterpretation not implemented")
+}
+func (*UnimplementedQueryServer) ValidateEconomicAddress(ctx context.Context, req *QueryValidateEconomicAddressRequest) (*QueryValidateEconomicAddressResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ValidateEconomicAddress not implemented")
 }
 
 func RegisterQueryServer(s grpc1.Server, srv QueryServer) {
@@ -1408,6 +1798,42 @@ func _Query_SettlementParamsVersions_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_TargetEpochInterpretation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryTargetEpochInterpretationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).TargetEpochInterpretation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/twilight.mining.v1.Query/TargetEpochInterpretation",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).TargetEpochInterpretation(ctx, req.(*QueryTargetEpochInterpretationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_ValidateEconomicAddress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryValidateEconomicAddressRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).ValidateEconomicAddress(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/twilight.mining.v1.Query/ValidateEconomicAddress",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).ValidateEconomicAddress(ctx, req.(*QueryValidateEconomicAddressRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var _Query_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "twilight.mining.v1.Query",
 	HandlerType: (*QueryServer)(nil),
@@ -1447,6 +1873,14 @@ var _Query_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SettlementParamsVersions",
 			Handler:    _Query_SettlementParamsVersions_Handler,
+		},
+		{
+			MethodName: "TargetEpochInterpretation",
+			Handler:    _Query_TargetEpochInterpretation_Handler,
+		},
+		{
+			MethodName: "ValidateEconomicAddress",
+			Handler:    _Query_ValidateEconomicAddress_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -2162,6 +2596,174 @@ func (m *QuerySettlementParamsVersionsResponse) MarshalToSizedBuffer(dAtA []byte
 	return len(dAtA) - i, nil
 }
 
+func (m *QueryTargetEpochInterpretationRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryTargetEpochInterpretationRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryTargetEpochInterpretationRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.TargetEpoch != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.TargetEpoch))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryTargetEpochInterpretationResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryTargetEpochInterpretationResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryTargetEpochInterpretationResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.BootstrapModeWithoutFullNMinus_2Binding {
+		i--
+		if m.BootstrapModeWithoutFullNMinus_2Binding {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.SelectionApplicable {
+		i--
+		if m.SelectionApplicable {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.DistributionModeVersion != nil {
+		{
+			size, err := m.DistributionModeVersion.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintQuery(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x1a
+	}
+	if m.BindingEpoch != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.BindingEpoch))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.TargetEpoch != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.TargetEpoch))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryValidateEconomicAddressRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryValidateEconomicAddressRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryValidateEconomicAddressRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Address) > 0 {
+		i -= len(m.Address)
+		copy(dAtA[i:], m.Address)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.Address)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryValidateEconomicAddressResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryValidateEconomicAddressResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryValidateEconomicAddressResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.CanonicalAddress) > 0 {
+		i -= len(m.CanonicalAddress)
+		copy(dAtA[i:], m.CanonicalAddress)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.CanonicalAddress)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if m.RejectionReason != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.RejectionReason))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.Admissible {
+		i--
+		if m.Admissible {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
 func encodeVarintQuery(dAtA []byte, offset int, v uint64) int {
 	offset -= sovQuery(v)
 	base := offset
@@ -2455,6 +3057,75 @@ func (m *QuerySettlementParamsVersionsResponse) Size() (n int) {
 	}
 	if m.Pagination != nil {
 		l = m.Pagination.Size()
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	return n
+}
+
+func (m *QueryTargetEpochInterpretationRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.TargetEpoch != 0 {
+		n += 1 + sovQuery(uint64(m.TargetEpoch))
+	}
+	return n
+}
+
+func (m *QueryTargetEpochInterpretationResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.TargetEpoch != 0 {
+		n += 1 + sovQuery(uint64(m.TargetEpoch))
+	}
+	if m.BindingEpoch != 0 {
+		n += 1 + sovQuery(uint64(m.BindingEpoch))
+	}
+	if m.DistributionModeVersion != nil {
+		l = m.DistributionModeVersion.Size()
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	if m.SelectionApplicable {
+		n += 2
+	}
+	if m.BootstrapModeWithoutFullNMinus_2Binding {
+		n += 2
+	}
+	return n
+}
+
+func (m *QueryValidateEconomicAddressRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Address)
+	if l > 0 {
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	return n
+}
+
+func (m *QueryValidateEconomicAddressResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Admissible {
+		n += 2
+	}
+	if m.RejectionReason != 0 {
+		n += 1 + sovQuery(uint64(m.RejectionReason))
+	}
+	l = len(m.CanonicalAddress)
+	if l > 0 {
 		n += 1 + l + sovQuery(uint64(l))
 	}
 	return n
@@ -4282,6 +4953,442 @@ func (m *QuerySettlementParamsVersionsResponse) Unmarshal(dAtA []byte) error {
 			if err := m.Pagination.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryTargetEpochInterpretationRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryTargetEpochInterpretationRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryTargetEpochInterpretationRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TargetEpoch", wireType)
+			}
+			m.TargetEpoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TargetEpoch |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryTargetEpochInterpretationResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryTargetEpochInterpretationResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryTargetEpochInterpretationResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TargetEpoch", wireType)
+			}
+			m.TargetEpoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TargetEpoch |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BindingEpoch", wireType)
+			}
+			m.BindingEpoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.BindingEpoch |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DistributionModeVersion", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.DistributionModeVersion == nil {
+				m.DistributionModeVersion = &MiningDistributionModeVersion{}
+			}
+			if err := m.DistributionModeVersion.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SelectionApplicable", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.SelectionApplicable = bool(v != 0)
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BootstrapModeWithoutFullNMinus_2Binding", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.BootstrapModeWithoutFullNMinus_2Binding = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryValidateEconomicAddressRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryValidateEconomicAddressRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryValidateEconomicAddressRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Address", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Address = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryValidateEconomicAddressResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryValidateEconomicAddressResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryValidateEconomicAddressResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Admissible", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Admissible = bool(v != 0)
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RejectionReason", wireType)
+			}
+			m.RejectionReason = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.RejectionReason |= EconomicAddressRejectionReason(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CanonicalAddress", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.CanonicalAddress = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

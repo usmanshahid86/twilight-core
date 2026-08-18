@@ -2332,6 +2332,38 @@
         ]
       }
     },
+    "/twilight/mining/v1/economic-address": {
+      "get": {
+        "summary": "ValidateEconomicAddress reports whether an address may receive protocol value,\nunder the same canonical rule settlement execution enforces.",
+        "description": "The address is a QUERY PARAMETER, not a path segment. A gateway path segment must\nbe non-empty to match its pattern, so a path form could not express the empty\naddress — which is a successful domain rejection here, not a malformed request.\nEvery enumerated case has to be reachable on every surface or the surfaces\ndisagree.",
+        "operationId": "Query_ValidateEconomicAddress",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryValidateEconomicAddressResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "address",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
     "/twilight/mining/v1/selection-params-versions": {
       "get": {
         "operationId": "Query_SelectionParamsVersions",
@@ -2645,6 +2677,39 @@
             "in": "query",
             "required": false,
             "type": "boolean"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
+    "/twilight/mining/v1/target-epochs/{target_epoch}": {
+      "get": {
+        "summary": "TargetEpochInterpretation returns the chain's own reading of a target epoch:\nwhich boundary binds it, which distribution-mode row governs that boundary, and\nwhether the target is canonically a Selection target.",
+        "description": "It exists so a consumer reads an interpretation instead of deriving one. The N-2\nrule and the bootstrap exception are consensus rules; a second copy of them\noutside the chain can drift from the arm settlement actually takes without\nanything failing loudly.",
+        "operationId": "Query_TargetEpochInterpretation",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryTargetEpochInterpretationResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "target_epoch",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
           }
         ],
         "tags": [
@@ -4589,6 +4654,19 @@
       "default": "DISTRIBUTION_METHOD_UNSPECIFIED",
       "description": "Enum numeric values are permanent after release. Future upgrades may add\nvalues but must not reuse, reorder, or change existing numeric values."
     },
+    "v1EconomicAddressRejectionReason": {
+      "type": "string",
+      "enum": [
+        "ECONOMIC_ADDRESS_REJECTION_REASON_UNSPECIFIED",
+        "ECONOMIC_ADDRESS_REJECTION_REASON_NONE",
+        "ECONOMIC_ADDRESS_REJECTION_REASON_EMPTY",
+        "ECONOMIC_ADDRESS_REJECTION_REASON_INVALID",
+        "ECONOMIC_ADDRESS_REJECTION_REASON_MODULE_ACCOUNT",
+        "ECONOMIC_ADDRESS_REJECTION_REASON_BANK_BLOCKED"
+      ],
+      "default": "ECONOMIC_ADDRESS_REJECTION_REASON_UNSPECIFIED",
+      "description": "Why an address may not receive protocol value.\n\nDeclared here rather than in mining.proto because it is query-only and must never\nbecome stored state. Keeping it out of the stored-state file makes that structural\ninstead of a convention someone has to remember.\n\nThe economic-address validator's sentinels are the sole authority for these values.\nA handler may only map those sentinels onto this enum; it may not infer a cause of\nits own, and an unrecognised failure is an RPC error rather than a guessed value.\n\n - ECONOMIC_ADDRESS_REJECTION_REASON_NONE: Admissible: no rejection.\n - ECONOMIC_ADDRESS_REJECTION_REASON_INVALID: Not an account address for this chain: malformed, foreign prefix, or all-zero."
+    },
     "v1EligibleSlotReward": {
       "type": "object",
       "properties": {
@@ -5306,6 +5384,47 @@
         },
         "next_halving": {
           "$ref": "#/definitions/v1NextHalvingInfo"
+        }
+      }
+    },
+    "v1QueryTargetEpochInterpretationResponse": {
+      "type": "object",
+      "properties": {
+        "target_epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "binding_epoch": {
+          "type": "string",
+          "format": "uint64",
+          "description": "0 for bootstrap targets, target_epoch - 2 otherwise."
+        },
+        "distribution_mode_version": {
+          "$ref": "#/definitions/v1MiningDistributionModeVersion",
+          "description": "The full governing record, so a consumer maps mode and version into its own\nsnapshot rather than reading fields this response chose to duplicate."
+        },
+        "selection_applicable": {
+          "type": "boolean",
+          "description": "Whether the target is canonically bound to the PROTOCOL_SELECTION arm with a\ncomplete N-2 binding.\n\nThis is a statement about binding, NOT about runtime readiness: it does not assert\nthat a Selection producer is enabled in the current deployment or profile."
+        },
+        "bootstrap_mode_without_full_n_minus_2_binding": {
+          "type": "boolean",
+          "description": "True for targets 1 and 2, which have no N-2 boundary inside chain history and\nresolve from the genesis anchor."
+        }
+      }
+    },
+    "v1QueryValidateEconomicAddressResponse": {
+      "type": "object",
+      "properties": {
+        "admissible": {
+          "type": "boolean"
+        },
+        "rejection_reason": {
+          "$ref": "#/definitions/v1EconomicAddressRejectionReason"
+        },
+        "canonical_address": {
+          "type": "string",
+          "description": "The parsed address, populated ONLY when admissible.\n\nIt stays empty on every rejection, including the ones that parse perfectly well —\na module account or a bank-blocked address is syntactically fine and still\ninadmissible. Emitting a canonical-looking value there would give downstream code\nsomething it could mistake for acceptance."
         }
       }
     },
