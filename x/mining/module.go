@@ -33,11 +33,16 @@ func (AppModuleBasic) RegisterInterfaces(registry codectypes.InterfaceRegistry) 
 	types.RegisterInterfaces(registry)
 }
 
-// RegisterGRPCGatewayRoutes has no routes to register in this gate: the mining
-// query service arrives with the settlement observability surface. It is
-// implemented now so the module satisfies the interface and so adding the service
-// later is a change to a body rather than a new registration point.
-func (AppModuleBasic) RegisterGRPCGatewayRoutes(_ client.Context, _ *gwruntime.ServeMux) {}
+// RegisterGRPCGatewayRoutes wires the mining query service into the REST
+// gRPC-gateway mux over the chain's gRPC query surface. It panics on a registration
+// error, matching the other modules, so a broken gateway crashes the node at startup
+// rather than silently serving 501s to a worker that depends on these queries for
+// correctness.
+func (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *gwruntime.ServeMux) {
+	if err := types.RegisterQueryHandlerClient(context.Background(), mux, types.NewQueryClient(clientCtx)); err != nil {
+		panic(err)
+	}
+}
 
 func (AppModuleBasic) DefaultGenesis(cdc codec.JSONCodec) json.RawMessage {
 	return cdc.MustMarshalJSON(types.DefaultGenesis())
@@ -76,6 +81,7 @@ func (AppModule) ConsensusVersion() uint64 { return ConsensusVersion }
 // The query service arrives with the observability gate.
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServer(am.keeper))
+	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServer(am.keeper))
 }
 
 func (am AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, raw json.RawMessage) {

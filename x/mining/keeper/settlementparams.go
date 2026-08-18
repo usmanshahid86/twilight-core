@@ -51,6 +51,34 @@ func (k Keeper) GenesisSettlementParams(ctx context.Context) (types.SettlementPa
 	return version, nil
 }
 
+// GenesisSelectionParams returns the permanent anchor of the Selection-parameter
+// history.
+//
+// The third of the three family anchors, written to match GenesisDistributionMode
+// and GenesisSettlementParams rather than to be reached by a runtime path: nothing
+// in this profile resolves Selection parameters consequentially, but the history is
+// canonical state and its origin is what every later row is positioned against.
+func (k Keeper) GenesisSelectionParams(ctx context.Context) (types.SelectionParamsVersion, error) {
+	version, err := k.SelectionParamsVersions.Get(ctx, 1)
+	if errors.Is(err, collections.ErrNotFound) {
+		return types.SelectionParamsVersion{}, types.ErrParamsNotFound.Wrap(
+			"the initial selection parameters effective at epoch 1 are absent")
+	}
+	if err != nil {
+		return types.SelectionParamsVersion{}, types.ErrInvalidState.Wrapf(
+			"the initial selection parameters could not be read: %v", err)
+	}
+	if err := validateSelectionParamsRecord(1, version); err != nil {
+		return types.SelectionParamsVersion{}, err
+	}
+	if version.Version != 1 {
+		return types.SelectionParamsVersion{}, types.ErrInvalidState.Wrapf(
+			"the initial selection parameters must be version 1 effective at epoch 1, found version %d",
+			version.Version)
+	}
+	return version, nil
+}
+
 // SettlementParamsForTarget returns the parameters governing a target epoch.
 //
 // Bootstrap targets whose binding boundary predates chain history use the genesis
