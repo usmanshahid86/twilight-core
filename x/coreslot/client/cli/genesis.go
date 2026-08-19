@@ -171,8 +171,24 @@ func addGenesisSlotCmd() *cobra.Command {
 			doc["app_state"] = appState
 			// initial_height is read above, not written: the document decides when the
 			// chain starts, and adding a slot is not that decision.
+			// Decode what is already there before appending to it. Discarding this
+			// error silently drops every validator added by an earlier `add`: a
+			// malformed value leaves the slice nil, the append writes a
+			// single-entry array, and saveGenesis persists a genesis missing the
+			// operators it was built from. A genesis is assembled once, by hand,
+			// incrementally — exactly the shape of workflow where quiet data loss
+			// survives to launch.
+			//
+			// An ABSENT key stays tolerated: the first add legitimately finds no
+			// validators array, and only a value that is present and undecodable
+			// is refused.
 			var validators []genesisValidator
-			_ = json.Unmarshal(doc["validators"], &validators)
+			if raw := doc["validators"]; len(raw) > 0 && string(raw) != "null" {
+				if err := json.Unmarshal(raw, &validators); err != nil {
+					return fmt.Errorf("genesis validators are present but unreadable, "+
+						"so adding a slot would discard them: %w", err)
+				}
+			}
 			// args[3] is the consensus pubkey and args[4] the moniker: the settlement
 			// address was inserted at args[2], which shifted both.
 			validators = append(validators, genesisValidator{PubKey: genesisPubKey{Type: "tendermint/PubKeyEd25519", Value: args[3]}, Power: strconv.FormatInt(power, 10), Name: args[4]})
