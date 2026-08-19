@@ -113,6 +113,26 @@ func GetQueryCmd() *cobra.Command {
 			}
 			return &types.QuerySettlementParamsVersionsRequest{Pagination: page}, nil
 		}),
+		add("target-epoch-interpretation [target-epoch]", cobra.ExactArgs(1), false, func(_ *cobra.Command, a []string) (interface{}, error) {
+			// Zero is refused here by the same convention every other protocol
+			// identifier follows, so a typo costs no round trip. The server refuses
+			// it too, and on its own authority: this is a convenience ahead of the
+			// rule, never a substitute for it.
+			target, err := positiveID(a[0], "target-epoch")
+			if err != nil {
+				return nil, err
+			}
+			return &types.QueryTargetEpochInterpretationRequest{TargetEpoch: target}, nil
+		}),
+		add("validate-economic-address [address]", cobra.ExactArgs(1), false, func(_ *cobra.Command, a []string) (interface{}, error) {
+			// Deliberately unvalidated. The chain owns the admissibility rule, and
+			// the whole purpose of this command is to ask it rather than to hold a
+			// second opinion locally — including for the empty address, which is a
+			// successful domain rejection the operator is entitled to see. Cobra
+			// passes an empty positional argument through, so `validate-economic-address ""`
+			// reaches the handler and returns that answer.
+			return &types.QueryValidateEconomicAddressRequest{Address: a[0]}, nil
+		}),
 	)
 	return cmd
 }
@@ -142,6 +162,10 @@ func dispatchQuery(ctx context.Context, qc types.QueryClient, req interface{}) (
 		return qc.SettlementParamsVersion(ctx, r)
 	case *types.QuerySettlementParamsVersionsRequest:
 		return qc.SettlementParamsVersions(ctx, r)
+	case *types.QueryTargetEpochInterpretationRequest:
+		return qc.TargetEpochInterpretation(ctx, r)
+	case *types.QueryValidateEconomicAddressRequest:
+		return qc.ValidateEconomicAddress(ctx, r)
 	default:
 		return nil, fmt.Errorf("unsupported mining query request %T", req)
 	}

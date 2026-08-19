@@ -103,7 +103,40 @@ Full inventory: `docs/reference/rest-routes.md`. Highlights an indexer relies on
 `settlements/{slot_id}/{epoch}`, `slots/{slot_id}/open-settlements`, `settlement-clock`,
 `distribution-mode-versions`, `distribution-mode-versions/{version}`,
 `selection-params-versions`, `selection-params-versions/{version}`,
-`settlement-params-versions`, `settlement-params-versions/{version}`.
+`settlement-params-versions`, `settlement-params-versions/{version}`,
+`target-epochs/{target_epoch}`, `economic-address?address=…`.
+
+### The consumer read contract (two routes worth reading before you build)
+
+Both exist so a consumer reads the chain's own interpretation instead of reimplementing
+a consensus rule. A copy of such a rule living outside the chain can drift from what
+settlement actually does, and nothing fails loudly when it does.
+
+- **`target-epochs/{target_epoch}`** — which boundary binds a target epoch, which
+  distribution-mode row governs it, and whether the target is canonically a Selection
+  target. `binding_epoch` is **diagnostic only**: recomputing anything from it
+  reintroduces the copy the route removes. `selection_applicable` states canonical
+  **binding**, not runtime readiness — it does not claim a Selection producer is enabled
+  in the deployment. `0` is a `400`; a damaged mode history is a `500` and never a `404`,
+  because every initialized chain has that history.
+
+- **`economic-address?address=…`** — whether an address may receive protocol value, under
+  the same rule settlement execution enforces. The address is a **query parameter, not a
+  path segment**, so the empty address is expressible; it is a *successful* rejection
+  (`200`, `admissible=false`, `rejection_reason=EMPTY`), not a `400`. `canonical_address`
+  is populated only when `admissible=true` and is empty on every rejection — a module or
+  blocked address parses cleanly and is still inadmissible, so a normalized value from a
+  rejected result must never be used.
+  **It reports the serving node's currently configured rule.** The module-account and
+  bank-blocked sets are app configuration copied in at process construction, not
+  consensus state, so `x-cosmos-block-height` does not reconstruct a prior height's
+  configuration for this route.
+
+Every other state-backed query above honors a single `x-cosmos-block-height` view,
+including the derived settlement values (`participant_distribution_ceiling`,
+`deadline_clock`, `current_settlement_clock`, `permissionless_finalization_now`). Pin one
+height for a whole reconciliation pass; mixing a pinned read with an unpinned one mixes
+two moments into one decision.
 
 Query footguns the design MUST account for:
 - **`active-slots` not `slots/active`** — the latter collides with `slots/{slot_id}` and
@@ -112,6 +145,17 @@ Query footguns the design MUST account for:
 - **`EpochReward.rewards[]` is empty** and is not the per-slot obligation. The obligation a
   finalized epoch creates is a `SlotEntitlement`; see the retirement note in §6.
 - Rewards **amounts are strings** (not `cosmos.base.v1beta1.Coin`); denom is `utwlt`.
+- **A `404` is absence; a `500` is corruption.** Existing-but-unreadable state is never
+  reported as absence, and no response is completed with a synthesized default. Do not
+  treat an entitlement `404` as definitive zero participation until the target epoch has
+  also been proven finalized **at the same pinned height**.
+- **`open-settlements` is complete only when `next_key` is empty.** An empty list with a
+  non-empty `next_key` is not proof that no open settlement remains: the server-side bound
+  applies to canonical rows inspected, not to rows returned. The version histories page
+  the same way. `offset`, `count_total` and `reverse` are refused on these listings.
+- **Settlement creation height is not a stored field.** It is
+  `EpochBoundaries(settlement.epoch).end_height`; `SlotEntitlement.created_height` matches
+  it under canonical execution and may be cross-checked.
 
 ## 6. Events (exact emitted strings — for event projections)
 

@@ -34,3 +34,13 @@ var FinalizeSettlementWithoutCache = Keeper.finalizeSettlement
 // construct one rather than only echoing one back, which is the only way to reach
 // the "cursor past the end" branch deliberately.
 var EncodeEpochCursor = encodeEpochCursor
+
+// ClassifyEconomicAddressRejection maps a validator sentinel onto the public enum,
+// reporting whether the error was recognized at all.
+//
+// It is exported because the unrecognized-error branch is unreachable through the
+// keeper: the validator is a concrete rule, not an injectable interface, so no
+// fixture can make it return an error outside its own sentinel set. The branch
+// still has to be proven — it is what keeps a sentinel added upstream later from
+// landing silently in whichever bucket happened to be nearest.
+var ClassifyEconomicAddressRejection = economicAddressRejectionReason
