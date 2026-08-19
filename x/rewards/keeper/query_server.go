@@ -344,6 +344,12 @@ func epochQueryError(err error) error {
 	switch {
 	case err == nil:
 		return nil
+	case errors.Is(err, types.ErrEpochBeyondProjectionHorizon):
+		// OutOfRange, not NotFound: the epoch was not looked for and found
+		// missing, it was past the range this query will compute. A consumer can
+		// act on that — ask about a nearer epoch — where NotFound would tell it
+		// to stop.
+		return status.Error(codes.OutOfRange, err.Error())
 	case errors.Is(err, types.ErrEpochConfigNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, types.ErrInvalidState):
