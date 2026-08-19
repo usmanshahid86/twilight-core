@@ -48,6 +48,7 @@ Consensus/economic changes must also pass the local end-to-end checks:
 ```bash
 make localnet-smoke           # 4-node localnet sanity
 make localnet-rewards-epoch-smoke  # rewards epoch finalization + entitlements
+make localnet-settlement-smoke     # settlement money-movement proof (real payouts)
 make drills                   # lifecycle + restart-rotation + quorum chaos drills
 ```
 
