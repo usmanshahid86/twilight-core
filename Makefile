@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -53,6 +53,12 @@ localnet-smoke:
 
 localnet-rewards-epoch-smoke:
 	./scripts/localnet/rewards-smoke.sh
+
+# The definitive POC1 money-movement proof: real signed settlement transactions on
+# a four-node localnet, across more than one epoch. This is the run that shows the
+# chain paying participants, and it replaces the retired claim smoke in that role.
+localnet-settlement-smoke:
+	./scripts/localnet/settlement-smoke.sh
 
 # Retained under its historical name so existing invocations keep working. It is
 # NOT a money-movement gate: V2 release is keeper-only until Settlement, so no

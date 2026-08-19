@@ -18,8 +18,8 @@ set -euo pipefail
 # simply does not do it. It closes an epoch and checks the obligations that
 # creates; it submits no settlement chunk.
 #
-# The money-movement proof belongs to the Settlement acceptance run, which drives
-# those transactions end to end. Do not extend this script into that role: the two
+# The money-movement proof belongs to scripts/localnet/settlement-smoke.sh
+# (`make localnet-settlement-smoke`), which drives those transactions end to end. Do not extend this script into that role: the two
 # prove different things, and an epoch/entitlement proof that also moved value
 # would no longer isolate which half had failed.
 
