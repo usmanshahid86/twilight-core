@@ -25,6 +25,13 @@ Base URL in examples: `REST=http://localhost:1317`.
 | `SupplySchedule` | `/twilight/rewards/v1/supply-schedule` | — | `QuerySupplyScheduleResponse` | `curl $REST/twilight/rewards/v1/supply-schedule` | 200 |
 | `CurrentEpochActiveBlocks` | `/twilight/rewards/v1/current-epoch/active-blocks` | `pagination.*` (query) | `QueryCurrentEpochActiveBlocksResponse` | `curl $REST/twilight/rewards/v1/current-epoch/active-blocks` | 200 |
 | `ModuleBalances` | `/twilight/rewards/v1/module-balances` | — | `QueryModuleBalancesResponse` | `curl $REST/twilight/rewards/v1/module-balances` | 200 |
+| `EpochBoundaries` | `/twilight/rewards/v1/epochs/{epoch_number}/boundaries` | `epoch_number` (path, uint64) | `QueryEpochBoundariesResponse` | `curl $REST/twilight/rewards/v1/epochs/1/boundaries` | 200 |
+| `SlotEntitlement` | `/twilight/rewards/v1/slots/{slot_id}/entitlements/{epoch}` | `slot_id`, `epoch` (path, uint64) | `QuerySlotEntitlementResponse` | `curl $REST/twilight/rewards/v1/slots/1/entitlements/1` | 200; 404 if none |
+| `SlotEntitlementsByEpoch` | `/twilight/rewards/v1/epochs/{epoch}/entitlements` | `epoch` (path, uint64); `pagination.*` (query) | `QuerySlotEntitlementsByEpochResponse` | `curl $REST/twilight/rewards/v1/epochs/1/entitlements` | 200 |
+| `RewardsPauseState` | `/twilight/rewards/v1/pause-state` | — | `QueryRewardsPauseStateResponse` | `curl $REST/twilight/rewards/v1/pause-state` | 200 |
+| `EpochConfigVersions` | `/twilight/rewards/v1/epoch-config-versions` | `pagination.*`, `scheduled_start_epoch`, `scheduled_limit` (query) | `QueryEpochConfigVersionsResponse` | `curl $REST/twilight/rewards/v1/epoch-config-versions` | 200 |
+| `RewardConfigVersions` | `/twilight/rewards/v1/reward-config-versions` | `pagination.*` (query) | `QueryRewardConfigVersionsResponse` | `curl $REST/twilight/rewards/v1/reward-config-versions` | 200 |
+| `RewardConfigVersion` | `/twilight/rewards/v1/reward-config-version` | `version` **or** `effective_epoch` (query, uint64) | `QueryRewardConfigVersionResponse` | `curl "$REST/twilight/rewards/v1/reward-config-version?version=1"` | 200; 404 if no such version |
 
 ## x/coreslot — `twilight.coreslot.v1.Query`
 
@@ -40,6 +47,9 @@ Base URL in examples: `REST=http://localhost:1317`.
 | `LastAppliedValidators` | `/twilight/coreslot/v1/last-applied-validators` | — | `QueryLastAppliedValidatorsResponse` | `curl $REST/twilight/coreslot/v1/last-applied-validators` | 200 |
 | `ReservedConsensusAddress` | `/twilight/coreslot/v1/reserved-consensus-address/{consensus_address}` | `consensus_address` (path) | `QueryReservedConsensusAddressResponse` | `curl $REST/twilight/coreslot/v1/reserved-consensus-address/<addr>` | 200; 404 if none |
 | `RewardWeight` | `/twilight/coreslot/v1/slots/{slot_id}/reward-weight` | `slot_id` (path, uint64) | `QueryRewardWeightResponse` | `curl $REST/twilight/coreslot/v1/slots/1/reward-weight` | 200 |
+| `SelectionPolicy` | `/twilight/coreslot/v1/slots/{slot_id}/selection-policy` | `slot_id` (path, uint64) | `QuerySelectionPolicyResponse` | `curl $REST/twilight/coreslot/v1/slots/1/selection-policy` | 200; 404 if none |
+| `SelectionPolicyVersion` | `/twilight/coreslot/v1/slots/{slot_id}/selection-policy/version/{policy_version}` | `slot_id`, `policy_version` (path, uint64) | `QuerySelectionPolicyResponse` | `curl $REST/twilight/coreslot/v1/slots/1/selection-policy/version/1` | 200; 404 if none |
+| `SelectionPolicyAtHeight` | `/twilight/coreslot/v1/slots/{slot_id}/selection-policy/height/{at_height}` | `slot_id`, `at_height` (path) | `QuerySelectionPolicyResponse` | `curl $REST/twilight/coreslot/v1/slots/1/selection-policy/height/100` | 200; 404 if none |
 
 ## x/mining — `twilight.mining.v1.Query`
 

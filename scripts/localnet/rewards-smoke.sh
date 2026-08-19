@@ -10,11 +10,18 @@ set -euo pipefail
 #
 # THIS IS NOT A MONEY-MOVEMENT PROOF, and it deliberately no longer claims to be.
 #
-# V2 finalization creates SlotEntitlements, and the only way value leaves rewards
-# escrow is the constrained keeper API, which has no transaction, no CLI, and no
-# public surface by design. There is therefore no public payout a localnet can
-# submit at this stage. The definitive public money-moving proof arrives with
-# Settlement, which calls that API.
+# V2 finalization creates SlotEntitlements. Value leaves rewards escrow only
+# through the constrained keeper API, and the authorized caller of that API is
+# x/mining Settlement: `MsgSubmitSettlementChunk` releases participant value and
+# `MsgFinalizeSettlement` releases the operator remainder. Both are submittable
+# from a node, so a public payout IS reachable on a localnet now — this script
+# simply does not do it. It closes an epoch and checks the obligations that
+# creates; it submits no settlement chunk.
+#
+# The money-movement proof belongs to the Settlement acceptance run, which drives
+# those transactions end to end. Do not extend this script into that role: the two
+# prove different things, and an epoch/entitlement proof that also moved value
+# would no longer isolate which half had failed.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${BIN:-$ROOT/build/twilightd}"
