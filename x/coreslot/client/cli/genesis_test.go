@@ -274,3 +274,136 @@ func readTestGenesis(t *testing.T, configDir string) (map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(doc["app_state"], &state))
 	return doc, state
 }
+
+// TestGenesisCLIPreservesExistingValidators is the incremental-build property.
+//
+// A genesis is assembled one `add` at a time, and each call rewrites the whole
+// CometBFT validators array. So every call must first READ what is there. It
+// previously discarded that decode error, which meant a malformed array silently
+// produced a single-entry result — the operators added before it simply gone, in a
+// document nobody re-reads before launch.
+func TestGenesisCLIPreservesExistingValidators(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, "config")
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
+
+	cdc := testCodec(t)
+	authority, emergency, operator, payout, settlement := testAddresses()
+	writeTestGenesis(t, configDir, cdc, types.DefaultGenesis(authority, emergency), `"1"`)
+
+	// Two operators, added one after the other, as a real genesis is built.
+	firstKey := testConsensusKeyB64()
+	secondRaw := make([]byte, sdked25519.PubKeySize)
+	secondRaw[0] = 11
+	secondKey := base64.StdEncoding.EncodeToString(secondRaw)
+
+	require.NoError(t, runCLI(t, addGenesisSlotCmd(), home, cdc,
+		operator, payout, settlement, firstKey, "node0"))
+	require.NoError(t, runCLI(t, addGenesisSlotCmd(), home, cdc,
+		sdk.AccAddress(append([]byte{6}, make([]byte, 19)...)).String(),
+		payout, settlement, secondKey, "node1"))
+
+	doc, state := readTestGenesis(t, configDir)
+
+	var validators []genesisValidator
+	require.NoError(t, json.Unmarshal(doc["validators"], &validators))
+	require.Len(t, validators, 2, "the second add must not discard the first validator")
+	require.Equal(t, firstKey, validators[0].PubKey.Value)
+	require.Equal(t, "node0", validators[0].Name)
+	require.Equal(t, secondKey, validators[1].PubKey.Value)
+	require.Equal(t, "node1", validators[1].Name)
+
+	// The module state must agree: two slots, and the document still boots.
+	var genesis types.GenesisState
+	require.NoError(t, cdc.UnmarshalJSON(state[types.ModuleName], &genesis))
+	require.Len(t, genesis.Slots, 2)
+	require.NoError(t, genesis.Validate())
+}
+
+// TestGenesisCLIRefusesUnreadableValidators covers the case the discarded error
+// used to swallow.
+//
+// Refusing is the only safe answer. The command cannot append to a list it cannot
+// read, and writing the append anyway destroys whatever the malformed value stood
+// for — silently, into the one file that has no earlier version to restore from.
+func TestGenesisCLIRefusesUnreadableValidators(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, "config")
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
+
+	cdc := testCodec(t)
+	authority, emergency, operator, payout, settlement := testAddresses()
+	writeTestGenesis(t, configDir, cdc, types.DefaultGenesis(authority, emergency), `"1"`)
+
+	// A validators value that is present and undecodable, as a hand-edited or
+	// half-written genesis would leave it.
+	path := filepath.Join(configDir, "genesis.json")
+	bz, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(bz, &doc))
+	doc["validators"] = json.RawMessage(`{"not":"an array"}`)
+	bz, err = json.Marshal(doc)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, bz, 0o600))
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	err = runCLI(t, addGenesisSlotCmd(), home, cdc,
+		operator, payout, settlement, testConsensusKeyB64(), testMoniker)
+	require.Error(t, err, "an unreadable validators array must not be appended to")
+	require.ErrorContains(t, err, "unreadable")
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, before, after, "a refused add must leave the document untouched")
+}
+
+// TestGenesisCLIToleratesAnAbsentValidatorsKey keeps the first add working.
+//
+// Absence is not corruption: the very first add legitimately finds no validators
+// array, and a fix that refused it would break authoring a genesis from scratch —
+// which is the only way one is ever authored.
+func TestGenesisCLIToleratesAnAbsentValidatorsKey(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, "config")
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
+
+	cdc := testCodec(t)
+	authority, emergency, operator, payout, settlement := testAddresses()
+	writeTestGenesis(t, configDir, cdc, types.DefaultGenesis(authority, emergency), `"1"`)
+
+	path := filepath.Join(configDir, "genesis.json")
+	bz, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var doc map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(bz, &doc))
+
+	for name, value := range map[string]json.RawMessage{
+		"key absent": nil,
+		"json null":  json.RawMessage(`null`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			fresh := map[string]json.RawMessage{}
+			for k, v := range doc {
+				fresh[k] = v
+			}
+			if value == nil {
+				delete(fresh, "validators")
+			} else {
+				fresh["validators"] = value
+			}
+			out, err := json.Marshal(fresh)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, out, 0o600))
+
+			require.NoError(t, runCLI(t, addGenesisSlotCmd(), home, cdc,
+				operator, payout, settlement, testConsensusKeyB64(), testMoniker))
+
+			written, _ := readTestGenesis(t, configDir)
+			var validators []genesisValidator
+			require.NoError(t, json.Unmarshal(written["validators"], &validators))
+			require.Len(t, validators, 1)
+		})
+	}
+}
