@@ -65,9 +65,12 @@ localnet-settlement-smoke:
 # public payout exists for a localnet to submit.
 localnet-rewards-smoke: localnet-rewards-epoch-smoke
 
-# Soak harness: runs the four-node rewards localnet for SOAK_DURATION seconds with
-# continuous determinism/accounting assertions + periodic claim/pause/param/restart
-# drills. Env-tunable (SOAK_DURATION, EPOCH_LENGTH, PREMINE, CHAOS, ...). See
+# Soak harness: runs the four-node rewards localnet until SOAK_EPOCHS epochs have
+# closed (default 3) with continuous determinism/accounting assertions + periodic
+# pause/param/restart drills. Sized in EPOCHS, not seconds: the ratified 360-block
+# minimum epoch takes minutes on a localnet, and a seconds-based budget could finish
+# without closing one — proving nothing while reporting success.
+# Env-tunable (SOAK_EPOCHS, SOAK_DURATION as a safety cap, EPOCH_LENGTH, PREMINE, CHAOS, ...). See
 # docs/research/x-rewards-soak-harness-design.md.
 localnet-rewards-soak:
 	./scripts/localnet/rewards-soak.sh

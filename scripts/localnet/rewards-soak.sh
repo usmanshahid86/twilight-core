@@ -3,8 +3,8 @@ set -uo pipefail
 
 # x/rewards soak harness.
 #
-# Runs the four-node localnet for SOAK_DURATION seconds with a short rewards
-# epoch, continuously asserting determinism + accounting at every epoch boundary,
+# Runs the four-node localnet until SOAK_EPOCHS epochs have closed (default 3),
+# continuously asserting determinism + accounting at every epoch boundary,
 # and periodically exercising an authority param update, an emergency
 # pause/resume, and a node restart. Emits soak.log + soak-summary.md under $NET.
 #
@@ -21,7 +21,16 @@ NET="${TWILIGHT_LOCALNET_HOME:-/tmp/twilight-rewards-soak}"
 CHAIN_ID="${CHAIN_ID:-twilight-rewards-soak-1}"
 NODE_COUNT=4
 
-SOAK_DURATION="${SOAK_DURATION:-240}"
+# How much soak is enough is a question about EPOCHS, not seconds. The ratified
+# minimum epoch is 360 blocks and a four-node localnet commits a block roughly every
+# 0.3-0.5s, so an epoch is two to three minutes of wall clock — and the old
+# 240-second default could not finalize even one. A run that observes no epoch
+# boundary exercises none of the accounting below.
+SOAK_EPOCHS="${SOAK_EPOCHS:-3}"
+# Seconds are now only a SAFETY CAP: the run stops as soon as SOAK_EPOCHS epochs
+# have closed. The budget is deliberately generous (1s per block) because a slow
+# host should extend the run, not silently truncate what it proves.
+SOAK_DURATION="${SOAK_DURATION:-$(( SOAK_EPOCHS * ${EPOCH_LENGTH:-360} + 300 ))}"
 # The epoch length must sit inside the ratified immutable interval
 # [360, 720]; genesis refuses anything outside it. These localnets therefore run
 # a fast block time instead of a short epoch — block time is node-local
@@ -203,7 +212,7 @@ operator0="$(jq -r '.address' "$NET/operator0.json")"  # slot 1 payout + authori
 operator1="$(jq -r '.address' "$NET/operator1.json")"  # emergency authority
 
 [[ "$RESUME" == "on" ]] && phase="resume" || phase="start"
-log "soak $phase: duration=${SOAK_DURATION}s epoch_length=$EPOCH_LENGTH premine=$PREMINE emission/epoch=$EPOCH_EMISSION per_slot=$PER_SLOT"
+log "soak $phase: target=${SOAK_EPOCHS} epoch(s) cap=${SOAK_DURATION}s epoch_length=$EPOCH_LENGTH premine=$PREMINE emission/epoch=$EPOCH_EMISSION per_slot=$PER_SLOT"
 "$ROOT/scripts/localnet/start.sh"
 trap '"$ROOT/scripts/localnet/stop.sh" >/dev/null 2>&1 || true' EXIT
 
@@ -260,6 +269,10 @@ while (( SECONDS - START < SOAK_DURATION )); do
   fi
 
   epoch="$(current_epoch)"
+  if (( epoch - INIT_EPOCH >= SOAK_EPOCHS )); then
+    log "target reached: $SOAK_EPOCHS epoch(s) closed since start"
+    break
+  fi
   (( epoch <= prev_epoch )) && continue
   # Epoch advanced: epoch-1 just finalized. (handle multi-advance by looping)
   while (( prev_epoch < epoch )); do
@@ -388,7 +401,16 @@ if [[ -s "$EXPORT" ]]; then
 fi
 
 # Disk-growth rate + linear projections (state is never pruned).
-epochs_session=$(( ex_epoch - INIT_EPOCH )); (( epochs_session < 1 )) && epochs_session=1
+# Growth per epoch is only meaningful once epochs have actually closed. Clamping a
+# zero to one used to turn "nothing was observed" into a per-epoch rate and a
+# multi-gigabyte weekly projection — a fabricated number in the shape of a
+# measurement, which is exactly what a capacity plan would then be built on.
+epochs_session=$(( ex_epoch - INIT_EPOCH ))
+PROJECTION_VALID=1
+if (( epochs_session < 1 )); then
+  PROJECTION_VALID=0
+  epochs_session=1
+fi
 elapsed=$(( SECONDS - INIT_TS )); (( elapsed < 1 )) && elapsed=1
 grow_kb=$(( final_db - INIT_DB_KB )); (( grow_kb < 0 )) && grow_kb=0
 bytes_per_epoch=$(( grow_kb * 1024 / epochs_session ))
@@ -400,6 +422,14 @@ proj_7d=$(( bytes_per_epoch * epochs_per_hour * 168 ))
 # ---------------------------------------------------------------------------
 # Final verdict
 # ---------------------------------------------------------------------------
+# A run that closed fewer epochs than it set out to has not exercised the accounting
+# below: with no epoch boundary, "cumulative == 0" and "module balance == 0" hold on
+# an idle chain and the run reports success having observed nothing. That is a worse
+# outcome than a failure, because it looks like evidence.
+if (( finalized_count < SOAK_EPOCHS )); then
+  record_fail "closed $finalized_count epoch(s), target $SOAK_EPOCHS — the accounting assertions never ran"
+fi
+
 VERDICT="PASS"
 (( FAILURES > 0 )) && VERDICT="FAIL"
 (( HALTED == 1 )) && VERDICT="FAIL (HALT)"
@@ -457,15 +487,24 @@ FinalizedEpochs); production epoch length differs, so scale by
 EOF
 
 log "soak end: verdict=$VERDICT epochs_finalized=$finalized_count carry=${ex_carry} module=${module_bal} cumulative=${ex_cum} supply=${total_supply} failures=$FAILURES halted=$HALTED"
-log "disk: ${grow_kb}KB/${epochs_session}ep -> $(human "$bytes_per_epoch")/epoch; proj 24h=$(human "$proj_24h") 48h=$(human "$proj_48h") 7d=$(human "$proj_7d")"
+if (( PROJECTION_VALID == 1 )); then
+  log "disk: ${grow_kb}KB/${epochs_session}ep -> $(human "$bytes_per_epoch")/epoch; proj 24h=$(human "$proj_24h") 48h=$(human "$proj_48h") 7d=$(human "$proj_7d")"
+else
+  log "disk: no epoch closed during this run — growth rate and projections withheld (would be extrapolated from nothing)"
+fi
 echo
 echo "==================== SOAK $VERDICT ===================="
 echo "  finalized epochs : $finalized_count"
 echo "  module balance   : ${module_bal}utwlt   carry: ${ex_carry}"
 echo "  cumulative       : ${ex_cum}utwlt   supply: ${total_supply}utwlt"
 echo "  assertion fails  : $FAILURES    halt: $HALTED"
-echo "  DB node0         : $(human $(( final_db * 1024 )))   $(human "$bytes_per_epoch")/epoch"
-echo "  proj growth      : 24h $(human "$proj_24h") | 48h $(human "$proj_48h") | 7d $(human "$proj_7d")"
+if (( PROJECTION_VALID == 1 )); then
+  echo "  DB node0         : $(human $(( final_db * 1024 )))   $(human "$bytes_per_epoch")/epoch over $epochs_session epoch(s)"
+  echo "  proj growth      : 24h $(human "$proj_24h") | 48h $(human "$proj_48h") | 7d $(human "$proj_7d")"
+else
+  echo "  DB node0         : $(human $(( final_db * 1024 )))   (per-epoch rate unavailable)"
+  echo "  proj growth      : withheld — no epoch closed, nothing to extrapolate from"
+fi
 echo "  artifacts        : $FINAL_REPORT | $EXPORT"
 echo "======================================================="
 [[ "$VERDICT" == "PASS" ]]

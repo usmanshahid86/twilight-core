@@ -104,6 +104,18 @@ check_custom /twilight/rewards/v1/supply-schedule
 check_custom /twilight/rewards/v1/module-balances
 check_custom /twilight/rewards/v1/current-epoch/active-blocks
 check_custom /twilight/rewards/v1/epochs/1
+# The obligation surface a settlement consumer reconciles against. A fresh chain may
+# hold no entitlement yet, and 404 is a wired route answering "absent" — which is
+# exactly what check_custom accepts and 501 is not.
+check_custom /twilight/rewards/v1/epochs/1/boundaries
+check_custom /twilight/rewards/v1/epochs/1/entitlements
+check_custom /twilight/rewards/v1/slots/1/entitlements/1
+check_custom /twilight/rewards/v1/pause-state
+# Configuration histories. reward-config-version takes its selector as a QUERY
+# parameter, not a path segment.
+check_custom /twilight/rewards/v1/epoch-config-versions
+check_custom /twilight/rewards/v1/reward-config-versions
+check_custom "/twilight/rewards/v1/reward-config-version?version=1"
 # Retired with the legacy claim path: both were claim-record-backed.
 check_retired /twilight/rewards/v1/slots/1/rewards
 check_retired "/twilight/rewards/v1/slots/1/claimable?start_epoch=1&end_epoch=1"
@@ -115,6 +127,11 @@ check_custom /twilight/coreslot/v1/slots
 check_custom /twilight/coreslot/v1/active-slots
 check_custom /twilight/coreslot/v1/slots/1
 check_custom /twilight/coreslot/v1/slots/1/reward-weight
+# Selection policy, including its two historical selectors. POC1 runs no Selection,
+# but the routes are served and a consumer reading policy history will call them.
+check_custom /twilight/coreslot/v1/slots/1/selection-policy
+check_custom /twilight/coreslot/v1/slots/1/selection-policy/version/1
+check_custom /twilight/coreslot/v1/slots/1/selection-policy/height/1
 check_custom /twilight/coreslot/v1/pending-key-rotations
 check_custom /twilight/coreslot/v1/last-applied-validators
 
@@ -146,6 +163,32 @@ if [[ -n "${RESERVED_CONS_HEX:-}" ]]; then
 else
   printf '  skip  ReservedConsensusAddress (set RESERVED_CONS_HEX to a known reserved hex address)\n'
 fi
+
+echo
+echo "-- x/mining REST --"
+# The settlement surface. It was served from the observability gate onward and this
+# smoke never touched it, so every route here is newly covered rather than
+# re-verified. A settlement only exists once an epoch has closed, and this smoke
+# runs against a young chain — so 404 is the expected answer for the keyed routes
+# and is accepted: check_custom is asking whether the gateway serves the route at
+# all, which 501 would deny.
+check_custom /twilight/mining/v1/settlement-clock
+check_custom /twilight/mining/v1/settlements/1/1
+check_custom /twilight/mining/v1/slots/1/open-settlements
+check_custom /twilight/mining/v1/distribution-mode-versions
+check_custom /twilight/mining/v1/distribution-mode-versions/1
+check_custom /twilight/mining/v1/selection-params-versions
+check_custom /twilight/mining/v1/selection-params-versions/1
+check_custom /twilight/mining/v1/settlement-params-versions
+check_custom /twilight/mining/v1/settlement-params-versions/1
+# The AS consumer read contract. The address route takes a QUERY parameter rather
+# than a path segment, deliberately: a gateway path segment must be non-empty to
+# match, and the empty address is a successful domain rejection this chain must be
+# able to express. Both spellings of "no address" are probed for that reason.
+check_custom /twilight/mining/v1/target-epochs/1
+check_custom "/twilight/mining/v1/economic-address?address=twilight1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu"
+check_custom "/twilight/mining/v1/economic-address?address="
+check_custom /twilight/mining/v1/economic-address
 
 echo
 echo "-- generic chain REST (must be 200) --"
