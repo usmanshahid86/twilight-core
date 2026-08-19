@@ -29,4 +29,16 @@ var (
 	// anchor at epoch 1 governs every target the chain can finalize, so an absent
 	// version means the history is not the history genesis wrote.
 	ErrRewardConfigNotFound = errorsmod.Register(ModuleName, 9, "reward configuration not found")
+
+	// ErrEpochBeyondProjectionHorizon reports an epoch the chain DECLINED to
+	// project, not one it has no configuration for.
+	//
+	// The two are different answers and must not share a sentinel. A configuration
+	// that is absent says something about the chain's history; a horizon says only
+	// that the caller asked further ahead than a bounded query will walk, and the
+	// same question inside the horizon would be answered. Collapsing them tells a
+	// consumer a far-future epoch has no configuration, which it would reasonably
+	// read as "nothing scheduled" and act on.
+	ErrEpochBeyondProjectionHorizon = errorsmod.Register(
+		ModuleName, 10, "epoch lies beyond the supported projection horizon")
 )

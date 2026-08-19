@@ -326,9 +326,15 @@ func TestScheduledEpochConfigProjection(t *testing.T) {
 		require.Equal(t, uint64(1121), start)
 	})
 
+	// The horizon is a refusal to walk, not a statement about the chain's history,
+	// and it carries its own sentinel for that reason. Sharing one with absence
+	// would tell a caller a far-future epoch has no configuration when the truth
+	// is only that this query declined to project that far.
 	t.Run("beyond the horizon is refused, never clamped", func(t *testing.T) {
 		_, err := k.ProjectEpochStartHeight(ctx, 10_000, 5)
-		require.ErrorIs(t, err, types.ErrEpochConfigNotFound)
+		require.ErrorIs(t, err, types.ErrEpochBeyondProjectionHorizon)
+		require.NotErrorIs(t, err, types.ErrEpochConfigNotFound,
+			"a horizon must not be reported as an absent configuration")
 	})
 
 	t.Run("an inadmissible scheduled length is refused, not projected", func(t *testing.T) {

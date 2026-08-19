@@ -117,6 +117,38 @@ func TestQueriesClassifyAbsenceAsNotFound(t *testing.T) {
 	}
 }
 
+// TestARefusalToComputeIsNotAnAbsence covers the fourth answer, which exists
+// because two conditions previously shared one code.
+//
+// EpochBoundaries projects forward by walking the schedule, and it stops after a
+// bounded number of steps. That refusal used to arrive as NotFound, identical to
+// an epoch whose configuration genuinely does not exist — so a consumer asking
+// about a far-future epoch was told the epoch had no configuration when the truth
+// was that the chain declined to look. OutOfRange says the difference: the
+// question was answerable, just not that far ahead.
+func TestARefusalToComputeIsNotAnAbsence(t *testing.T) {
+	chain := bootPinnedChain(t)
+	chain.commitThrough(t, 3)
+	querier := newHeaderQuerier(chain.app)
+
+	beyond := classificationCase{
+		name:   "rewards epoch beyond the projection horizon",
+		method: "/twilight.rewards.v1.Query/EpochBoundaries",
+		req:    &rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 100_000_000},
+		want:   codes.OutOfRange,
+	}
+	require.Equal(t, codes.OutOfRange, classify(t, querier, beyond),
+		"a bounded projection that refused to walk is not a missing configuration")
+
+	// And the distinction is only meaningful if a reachable epoch still answers,
+	// so the horizon is a horizon rather than a blanket refusal.
+	var near rewardstypes.QueryEpochBoundariesResponse
+	queryAtHeight(t, chain.app, "/twilight.rewards.v1.Query/EpochBoundaries",
+		&rewardstypes.QueryEpochBoundariesRequest{EpochNumber: 2}, &near, chain.head)
+	require.Equal(t, uint64(2), near.EpochNumber)
+	require.NotZero(t, near.StartHeight)
+}
+
 // TestQueriesClassifyMalformedRequestsAsInvalidArgument covers the arm that is
 // about the CALLER rather than the chain.
 //

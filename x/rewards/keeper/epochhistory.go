@@ -271,7 +271,11 @@ func (k Keeper) ProjectEpochStartHeight(ctx context.Context, epoch, maxSteps uin
 
 	for steps := uint64(0); cursor < epoch; steps++ {
 		if steps >= maxSteps {
-			return 0, types.ErrEpochConfigNotFound.Wrapf(
+			// Not ErrEpochConfigNotFound: the walk was refused, not exhausted. The
+			// epoch may well have a configuration — this query simply will not
+			// walk far enough to find out, and saying "not found" would answer a
+			// question about the chain's history that was never asked.
+			return 0, types.ErrEpochBeyondProjectionHorizon.Wrapf(
 				"epoch %d lies beyond the supported projection horizon of %d scheduled steps",
 				epoch, maxSteps)
 		}
