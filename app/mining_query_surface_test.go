@@ -1,15 +1,22 @@
 package app_test
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/cosmos/gogoproto/proto"
 	descriptorpb "github.com/cosmos/gogoproto/protoc-gen-gogo/descriptor"
+	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/twilight-project/twilight-core/app/openapi"
+	miningtypes "github.com/twilight-project/twilight-core/x/mining/types"
 )
 
 // The consumer read contract has to exist on every surface it is offered on.
@@ -97,4 +104,56 @@ func TestConsumerQueriesAppearInTheExportedDescriptor(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(manifest), "TargetEpoch")
 	require.NotContains(t, strings.ToLower(string(manifest)), "economicaddress")
+}
+
+// stubQueryClient records the request the gateway built and answers with a canned
+// response. The recording is the point: what needs proving is what the gateway
+// makes of a URL, not that a handler exists behind it.
+type stubQueryClient struct {
+	miningtypes.QueryClient
+
+	address string
+}
+
+func (s *stubQueryClient) ValidateEconomicAddress(
+	_ context.Context, req *miningtypes.QueryValidateEconomicAddressRequest, _ ...grpc.CallOption,
+) (*miningtypes.QueryValidateEconomicAddressResponse, error) {
+	s.address = req.Address
+	return &miningtypes.QueryValidateEconomicAddressResponse{}, nil
+}
+
+// TestTheAddressRouteExpressesTheEmptyAddressOverRest exercises the claim the
+// query-parameter form was chosen for.
+//
+// An empty address is a successful domain rejection, so it has to be askable on
+// every surface the query is offered on. A path-segment route could not express it
+// at all — a gateway path segment must be non-empty to match its pattern — so REST
+// would answer strictly fewer cases than gRPC and the CLI. Both REST spellings of
+// "no address" are driven here against the real generated gateway.
+func TestTheAddressRouteExpressesTheEmptyAddressOverRest(t *testing.T) {
+	const route = "/twilight/mining/v1/economic-address"
+
+	for name, target := range map[string]string{
+		"the parameter is omitted entirely":  route,
+		"the parameter is present and empty": route + "?address=",
+		"an ordinary address":                route + "?address=cosmos1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu",
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := &stubQueryClient{}
+			mux := runtime.NewServeMux()
+			require.NoError(t, miningtypes.RegisterQueryHandlerClient(context.Background(), mux, client))
+
+			recorder := httptest.NewRecorder()
+			mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+
+			require.Equal(t, http.StatusOK, recorder.Code,
+				"every enumerated case must reach the handler over REST")
+			expected := ""
+			if parsed, err := url.Parse(target); err == nil {
+				expected = parsed.Query().Get("address")
+			}
+			require.Equal(t, expected, client.address,
+				"the gateway must hand the handler exactly the address the URL carried")
+		})
+	}
 }
