@@ -66,18 +66,94 @@ func policyQueryError(err error) error {
 	}
 }
 
+// lookupError maps a keyed read onto the public query contract.
+//
+// Absence is an ordinary answer for a caller that asked after a specific slot,
+// address or weight, and must arrive as NotFound — a REST 404 rather than a
+// server error. Anything else means the key IS there and the stored bytes could
+// not be read, which is categorically different and stays Internal: telling a
+// caller a slot does not exist when the database holding it is broken is the one
+// answer a read surface must never give.
+//
+// An error that already carries a transport code keeps it. A canceled or
+// timed-out query is not chain corruption, and flattening it into Internal would
+// report a client disconnect as a fault of this module.
+func lookupError(subject string, err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, types.ErrSlotNotFound),
+		errors.Is(err, types.ErrSelectionPolicyNotFound),
+		errors.Is(err, collections.ErrNotFound):
+		return grpcStatusError{code: codes.NotFound, err: types.ErrSlotNotFound.Wrap(subject)}
+	case carriesTransportCode(err):
+		return err
+	default:
+		return grpcStatusError{
+			code: codes.Internal,
+			err:  fmt.Errorf("coreslot %s could not be read: %w", subject, err),
+		}
+	}
+}
+
+// mandatoryStateError maps a read of state every initialized chain has.
+//
+// The difference from lookupError is the absence case, and it inverts. Params,
+// the ACTIVE membership index, the rotation queue and the last-applied set are
+// written by InitGenesis and maintained by consensus; nobody asked after a
+// particular object, so there is no object whose absence is an answer. A missing
+// or unreadable one means the chain is damaged, and a caller told NotFound would
+// reasonably read it as "nothing configured yet" and carry on — which is exactly
+// the wrong response to a chain that cannot describe itself.
+func mandatoryStateError(subject string, err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case carriesTransportCode(err):
+		return err
+	default:
+		return grpcStatusError{
+			code: codes.Internal,
+			err:  fmt.Errorf("coreslot %s could not be read: %w", subject, err),
+		}
+	}
+}
+
+// carriesTransportCode reports whether an error already names its own gRPC code,
+// either because a mapper here classified it or because the transport produced
+// it. Such an error is passed through untouched rather than reclassified.
+func carriesTransportCode(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var withStatus interface{ GRPCStatus() *grpcstatus.Status }
+	return errors.As(err, &withStatus)
+}
+
 type queryServer struct{ Keeper }
 
 func NewQueryServer(k Keeper) types.QueryServer { return queryServer{Keeper: k} }
 
 func (q queryServer) Params(ctx context.Context, _ *types.QueryParamsRequest) (*types.QueryParamsResponse, error) {
 	params, err := q.Keeper.Params.Get(ctx)
-	return &types.QueryParamsResponse{Params: &params}, err
+	if err != nil {
+		return nil, mandatoryStateError("params", err)
+	}
+	return &types.QueryParamsResponse{Params: &params}, nil
 }
 
 func (q queryServer) CoreSlot(ctx context.Context, req *types.QueryCoreSlotRequest) (*types.QueryCoreSlotResponse, error) {
+	if req == nil {
+		return nil, grpcStatusError{code: codes.InvalidArgument, err: fmt.Errorf("a request is required")}
+	}
 	slot, err := q.getSlot(ctx, req.SlotId)
-	return &types.QueryCoreSlotResponse{Slot: &slot}, err
+	if err != nil {
+		// No response body on the error path. Returning one hands a client a
+		// zero-valued CoreSlot with slot_id 0 next to the error, and a caller
+		// reading the body first cannot tell that from a real answer.
+		return nil, lookupError(fmt.Sprintf("slot %d", req.SlotId), err)
+	}
+	return &types.QueryCoreSlotResponse{Slot: &slot}, nil
 }
 
 func (q queryServer) CoreSlots(ctx context.Context, req *types.QueryCoreSlotsRequest) (*types.QueryCoreSlotsResponse, error) {
@@ -101,7 +177,7 @@ func (q queryServer) CoreSlots(ctx context.Context, req *types.QueryCoreSlotsReq
 		},
 	)
 	if err != nil {
-		return nil, err
+		return nil, mandatoryStateError("the slot collection", err)
 	}
 	return &types.QueryCoreSlotsResponse{Slots: slots, Pagination: pageRes}, nil
 }
@@ -122,7 +198,7 @@ func (q queryServer) CoreSlots(ctx context.Context, req *types.QueryCoreSlotsReq
 func (q queryServer) ActiveCoreSlots(ctx context.Context, _ *types.QueryActiveCoreSlotsRequest) (*types.QueryCoreSlotsResponse, error) {
 	slots, err := q.GetActiveSlots(ctx)
 	if err != nil {
-		return nil, err
+		return nil, mandatoryStateError("the active membership index", err)
 	}
 	resp := &types.QueryCoreSlotsResponse{Slots: make([]*types.CoreSlot, 0, len(slots))}
 	for i := range slots {
@@ -162,7 +238,13 @@ func (q queryServer) CoreSlotByOperator(ctx context.Context, req *types.QueryCor
 func (q queryServer) CoreSlotByConsensusAddress(ctx context.Context, req *types.QueryCoreSlotByConsensusAddressRequest) (*types.QueryCoreSlotResponse, error) {
 	raw, err := hex.DecodeString(req.ConsensusAddress)
 	if err != nil {
-		return nil, err
+		// Malformed input is the caller's defect, not absence and not corruption.
+		// It is the third arm of the contract and the only one this module was
+		// missing entirely.
+		return nil, grpcStatusError{
+			code: codes.InvalidArgument,
+			err:  fmt.Errorf("consensus address %q is not hex: %w", req.ConsensusAddress, err),
+		}
 	}
 	key := hex.EncodeToString(raw)
 	id, err := q.ByConsensus.Get(ctx, key)
@@ -179,7 +261,10 @@ func (q queryServer) PendingKeyRotations(ctx context.Context, _ *types.QueryPend
 		resp.Rotations = append(resp.Rotations, &rotationCopy)
 		return false, nil
 	})
-	return resp, err
+	if err != nil {
+		return nil, mandatoryStateError("the pending key-rotation queue", err)
+	}
+	return resp, nil
 }
 
 func (q queryServer) LastAppliedValidators(ctx context.Context, _ *types.QueryLastAppliedValidatorsRequest) (*types.QueryLastAppliedValidatorsResponse, error) {
@@ -189,12 +274,21 @@ func (q queryServer) LastAppliedValidators(ctx context.Context, _ *types.QueryLa
 		resp.Validators = append(resp.Validators, &validatorCopy)
 		return false, nil
 	})
-	return resp, err
+	if err != nil {
+		return nil, mandatoryStateError("the last-applied validator set", err)
+	}
+	return resp, nil
 }
 
 func (q queryServer) ReservedConsensusAddress(ctx context.Context, req *types.QueryReservedConsensusAddressRequest) (*types.QueryReservedConsensusAddressResponse, error) {
+	if req == nil {
+		return nil, grpcStatusError{code: codes.InvalidArgument, err: fmt.Errorf("a request is required")}
+	}
 	reservation, err := q.Reserved.Get(ctx, req.ConsensusAddress)
-	return &types.QueryReservedConsensusAddressResponse{Reservation: &reservation}, err
+	if err != nil {
+		return nil, lookupError(fmt.Sprintf("reservation for consensus address %s", req.ConsensusAddress), err)
+	}
+	return &types.QueryReservedConsensusAddressResponse{Reservation: &reservation}, nil
 }
 
 // SelectionPolicy returns the version a slot currently points at. It resolves
@@ -258,6 +352,12 @@ func (q queryServer) SelectionPolicyAtHeight(ctx context.Context, req *types.Que
 }
 
 func (q queryServer) RewardWeight(ctx context.Context, req *types.QueryRewardWeightRequest) (*types.QueryRewardWeightResponse, error) {
+	if req == nil {
+		return nil, grpcStatusError{code: codes.InvalidArgument, err: fmt.Errorf("a request is required")}
+	}
 	weight, err := q.RewardWeights.Get(ctx, req.SlotId)
-	return &types.QueryRewardWeightResponse{RewardWeight: &weight}, err
+	if err != nil {
+		return nil, lookupError(fmt.Sprintf("reward weight for slot %d", req.SlotId), err)
+	}
+	return &types.QueryRewardWeightResponse{RewardWeight: &weight}, nil
 }
