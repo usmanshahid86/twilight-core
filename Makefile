@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -75,6 +75,11 @@ localnet-validator-growth:
 # plus the guards on the way down and a key rotation with no quorum margin.
 localnet-validator-departures:
 	./scripts/localnet/validator-departures.sh
+
+# The operational playbook: one Slot, a second joins, both earn, and each
+# operator settles its own entitlement alone from its own node.
+localnet-join-and-settle:
+	./scripts/localnet/join-and-settle.sh
 
 # The whole validator-set behaviour study.
 validator-set-study: localnet-quorum-table localnet-validator-growth localnet-validator-departures
