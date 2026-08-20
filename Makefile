@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -65,6 +65,19 @@ localnet-settlement-smoke:
 # docs/testing/quorum-threshold-table.md. No epochs: validator-set mechanics only.
 localnet-quorum-table:
 	./scripts/localnet/quorum-threshold.sh
+
+# A chain that starts at one validator and grows to five, each node syncing
+# before it is admitted to the set. The untested half of node-join.
+localnet-validator-growth:
+	./scripts/localnet/validator-growth.sh
+
+# The four ways a validator leaves — offline, inactivated, suspended, removed —
+# plus the guards on the way down and a key rotation with no quorum margin.
+localnet-validator-departures:
+	./scripts/localnet/validator-departures.sh
+
+# The whole validator-set behaviour study.
+validator-set-study: localnet-quorum-table localnet-validator-growth localnet-validator-departures
 
 # Retained under its historical name so existing invocations keep working. It is
 # NOT a money-movement gate: V2 release is keeper-only until Settlement, so no
