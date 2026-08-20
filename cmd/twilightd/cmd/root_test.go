@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	dbm "github.com/cosmos/cosmos-db"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
 	"cosmossdk.io/log"
@@ -104,4 +105,41 @@ func sortedKeys(genesis map[string]json.RawMessage) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// TestGenesisValidationCoversTheWholeDocument guards the check that was missing.
+//
+// The only genesis validation on the binary was `coreslot-genesis validate`, which
+// unmarshals and validates ONE module's state. Its name suggests more than it
+// does, and an assembly tool that ran it could report success while leaving a
+// document that dies in another module's InitGenesis at `start` — which is exactly
+// what `devnet-up.sh` did, printing its banner and a JOIN.md for a chain that
+// could never open.
+//
+// The SDK ships the whole-document validator; it simply was not registered. This
+// asserts it stays registered, because the failure it prevents is invisible until
+// a node refuses to boot.
+func TestGenesisValidationCoversTheWholeDocument(t *testing.T) {
+	root := cmd.NewRootCmd()
+
+	var found *cobra.Command
+	for _, sub := range root.Commands() {
+		if sub.Name() == "validate" {
+			found = sub
+			break
+		}
+	}
+	require.NotNil(t, found, "a whole-genesis validate command must be registered")
+
+	// The recognizable name has to keep working: scripts and runbooks reach for
+	// `validate-genesis`, which is the SDK's own alias.
+	require.Contains(t, found.Aliases, "validate-genesis")
+
+	// It must not be confusable with the single-module command that caused the
+	// problem — that one stays scoped under its own parent.
+	for _, sub := range root.Commands() {
+		if sub.Name() == "coreslot-genesis" {
+			require.NotEqual(t, sub.Name(), found.Name())
+		}
+	}
 }
