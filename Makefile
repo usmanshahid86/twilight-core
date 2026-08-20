@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -59,6 +59,12 @@ localnet-rewards-epoch-smoke:
 # chain paying participants, and it replaces the retired claim smoke in that role.
 localnet-settlement-smoke:
 	./scripts/localnet/settlement-smoke.sh
+
+# Measures how many validators the chain needs and how many it can lose, by
+# building real sets of each size and degrading them. Writes the table to
+# docs/testing/quorum-threshold-table.md. No epochs: validator-set mechanics only.
+localnet-quorum-table:
+	./scripts/localnet/quorum-threshold.sh
 
 # Retained under its historical name so existing invocations keep working. It is
 # NOT a money-movement gate: V2 release is keeper-only until Settlement, so no
