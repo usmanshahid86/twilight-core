@@ -48,20 +48,53 @@ an oversight. Any upgrade mechanism has to fit that model instead of quietly rep
 
 ## Decision
 
-### 1. Wire `x/upgrade`, authority-gated
-
-```go
-{Name: "upgrade", Config: appconfig.WrapAny(&upgrademodulev1.Module{
-    Authority: AuthorityModuleName,
-})},
-```
+### 1. Wire `x/upgrade`, reached only through the CoreSlot authority
 
 `x/upgrade` defaults its authority to the governance module account, which is why the module
-is often assumed to depend on governance. It does not. Pointing it at the existing authority
-introduces **no new trust assumption**: the same role that admits validators and updates
-parameters schedules upgrades.
+is often assumed to depend on governance. It does not — the authority is configurable. But
+configuring it naively does not work here, and the reason is worth recording because it is
+invisible until an upgrade is attempted.
 
-`MsgCancelUpgrade` is gated identically, so a mistaken plan can be withdrawn before its height.
+The authority this application passes to `auth`, `bank` and `consensus` is
+`AuthorityModuleName`, which is a **module account**. Module addresses are derived from a
+name, so **no private key exists for them**. For those three modules that is harmless:
+their `MsgUpdateParams` is simply unreachable, and their parameters are static. Wiring
+`x/upgrade` the same way would produce an upgrade module to which **no account could ever
+submit a plan** — the keeper fixes its authority at construction, with no setter, and its
+message server compares the signer against that value directly.
+
+The operational authority is not that module account. It is `Params.authority` in
+`x/coreslot` — a genesis-set account address, held by a real key, and rotatable. The
+constraint is that the two cannot see each other: the application configuration is a
+compile-time value, while `Params.authority` is chain state read at run time.
+
+So the upgrade module keeps the keyless module address as its authority, **deliberately**, and
+the only path to it is a proxy:
+
+```
+MsgScheduleUpgrade / MsgCancelUpgrade   (x/coreslot)
+  signer checked against Params.authority
+        |
+        v
+  upgradeKeeper.ScheduleUpgrade(plan) / ClearUpgradePlan(ctx)
+```
+
+This is the same shape governance uses to execute a proposal, and it keeps **one** authority
+concept rather than two. Rotating `Params.authority` rotates who may upgrade, with nothing to
+keep in sync, and the two-step rotation hardening covers the upgrade path for free.
+
+The alternative — compiling a real account address into the binary as the upgrade authority —
+was rejected. It creates a second authority that can drift from the first, sits outside the
+rotation hardening, requires a different binary per network or the same key across networks,
+and can itself only be changed by performing an upgrade.
+
+### 1a. `PreBlockers` must list `upgrade`
+
+`x/upgrade` executes a scheduled plan in **PreBlock**, before any `BeginBlocker`. The runtime
+configuration in this application did not previously set `PreBlockers` at all. Omitting the
+entry is silent and total: plans are still accepted, still stored and still queryable, but
+nothing ever applies them, so the chain runs straight past its own halt height. The upgrade
+drill asserts the halt rather than trusting review to catch this.
 
 ### 2. Do not introduce a governance module
 
