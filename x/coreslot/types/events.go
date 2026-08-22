@@ -16,6 +16,8 @@ const (
 	EventTypeSettlementUpdated      = "coreslot_settlement_updated"
 	EventTypeSelectionPolicyUpdated = "coreslot_selection_policy_updated"
 	EventTypeParamsUpdated          = "coreslot_params_updated"
+	EventTypeUpgradeScheduled       = "coreslot_upgrade_scheduled"
+	EventTypeUpgradeCanceled        = "coreslot_upgrade_canceled"
 	EventTypeValidatorUpdateEmitted = "coreslot_validator_update_emitted"
 	EventTypeRotationCanceled       = "coreslot_rotation_canceled"
 )
@@ -35,6 +37,9 @@ const (
 	AttributeKeyPolicyVersion       = "policy_version"
 	AttributeKeyReason              = "reason"
 	AttributeKeyAuthority           = "authority"
+	AttributeKeyUpgradeName         = "upgrade_name"
+	AttributeKeyUpgradeHeight       = "upgrade_height"
+	AttributeKeyUpgradeInfo         = "upgrade_info"
 )
 
 // Reason values used on coreslot_rotation_canceled.

@@ -27,6 +27,16 @@ type Keeper struct {
 	// keeper DAG is unchanged by holding it.
 	economicAddresses economicaddress.Validator
 
+	// upgrades is the only route from this module to x/upgrade, and the only
+	// route to x/upgrade at all: the upgrade module's own authority is a module
+	// address nobody holds a key for, so its messages are unreachable by design
+	// and this proxy is the whole surface.
+	//
+	// Nil in unit tests that do not exercise the upgrade path. The handlers
+	// refuse rather than dereference it, so a keeper built without one fails
+	// loudly at the message instead of panicking mid-block.
+	upgrades types.UpgradeScheduler
+
 	Schema        collections.Schema
 	Params        collections.Item[types.Params]
 	Slots         collections.Map[uint64, types.CoreSlot]
@@ -69,11 +79,17 @@ type Keeper struct {
 // unconfigured validator rejects every address, so a caller that omits it fails
 // loudly at the first registration rather than silently admitting module
 // accounts as payees.
-func NewKeeper(cdc codec.Codec, storeService storetypes.KVStoreService, economicAddresses economicaddress.Validator) Keeper {
+func NewKeeper(
+	cdc codec.Codec,
+	storeService storetypes.KVStoreService,
+	economicAddresses economicaddress.Validator,
+	upgrades types.UpgradeScheduler,
+) Keeper {
 	sb := collections.NewSchemaBuilder(storeService)
 	k := Keeper{
 		cdc:               cdc,
 		economicAddresses: economicAddresses,
+		upgrades:          upgrades,
 		Params:            collections.NewItem(sb, collections.NewPrefix(types.ParamsKey), "params", codec.CollValue[types.Params](cdc)),
 		Slots:             collections.NewMap(sb, collections.NewPrefix(types.SlotsPrefix), "slots", collections.Uint64Key, codec.CollValue[types.CoreSlot](cdc)),
 		ByOperator:        collections.NewMap(sb, collections.NewPrefix(types.OperatorPrefix), "slot_by_operator", collections.StringKey, collections.Uint64Value),

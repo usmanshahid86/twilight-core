@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strconv"
 
@@ -20,6 +21,7 @@ func GetTxCmd() *cobra.Command {
 	cmd.AddCommand(
 		registerCmd(), activateCmd(), inactivateCmd(), suspendCmd(), removeCmd(), rotateCmd(),
 		updatePayoutCmd(), updateMetadataCmd(), updateSettlementCmd(), updateSelectionPolicyCmd(), updateParamsCmd(),
+		scheduleUpgradeCmd(), cancelUpgradeCmd(),
 	)
 	return cmd
 }
@@ -234,5 +236,46 @@ func updateParamsCmd() *cobra.Command {
 			return err
 		}
 		return broadcast(cmd, &types.MsgUpdateParams{Authority: from, Params: &params})
+	})
+}
+
+// scheduleUpgradeCmd schedules a coordinated halt.
+//
+// It lives under `coreslot` rather than a top-level `upgrade` command because that
+// is where the authority is. The x/upgrade module's own messages are unreachable
+// on this chain by design — its authority is a module address with no private key —
+// so this is the only route to a plan. See ADR-0003.
+func scheduleUpgradeCmd() *cobra.Command {
+	return txCmd("schedule-upgrade [name] [height] [info]", cobra.RangeArgs(2, 3), func(cmd *cobra.Command, args []string) error {
+		from, err := signer(cmd)
+		if err != nil {
+			return err
+		}
+		height, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			return fmt.Errorf("height must be an integer: %w", err)
+		}
+		// The chain refuses a non-future height on its own authority; this refuses
+		// an obviously impossible one so a typo costs no round trip.
+		if height <= 0 {
+			return fmt.Errorf("height must be positive")
+		}
+		info := ""
+		if len(args) == 3 {
+			info = args[2]
+		}
+		return broadcast(cmd, &types.MsgScheduleUpgrade{
+			Authority: from, Name: args[0], Height: height, Info: info,
+		})
+	})
+}
+
+func cancelUpgradeCmd() *cobra.Command {
+	return txCmd("cancel-upgrade", cobra.NoArgs, func(cmd *cobra.Command, _ []string) error {
+		from, err := signer(cmd)
+		if err != nil {
+			return err
+		}
+		return broadcast(cmd, &types.MsgCancelUpgrade{Authority: from})
 	})
 }

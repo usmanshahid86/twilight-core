@@ -44,4 +44,13 @@ var (
 	// ErrSelectionPolicyCooldown is returned when a policy update arrives before
 	// the configured cooldown has elapsed since the slot's last update.
 	ErrSelectionPolicyCooldown = errorsmod.Register(ModuleName, 18, "selection policy update cooldown has not elapsed")
+
+	// ErrUpgradeUnavailable reports that this build has no route to x/upgrade.
+	// It is returned rather than panicking so a keeper constructed without an
+	// upgrade scheduler fails at the message, not mid-block.
+	ErrUpgradeUnavailable = errorsmod.Register(ModuleName, 19, "upgrade scheduling is not available in this build")
+
+	// ErrInvalidUpgrade reports a plan the chain refuses: an empty name, or a
+	// height that is not in the future.
+	ErrInvalidUpgrade = errorsmod.Register(ModuleName, 20, "invalid upgrade plan")
 )

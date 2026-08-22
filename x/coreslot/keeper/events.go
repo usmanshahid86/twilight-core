@@ -158,3 +158,24 @@ func emitRotationCanceled(ctx context.Context, slotID uint64, operator, oldConsA
 		sdk.NewAttribute(types.AttributeKeyHeight, i64(height)),
 	)
 }
+
+// emitUpgradeScheduled announces a coordinated halt.
+//
+// The event is observability, never the authority: x/upgrade holds the plan, and
+// an operator preparing for a halt should read it from there. This exists so a
+// scheduling decision is visible in the block that made it, alongside every other
+// authority action.
+func emitUpgradeScheduled(ctx context.Context, authority, name string, height int64, info string) {
+	emit(ctx, types.EventTypeUpgradeScheduled,
+		sdk.NewAttribute(types.AttributeKeyAuthority, authority),
+		sdk.NewAttribute(types.AttributeKeyUpgradeName, name),
+		sdk.NewAttribute(types.AttributeKeyUpgradeHeight, i64(height)),
+		sdk.NewAttribute(types.AttributeKeyUpgradeInfo, info),
+	)
+}
+
+func emitUpgradeCanceled(ctx context.Context, authority string) {
+	emit(ctx, types.EventTypeUpgradeCanceled,
+		sdk.NewAttribute(types.AttributeKeyAuthority, authority),
+	)
+}

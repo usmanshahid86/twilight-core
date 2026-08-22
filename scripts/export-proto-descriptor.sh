@@ -165,7 +165,9 @@ cat > "$MANIFEST" <<'JSON'
       "/twilight.coreslot.v1.MsgUpdateOperatorMetadata",
       "/twilight.coreslot.v1.MsgUpdateSettlementAddress",
       "/twilight.coreslot.v1.MsgUpdateSelectionPolicy",
-      "/twilight.coreslot.v1.MsgUpdateParams"
+      "/twilight.coreslot.v1.MsgUpdateParams",
+      "/twilight.coreslot.v1.MsgScheduleUpgrade",
+      "/twilight.coreslot.v1.MsgCancelUpgrade"
     ],
     "rewards": [
       "/twilight.rewards.v1.MsgUpdateRewardsParams",

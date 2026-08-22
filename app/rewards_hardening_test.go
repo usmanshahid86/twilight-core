@@ -136,7 +136,7 @@ func TestRewardsRuntimeDispatchFinalizeBlock(t *testing.T) {
 	// it must initialize and end-block after rewards. Its genesis additionally
 	// cross-checks already-imported CoreSlot policies, which is why it is last.
 	require.Equal(t,
-		[]string{"auth", "bank", "consensus", "coreslot", "rewards", "mining"},
+		[]string{"upgrade", "auth", "bank", "consensus", "coreslot", "rewards", "mining"},
 		a.ModuleManager.OrderInitGenesis)
 
 	rParams := rewardstypes.DefaultParams()

@@ -22,6 +22,23 @@ service Msg {
   rpc UpdateSettlementAddress(MsgUpdateSettlementAddress) returns (MsgUpdateSettlementAddressResponse);
   rpc UpdateSelectionPolicy(MsgUpdateSelectionPolicy) returns (MsgUpdateSelectionPolicyResponse);
   rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+
+  // ScheduleUpgrade and CancelUpgrade are the ONLY path to this chain's
+  // x/upgrade module.
+  //
+  // x/upgrade fixes its own authority at keeper construction and compares a
+  // message signer against it directly. This application gives it the
+  // coreslot-authority MODULE address, for which no private key exists — so its
+  // own MsgSoftwareUpgrade and MsgCancelUpgrade are unreachable by design, and
+  // the two messages below are the only way a plan is ever scheduled or
+  // withdrawn.
+  //
+  // The point is to keep ONE authority. Upgrade authority is not a second
+  // compile-time constant that can drift from Params.authority; it IS
+  // Params.authority, read from chain state at execution time, so rotating the
+  // authority rotates who may upgrade with nothing to keep in sync.
+  rpc ScheduleUpgrade(MsgScheduleUpgrade) returns (MsgScheduleUpgradeResponse);
+  rpc CancelUpgrade(MsgCancelUpgrade) returns (MsgCancelUpgradeResponse);
 }
 
 // InitialSelectionPolicy is the caller-supplied part of a slot's first Selection
@@ -136,3 +153,37 @@ message MsgUpdateParams {
   Params params = 2;
 }
 message MsgUpdateParamsResponse {}
+
+// MsgScheduleUpgrade schedules a coordinated halt at a height, after which every
+// node must be running a binary that knows this upgrade by name.
+//
+// The plan fields are carried flat rather than as an embedded
+// cosmos.upgrade.v1beta1.Plan. Two reasons: it keeps x/coreslot's public API free
+// of a dependency on the SDK's upgrade proto, and Plan carries deprecated fields
+// (a wall-clock time, an upgraded client state) that this chain must never accept
+// — a scheduled time would be a non-deterministic input to a consensus decision.
+message MsgScheduleUpgrade {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "twilight/coreslot/MsgScheduleUpgrade";
+
+  string authority = 1;
+  // name must match, exactly, an upgrade the target binary was compiled with. A
+  // node reaching this height without that name halts rather than guessing, which
+  // is the property that stops a partially-upgraded network from diverging.
+  string name = 2;
+  // height is the block at which every node halts. It must be in the future.
+  int64 height = 3;
+  // info is free-form operator metadata: a release tag, a checksum, a link. It is
+  // never interpreted by the chain.
+  string info = 4;
+}
+message MsgScheduleUpgradeResponse {}
+
+// MsgCancelUpgrade withdraws a scheduled plan before its height.
+message MsgCancelUpgrade {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "twilight/coreslot/MsgCancelUpgrade";
+
+  string authority = 1;
+}
+message MsgCancelUpgradeResponse {}

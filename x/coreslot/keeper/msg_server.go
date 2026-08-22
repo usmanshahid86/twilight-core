@@ -655,3 +655,75 @@ func (m msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams)
 	emitParamsUpdated(ctx, msg.Authority)
 	return &types.MsgUpdateParamsResponse{}, nil
 }
+
+// ScheduleUpgrade records a coordinated halt at a height.
+//
+// # Why this lives in x/coreslot
+//
+// x/upgrade fixes its authority at keeper construction and compares a message
+// signer against it directly. This application gives it the coreslot-authority
+// MODULE address, which is derived from a name and has no private key, so
+// MsgSoftwareUpgrade cannot be signed by anyone and this handler is the only way
+// a plan is ever scheduled.
+//
+// That is deliberate rather than a workaround. The alternative — compiling a real
+// account address into the binary as a second authority — would create a role that
+// can drift from Params.authority, sits outside the authority-rotation rules, and
+// can only be changed by performing an upgrade. Reading the authority from chain
+// state here means there is exactly one authority on this chain, and rotating it
+// rotates who may upgrade with nothing to keep in sync. See ADR-0003.
+func (m msgServer) ScheduleUpgrade(
+	ctx context.Context, msg *types.MsgScheduleUpgrade,
+) (*types.MsgScheduleUpgradeResponse, error) {
+	if m.upgrades == nil {
+		return nil, types.ErrUpgradeUnavailable
+	}
+	params, err := m.Params.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if msg.Authority != params.Authority {
+		return nil, types.ErrUnauthorized
+	}
+	// Checked after authorization, so an unauthorized caller learns nothing about
+	// which plans the chain would accept.
+	if msg.Name == "" {
+		return nil, types.ErrInvalidUpgrade.Wrap("upgrade name is required")
+	}
+	// A height at or below the current one cannot be halted at, and x/upgrade
+	// refuses it too. It is refused here as well so the message carries its own
+	// meaning rather than inheriting one from a module the caller cannot see.
+	if height := sdk.UnwrapSDKContext(ctx).BlockHeight(); msg.Height <= height {
+		return nil, types.ErrInvalidUpgrade.Wrapf(
+			"upgrade height %d is not in the future; the current height is %d", msg.Height, height)
+	}
+	if err := m.upgrades.ScheduleUpgrade(ctx, msg.Name, msg.Height, msg.Info); err != nil {
+		return nil, err
+	}
+	emitUpgradeScheduled(ctx, msg.Authority, msg.Name, msg.Height, msg.Info)
+	return &types.MsgScheduleUpgradeResponse{}, nil
+}
+
+// CancelUpgrade withdraws a scheduled plan before its height.
+//
+// Withdrawing is authorized identically to scheduling. A plan that could be set
+// but not unset would turn a mistyped height into an unavoidable halt.
+func (m msgServer) CancelUpgrade(
+	ctx context.Context, msg *types.MsgCancelUpgrade,
+) (*types.MsgCancelUpgradeResponse, error) {
+	if m.upgrades == nil {
+		return nil, types.ErrUpgradeUnavailable
+	}
+	params, err := m.Params.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if msg.Authority != params.Authority {
+		return nil, types.ErrUnauthorized
+	}
+	if err := m.upgrades.CancelUpgrade(ctx); err != nil {
+		return nil, err
+	}
+	emitUpgradeCanceled(ctx, msg.Authority)
+	return &types.MsgCancelUpgradeResponse{}, nil
+}

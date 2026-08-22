@@ -15,6 +15,8 @@ import (
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
+	_ "cosmossdk.io/x/upgrade"
+	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -73,6 +75,7 @@ var DefaultNodeHome = func() string {
 type App struct {
 	*runtime.App
 	CoreSlotKeeper coreslotkeeper.Keeper
+	UpgradeKeeper  *upgradekeeper.Keeper
 	RewardsKeeper  rewardskeeper.Keeper
 	MiningKeeper   miningkeeper.Keeper
 	AccountKeeper  authkeeper.AccountKeeper
@@ -107,16 +110,32 @@ func (a *App) AutoCliOpts() autocli.AppOptions {
 	}
 }
 
-func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ servertypes.AppOptions, baseAppOptions ...func(*baseapp.BaseApp)) *App {
+func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, appOpts servertypes.AppOptions, baseAppOptions ...func(*baseapp.BaseApp)) *App {
 	var (
 		builder       *runtime.AppBuilder
 		cdc           codec.Codec
 		accountKeeper authkeeper.AccountKeeper
 		bankKeeper    bankkeeper.BaseKeeper
+		upgradeKeeper *upgradekeeper.Keeper
 	)
+	// appOpts was previously discarded. It must be supplied: x/upgrade reads the
+	// home directory from it, and without one the keeper looks for its
+	// upgrade-info file at an empty path. Nothing fails at startup — the node
+	// simply never learns that it is resuming into a new store layout, which is a
+	// silent divergence rather than an error. depinject marks the input optional,
+	// so the omission would not be reported either.
+	configs := []depinject.Config{AppConfig, depinject.Supply(logger)}
+	if appOpts != nil {
+		// Supplied separately because depinject panics on a nil interface value
+		// rather than treating it as absent. The one caller that passes nil is the
+		// throwaway in-memory app the root command builds to extract AutoCLI
+		// options: it never loads stores from disk and never processes a block, so
+		// an empty home directory costs it nothing.
+		configs = append(configs, depinject.Supply(appOpts))
+	}
 	if err := depinject.Inject(
-		depinject.Configs(AppConfig, depinject.Supply(logger)),
-		&builder, &cdc, &accountKeeper, &bankKeeper,
+		depinject.Configs(configs...),
+		&builder, &cdc, &accountKeeper, &bankKeeper, &upgradeKeeper,
 	); err != nil {
 		panic(err)
 	}
@@ -140,7 +159,12 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ 
 	// depends on CoreSlot's read-only interface and must never depend on the
 	// reverse.
 	coreSlotKey := storetypes.NewKVStoreKey(coreslottypes.StoreKey)
-	coreSlotKeeper := coreslotkeeper.NewKeeper(cdc, runtime.NewKVStoreService(coreSlotKey), economicAddresses)
+	// The upgrade scheduler is injected as a plain value, not a keeper edge: it is
+	// the only route from x/coreslot to x/upgrade, and the only route to x/upgrade
+	// at all, because the upgrade module's own authority is a module address with
+	// no private key. See ADR-0003.
+	coreSlotKeeper := coreslotkeeper.NewKeeper(
+		cdc, runtime.NewKVStoreService(coreSlotKey), economicAddresses, upgradeScheduler{keeper: upgradeKeeper})
 	coreSlotModule := coreslot.NewAppModule(coreSlotKeeper, AuthorityAddress(), EmergencyAuthorityAddress())
 
 	rewardsKey := storetypes.NewKVStoreKey(rewardstypes.StoreKey)
@@ -173,12 +197,19 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, _ 
 	if err := runtimeApp.RegisterModules(coreSlotModule, rewardsModule, miningModule); err != nil {
 		panic(err)
 	}
+	// Both must run BEFORE Load: the store loader decides which stores are mounted,
+	// and handler registration has to be in place for the keeper to answer whether
+	// it knows an upgrade name at the moment a plan is proposed.
+	registerUpgradeHandlers(runtimeApp, upgradeKeeper, coreSlotKeeper)
+	setUpgradeStoreLoader(runtimeApp, upgradeKeeper)
+
 	if err := runtimeApp.Load(loadLatest); err != nil {
 		panic(err)
 	}
 	return &App{
 		App:            runtimeApp,
 		CoreSlotKeeper: coreSlotKeeper,
+		UpgradeKeeper:  upgradeKeeper,
 		RewardsKeeper:  rewardsKeeper,
 		MiningKeeper:   miningKeeper,
 		AccountKeeper:  accountKeeper,

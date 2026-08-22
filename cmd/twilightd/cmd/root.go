@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/viper"
 
 	"cosmossdk.io/log"
+	"cosmossdk.io/x/upgrade"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/config"
@@ -64,6 +65,10 @@ func BasicManager() module.BasicManager {
 		// Tx/query CLI commands are deferred to Phase 9.
 		rewards.NewAppModuleBasic(),
 		mining.NewAppModuleBasic(),
+		// x/upgrade mounts a store, so `twilightd init` must write its genesis
+		// section. A module the node initializes but the CLI omits produces a
+		// genesis whose store is never written.
+		upgrade.AppModuleBasic{},
 	)
 }
 

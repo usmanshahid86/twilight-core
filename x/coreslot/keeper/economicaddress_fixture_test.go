@@ -58,7 +58,7 @@ func setupWithoutEconomicAddresses(t *testing.T) (keeper.Keeper, sdk.Context, st
 	keys := storetypes.NewKVStoreKeys(types.StoreKey)
 	cms := integration.CreateMultiStore(keys, log.NewNopLogger())
 	ctx := sdk.NewContext(cms, cmtproto.Header{Height: 1}, false, log.NewNopLogger())
-	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(keys[types.StoreKey]), economicaddress.Validator{})
+	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(keys[types.StoreKey]), economicaddress.Validator{}, nil)
 	return k, ctx, testAccount(1), testAccount(2)
 }
 
