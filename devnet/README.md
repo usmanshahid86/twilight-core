@@ -1,18 +1,22 @@
 # Twilight Devnet — Operator Join Guide
 
-A public, single-validator **devnet** for the Twilight CoreSlot Proof-of-Authority
+A public, two-validator **devnet** for the Twilight CoreSlot Proof-of-Authority
 chain with the `utwlt` rewards module. Anyone can run a full node, sync the chain,
 query state, and submit transactions; operators can be onboarded as CoreSlot
 validators by the chain authority. This is a **throwaway test network** — it may be
 wiped and re-genesis'd at any time (you'll just re-join).
 
+> Both genesis validators must be online for the chain to produce blocks. CometBFT
+> needs more than 2/3 of voting power, and with two equal validators that means both.
+> A halt while one is restarting is expected behaviour, not a fault.
+
 ## Network details
 
 | | |
 |---|---|
-| chain-id | `twilight-devnet-1` |
-| RPC | `http://16.192.99.123:26657` |
-| seed / peer | `ea79c42d88c04ffda9c695c4af1218fdcb6b0c75@16.192.99.123:26656` |
+| chain-id | `twilight-devnet-2` |
+| RPC | `http://13.215.26.158:26657` |
+| seed / peer | `ea79c42d88c04ffda9c695c4af1218fdcb6b0c75@13.215.26.158:26656` |
 | genesis | [`devnet/genesis.json`](./genesis.json) in this repo (or fetch from RPC, below) |
 | gas | gasless — `--minimum-gas-prices 0utwlt` |
 | denom | `utwlt` (accounting); `twlt`/`TWLT` is display-only |
@@ -39,20 +43,20 @@ sudo install build/twilightd /usr/local/bin/twilightd
 ## 2. Initialize and install genesis
 
 ```bash
-twilightd init <your-moniker> --chain-id twilight-devnet-1
+twilightd init <your-moniker> --chain-id twilight-devnet-2
 
 # genesis: use the version-controlled copy (exact)…
 cp devnet/genesis.json ~/.twilightd/config/genesis.json
 # …or fetch it live:
-# curl -s http://16.192.99.123:26657/genesis | jq '.result.genesis' > ~/.twilightd/config/genesis.json
+# curl -s http://13.215.26.158:26657/genesis | jq '.result.genesis' > ~/.twilightd/config/genesis.json
 
-jq -r '.chain_id' ~/.twilightd/config/genesis.json   # -> twilight-devnet-1
+jq -r '.chain_id' ~/.twilightd/config/genesis.json   # -> twilight-devnet-2
 ```
 
 ## 3. Point at the seed
 
 ```bash
-sed -i 's#^persistent_peers =.*#persistent_peers = "ea79c42d88c04ffda9c695c4af1218fdcb6b0c75@16.192.99.123:26656"#' \
+sed -i 's#^persistent_peers =.*#persistent_peers = "ea79c42d88c04ffda9c695c4af1218fdcb6b0c75@13.215.26.158:26656"#' \
   ~/.twilightd/config/config.toml
 ```
 
@@ -91,7 +95,7 @@ journalctl -u twilightd -f          # watch it sync (Ctrl-C to stop watching)
 
 ```bash
 curl -s http://localhost:26657/status | jq '.result.sync_info | {height: .latest_block_height, catching_up}'
-curl -s http://16.192.99.123:26657/status | jq -r '.result.sync_info.latest_block_height'   # seed head
+curl -s http://13.215.26.158:26657/status | jq -r '.result.sync_info.latest_block_height'   # seed head
 ```
 
 `catching_up: false` with a height tracking the seed = fully joined.
@@ -119,7 +123,7 @@ credential you sign settlement-side messages with, and it is mandatory), your
 
 ```bash
 H=~/.twilight-devnet; COMMON="--from validator --keyring-backend test --home $H \
-  --chain-id twilight-devnet-1 --node http://localhost:26657 --gas 400000 --fees 0utwlt -y"
+  --chain-id twilight-devnet-2 --node http://localhost:26657 --gas 400000 --fees 0utwlt -y"
 
 twilightd coreslot register <operator> <payout> <settlement> <consensus-pubkey-base64> "<moniker>" $COMMON
 twilightd coreslot-query slots --node http://localhost:26657 -o json | jq   # find the new slot id
@@ -140,18 +144,28 @@ needed. Confirm with `curl -s http://localhost:26657/status | jq '.result.valida
 ## Interacting with the chain
 
 ```bash
-twilightd rewards-query epoch-info         --node http://16.192.99.123:26657 -o json
-twilightd rewards-query cumulative-emitted --node http://16.192.99.123:26657 -o json
-twilightd rewards-query module-balances    --node http://16.192.99.123:26657 -o json
-twilightd coreslot-query active            --node http://16.192.99.123:26657 -o json
+twilightd rewards-query epoch-info         --node http://13.215.26.158:26657 -o json
+twilightd rewards-query cumulative-emitted --node http://13.215.26.158:26657 -o json
+twilightd rewards-query module-balances    --node http://13.215.26.158:26657 -o json
+twilightd coreslot-query active            --node http://13.215.26.158:26657 -o json
 ```
 
-Rewards finalize ~every 5 minutes (devnet `epoch_length=60` at ~5 s blocks). Claims
-are anyone-triggered and pay the snapshotted payout to the slot's payout address —
-see the rewards docs in [`website/`](../website).
+Rewards finalize ~every 30 minutes (`epoch_length_blocks = 360` at ~5 s blocks). 360 is
+the immutable floor — the admissible interval is `[360, 720]` (`app/params/bounds.go`),
+so a shorter devnet epoch is no longer possible. Claims are anyone-triggered and pay the
+snapshotted payout to the slot's payout address — see the rewards docs in
+[`website/`](../website).
 
 ## Notes
 
-- **Devnet only — no persistence guarantees.** On a reset: delete `~/.twilightd/data`
-  (keep keys/config), reinstall the new genesis, restart the service.
-- This network was created with [`scripts/devnet/devnet-up.sh`](../scripts/devnet/devnet-up.sh).
+- **Devnet only — no persistence guarantees.** On a reset, run
+  `twilightd comet unsafe-reset-all --home ~/.twilightd` (this wipes the databases and
+  zeroes `data/priv_validator_state.json` while keeping your keys), remove the old
+  `config/genesis.json`, install the new one, and restart the service.
+- **`twilightd init` does not regenerate `app.toml`.** An existing one is left untouched,
+  so pruning and API settings carried over from a previous deployment survive a re-genesis
+  silently. Check `pruning` and `min-retain-blocks` after re-initialising.
+- `scripts/devnet/devnet-up.sh` is **stale** and cannot build a valid genesis for this
+  network: it forces `EPOCH_LENGTH=60`, below the immutable floor of 360. It needs a fix
+  before it is used again. This network was assembled with `coreslot-genesis
+  set-authorities` / `add` / `validate` directly.
