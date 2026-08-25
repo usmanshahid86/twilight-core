@@ -88,6 +88,30 @@ was rejected. It creates a second authority that can drift from the first, sits 
 rotation hardening, requires a different binary per network or the same key across networks,
 and can itself only be changed by performing an upgrade.
 
+### 1b. Scheduling must not require the running binary to know the upgrade
+
+`MsgScheduleUpgrade` deliberately does **not** check that the binary processing it
+holds a handler for the name being scheduled. The binary that performs an upgrade does
+not exist yet on the nodes that schedule it — that is what the mechanism is for.
+
+Upstream enforces the opposite, as a consensus rule. While a plan is pending and its
+height has not arrived, a node whose binary already contains that handler **aborts the
+block** (`BINARY UPDATED BEFORE TRIGGER`). The two conditions are the same lookup with
+opposite polarity, so requiring the handler at scheduling time would guarantee a
+network halt one block later, at a height nobody chose.
+
+Such a check would also buy nothing it appears to buy. It can only inspect the node
+submitting the transaction; it cannot stop a different operator swapping their binary
+early days afterwards, which is the failure that actually happens. That is the
+PreBlocker's job, and it runs on every node on every block for the whole pre-height
+window.
+
+A plan naming an upgrade no binary has is **recoverable, not fatal**: it is visible via
+`query upgrade plan` and the `coreslot_upgrade_scheduled` event, and the authority may
+cancel it at any point before the height arrives. Only once the height is reached do
+blocks stop, and by then the answer is to supply the binary. Verifying the name against
+a pre-staged, hash-verified build is an operational step, not a chain rule.
+
 ### 1a. `PreBlockers` must list `upgrade`
 
 `x/upgrade` executes a scheduled plan in **PreBlock**, before any `BeginBlocker`. The runtime
@@ -158,6 +182,16 @@ that were produced, so a halt freezes every open participant window rather than 
 Nothing expires while the network is down, however long that is. This property should be
 asserted by the upgrade drill rather than assumed.
 
+**Genesis must commit a complete module version map, and is refused otherwise.** The
+map x/upgrade persists at genesis is what a future upgrade reads to decide, per module,
+whether to migrate or to treat the module as newly added and run its `InitGenesis` with
+default state. The module manager skips any module the genesis document has no section
+for, and x/upgrade declares no `ValidateGenesis`, so a document missing its section
+passes every other check and starts a chain whose stored map is empty. `InitChain`
+therefore verifies the committed map covers every mounted module and refuses genesis if
+it does not — checking the committed result rather than the presence of a JSON key, so
+the guard holds whatever the cause.
+
 **Migrations inherit the fail-closed rule.** An upgrade handler runs on the same terms as
 `BeginBlock` and `EndBlock`: in a cache context, committing only on complete success. A
 half-applied migration on a chain carrying outstanding entitlement liability is not
@@ -186,6 +220,23 @@ to load. There is no migration path, because the mechanism that would schedule t
 addition is the very module being added. Any chain predating this wiring, twilight-devnet-2
 included, must be replaced rather than upgraded. That is the same one-way door this record is
 about, seen from the other side.
+
+**A single latest binary cannot replay the chain from genesis across an upgrade
+boundary, and Twilight does not claim it can.** Upstream ties each migration handler to
+the binary that becomes active at exactly that height: a binary carrying a historical
+handler aborts when it replays the block that scheduled that upgrade, because from the
+PreBlocker's point of view it is a binary updated too early. The supported recovery and
+replay model is therefore either the **historical binary sequence** — which is what
+cosmovisor automates — or a **validated snapshot / state sync starting after the
+relevant boundary**.
+
+Retaining released `Upgrade` entries in source remains the policy, but for the correct
+reason. A released entry is an executed artifact: editing what runs under a name the
+network already applied changes what a rebuilt or audited binary would do at that
+height. Upstream's own completed-upgrade and downgrade checks additionally need the
+**most recently completed** upgrade's handler. Keeping every historical entry is a
+deliberately **stronger local policy** than upstream requires — chosen for auditability
+and historical binary construction — not a requirement inherited from it.
 
 **Export and restore become the disaster path.** Wiring `x/upgrade` does not remove the need
 for a proven export; it makes it the fallback for when resuming is not an option. It must be
