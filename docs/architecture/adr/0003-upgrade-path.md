@@ -168,6 +168,25 @@ the authority now also reaches the upgrade mechanism. That raises the value of h
 authority rotation, tracked in
 [#130](https://github.com/usmanshahid86/twilight-core/issues/130).
 
+**`--unsafe-skip-upgrades` is a deliberate exception to the determinism invariant.**
+`AGENTS.md` invariant 4 says no state transition may read node-local config. x/upgrade's
+PreBlocker consults `IsSkipHeight`, populated from that node-local flag, and when it matches it
+performs a store delete (`ClearUpgradePlan`). Two nodes started with different values therefore
+compute different state at the same height.
+
+This is the SDK's standard emergency escape hatch and it is accepted here rather than
+engineered away — but it is an exception, not an oversight, and it is recorded as one. The flag
+is only safe when the whole network has agreed to skip the same height; used unilaterally it is
+a fork. Operator documentation must say so.
+
+**Adding the upgrade store is itself unrecoverable for an existing chain.** Wiring the module
+mounts a new IAVL store, so a chain with committed state started before this change cannot boot
+on a binary that has it — the root store reports a version mismatch for the new key and refuses
+to load. There is no migration path, because the mechanism that would schedule the store
+addition is the very module being added. Any chain predating this wiring, twilight-devnet-2
+included, must be replaced rather than upgraded. That is the same one-way door this record is
+about, seen from the other side.
+
 **Export and restore become the disaster path.** Wiring `x/upgrade` does not remove the need
 for a proven export; it makes it the fallback for when resuming is not an option. It must be
 exercised on a mid-life chain, not only at genesis.
