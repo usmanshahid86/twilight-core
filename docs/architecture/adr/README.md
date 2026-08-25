@@ -8,6 +8,7 @@ and reviewers.
 |---|---|---|
 | [0001](0001-coreslot-poa.md) | CoreSlot Proof-of-Authority — an independent validator module | Accepted |
 | [0002](0002-rewards-emission.md) | Rewards emission and supply-threshold halving | Accepted |
+| [0003](0003-upgrade-path.md) | Upgrade path — authority-gated `x/upgrade`, without governance | Accepted |
 
 The [architecture overview](../overview.md) is the read-first system map that these decisions
 sit within.

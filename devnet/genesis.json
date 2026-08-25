@@ -1,41 +1,6 @@
 {
-  "genesis_time": "2026-06-22T22:45:03.547156293Z",
-  "chain_id": "twilight-devnet-1",
-  "initial_height": "1",
-  "consensus_params": {
-    "block": {
-      "max_bytes": "22020096",
-      "max_gas": "-1"
-    },
-    "evidence": {
-      "max_age_num_blocks": "100000",
-      "max_age_duration": "172800000000000",
-      "max_bytes": "1048576"
-    },
-    "validator": {
-      "pub_key_types": [
-        "ed25519"
-      ]
-    },
-    "version": {
-      "app": "0"
-    },
-    "abci": {
-      "vote_extensions_enable_height": "0"
-    }
-  },
-  "validators": [
-    {
-      "address": "05D22094597C7692E1E4B399FDF74EA6F88BF428",
-      "pub_key": {
-        "type": "tendermint/PubKeyEd25519",
-        "value": "Kp7nprbVAqBTaAy8YdmlYpCjUqeTJOKbbX4Gh6oBPSI="
-      },
-      "power": "1",
-      "name": "twilight-devnet-validator"
-    }
-  ],
-  "app_hash": "",
+  "app_hash": null,
+  "app_name": "twilightd",
   "app_state": {
     "auth": {
       "params": {
@@ -48,16 +13,23 @@
       "accounts": [
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "twilight1kkxs9mjpq5waz7uxkugntzsp4dj67fgy4dwmk5",
+          "address": "twilight159xxd9prpm3tlngac5l3y2zlk2j9rtyzv7qjdp",
           "pub_key": null,
           "account_number": "0",
           "sequence": "0"
         },
         {
           "@type": "/cosmos.auth.v1beta1.BaseAccount",
-          "address": "twilight1yz9qtgryac506gqwwf2wjxgaqmlrkyhd33q6dq",
+          "address": "twilight1kkxs9mjpq5waz7uxkugntzsp4dj67fgy4dwmk5",
           "pub_key": null,
           "account_number": "1",
+          "sequence": "0"
+        },
+        {
+          "@type": "/cosmos.auth.v1beta1.BaseAccount",
+          "address": "twilight1yz9qtgryac506gqwwf2wjxgaqmlrkyhd33q6dq",
+          "pub_key": null,
+          "account_number": "2",
           "sequence": "0"
         }
       ]
@@ -66,6 +38,15 @@
       "balances": [
         {
           "address": "twilight1yz9qtgryac506gqwwf2wjxgaqmlrkyhd33q6dq",
+          "coins": [
+            {
+              "amount": "1000000000000",
+              "denom": "utwlt"
+            }
+          ]
+        },
+        {
+          "address": "twilight159xxd9prpm3tlngac5l3y2zlk2j9rtyzv7qjdp",
           "coins": [
             {
               "amount": "1000000000000",
@@ -109,7 +90,7 @@
       "send_enabled": [],
       "supply": [
         {
-          "amount": "2000000000000",
+          "amount": "3000000000000",
           "denom": "utwlt"
         }
       ]
@@ -126,7 +107,8 @@
         "removal_delay_blocks": "0",
         "consensus_key_reuse_lockout": "100000",
         "allow_self_registration": false,
-        "allow_emergency_below_min_active": false
+        "allow_emergency_below_min_active": false,
+        "selection_policy_update_cooldown_blocks": "720"
       },
       "slots": [
         {
@@ -141,17 +123,51 @@
           "consensus_power": "1",
           "reward_weight": "1.000000000000000000",
           "created_height": "0",
-          "activated_height": "0",
+          "activated_height": "1",
           "updated_height": "0",
           "suspended_height": "0",
           "removed_height": "0",
           "metadata": {
-            "moniker": "twilight-devnet-validator",
+            "moniker": "nodeA",
             "identity": "",
             "website": "",
             "security_contact": "",
             "details": ""
-          }
+          },
+          "settlement_address": "twilight1kkxs9mjpq5waz7uxkugntzsp4dj67fgy4dwmk5",
+          "activation_sequence": "1",
+          "activation_effective_height": "1",
+          "current_selection_policy_version": "1",
+          "last_selection_policy_update_height": "0"
+        },
+        {
+          "slot_id": "2",
+          "operator_address": "twilight159xxd9prpm3tlngac5l3y2zlk2j9rtyzv7qjdp",
+          "consensus_pubkey": {
+            "@type": "/cosmos.crypto.ed25519.PubKey",
+            "key": "bbgmojbmxkpHiqyKcYsFufCfrWTQo8z9mTcT0uvWmmk="
+          },
+          "payout_address": "twilight159xxd9prpm3tlngac5l3y2zlk2j9rtyzv7qjdp",
+          "status": "SLOT_STATUS_ACTIVE",
+          "consensus_power": "1",
+          "reward_weight": "1.000000000000000000",
+          "created_height": "0",
+          "activated_height": "1",
+          "updated_height": "0",
+          "suspended_height": "0",
+          "removed_height": "0",
+          "metadata": {
+            "moniker": "nodeB",
+            "identity": "",
+            "website": "",
+            "security_contact": "",
+            "details": ""
+          },
+          "settlement_address": "twilight159xxd9prpm3tlngac5l3y2zlk2j9rtyzv7qjdp",
+          "activation_sequence": "1",
+          "activation_effective_height": "1",
+          "current_selection_policy_version": "1",
+          "last_selection_policy_update_height": "0"
         }
       ],
       "pending_key_rotations": [],
@@ -166,10 +182,78 @@
           "external_weight": "",
           "final_weight": "1.000000000000000000",
           "updated_height": "0"
+        },
+        {
+          "slot_id": "2",
+          "base_weight": "1.000000000000000000",
+          "uptime_weight": "1.000000000000000000",
+          "performance_weight": "1.000000000000000000",
+          "stake_weight": "",
+          "external_weight": "",
+          "final_weight": "1.000000000000000000",
+          "updated_height": "0"
         }
       ],
       "last_applied_validators": [],
-      "next_slot_id": "2"
+      "next_slot_id": "3",
+      "selection_policies": [
+        {
+          "slot_id": "1",
+          "policy_version": "1",
+          "selection_rate_bps": "2500",
+          "max_selected_participants": "10",
+          "valid_from_height": "1",
+          "valid_until_height_exclusive": "0"
+        },
+        {
+          "slot_id": "2",
+          "policy_version": "1",
+          "selection_rate_bps": "2500",
+          "max_selected_participants": "10",
+          "valid_from_height": "1",
+          "valid_until_height_exclusive": "0"
+        }
+      ]
+    },
+    "mining": {
+      "distribution_mode_versions": [
+        {
+          "version": "1",
+          "mode": "MINING_DISTRIBUTION_MODE_TRUSTED_AS_DISTRIBUTION",
+          "valid_from_epoch": "1",
+          "valid_until_epoch_exclusive": "0"
+        }
+      ],
+      "scheduled_distribution_modes": [],
+      "selection_params_versions": [
+        {
+          "version": "1",
+          "effective_epoch": "1",
+          "max_selection_rate_bps": "2500",
+          "max_selected_participants_per_selection": "64",
+          "max_candidates_per_selection": "1024",
+          "beacon_start_offset_blocks": "48",
+          "beacon_window_blocks": "24",
+          "min_external_beacon_blocks": "12",
+          "min_distinct_external_proposers": "3"
+        }
+      ],
+      "scheduled_selection_params": [],
+      "settlement_params_versions": [
+        {
+          "version": "1",
+          "effective_epoch": "1",
+          "settlement_window_epochs": "2",
+          "max_recipients_per_chunk": "32",
+          "max_chunks_per_settlement": "4",
+          "min_recipient_payout_amount": "10000"
+        }
+      ],
+      "scheduled_settlement_params": [],
+      "settlement_clock": "0",
+      "last_processed_reward_epoch": "0",
+      "settlement_epoch_anchors": [],
+      "settlements": []
     },
     "rewards": {
       "params": {
@@ -180,7 +264,7 @@
         "max_supply": "21000000000000",
         "initial_block_subsidy": "416190",
         "target_block_time_seconds": "5",
-        "epoch_length_blocks": "60",
+        "epoch_length_blocks": "360",
         "halving_mode": "HALVING_MODE_SUPPLY_THRESHOLD",
         "distribution_method": "DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS",
         "remainder_policy": "REMAINDER_POLICY_CARRY_FORWARD",
@@ -201,10 +285,9 @@
         "carry_forward_remainder": "0"
       },
       "finalized_epochs": [],
-      "claim_records": [],
       "current_epoch_config": {
         "snapshot_version": "1",
-        "epoch_length_blocks": "60",
+        "epoch_length_blocks": "360",
         "distribution_method": "DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS",
         "remainder_policy": "REMAINDER_POLICY_CARRY_FORWARD",
         "initial_block_subsidy": "416190",
@@ -219,7 +302,81 @@
         "fee_treasury_share_bps": "0"
       },
       "has_pending_params": false,
-      "pending_params": null
+      "pending_params": null,
+      "epoch_config_versions": [
+        {
+          "version": "1",
+          "effective_epoch": "1",
+          "effective_start_height": "1",
+          "epoch_length_blocks": "360"
+        }
+      ],
+      "scheduled_epoch_configs": [],
+      "pause_state": {
+        "current_paused": false,
+        "has_pending": false,
+        "pending_value": false,
+        "pending_effective_height": "0"
+      },
+      "open_reward_enabled_blocks": "0",
+      "reward_config_versions": [
+        {
+          "version": "1",
+          "effective_epoch": "1",
+          "initial_block_subsidy": "416190",
+          "emission_treasury_share_bps": "0",
+          "treasury_address": ""
+        }
+      ],
+      "scheduled_reward_configs": [],
+      "slot_entitlements": [],
+      "outstanding_entitlement_liability": "0"
     }
-  }
+  },
+  "app_version": "3f0cb8b",
+  "chain_id": "twilight-devnet-2",
+  "consensus": {
+    "params": {
+      "block": {
+        "max_bytes": "22020096",
+        "max_gas": "-1"
+      },
+      "evidence": {
+        "max_age_num_blocks": "100000",
+        "max_age_duration": "172800000000000",
+        "max_bytes": "1048576"
+      },
+      "validator": {
+        "pub_key_types": [
+          "ed25519"
+        ]
+      },
+      "version": {
+        "app": "0"
+      },
+      "abci": {
+        "vote_extensions_enable_height": "0"
+      }
+    }
+  },
+  "genesis_time": "2026-08-19T20:11:48.496518607Z",
+  "initial_height": 1,
+  "validators": [
+    {
+      "pub_key": {
+        "type": "tendermint/PubKeyEd25519",
+        "value": "Kp7nprbVAqBTaAy8YdmlYpCjUqeTJOKbbX4Gh6oBPSI="
+      },
+      "power": "1",
+      "name": "nodeA"
+    },
+    {
+      "pub_key": {
+        "type": "tendermint/PubKeyEd25519",
+        "value": "bbgmojbmxkpHiqyKcYsFufCfrWTQo8z9mTcT0uvWmmk="
+      },
+      "power": "1",
+      "name": "nodeB"
+    }
+  ]
 }

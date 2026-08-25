@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -59,6 +59,37 @@ localnet-rewards-epoch-smoke:
 # chain paying participants, and it replaces the retired claim smoke in that role.
 localnet-settlement-smoke:
 	./scripts/localnet/settlement-smoke.sh
+
+# Measures how many validators the chain needs and how many it can lose, by
+# building real sets of each size and degrading them. Writes the table to
+# docs/testing/quorum-threshold-table.md. No epochs: validator-set mechanics only.
+localnet-quorum-table:
+	./scripts/localnet/quorum-threshold.sh
+
+# A chain that starts at one validator and grows to five, each node syncing
+# before it is admitted to the set. The untested half of node-join.
+localnet-validator-growth:
+	./scripts/localnet/validator-growth.sh
+
+# The four ways a validator leaves — offline, inactivated, suspended, removed —
+# plus the guards on the way down and a key rotation with no quorum margin.
+localnet-validator-departures:
+	./scripts/localnet/validator-departures.sh
+
+# The operational playbook: one Slot, a second joins, both earn, and each
+# operator settles its own entitlement alone from its own node.
+localnet-join-and-settle:
+	./scripts/localnet/join-and-settle.sh
+
+# Three Slots over three epochs. Membership moves in both directions with
+# settlements outstanding behind it, every settlement bound is pushed, and both
+# finalization arms are reached — including the deadline, which no other run gets
+# to. Long by nature: three epoch boundaries plus a 720-block window.
+localnet-settlement-matrix:
+	./scripts/localnet/settlement-lifecycle-matrix.sh
+
+# The whole validator-set behaviour study.
+validator-set-study: localnet-quorum-table localnet-validator-growth localnet-validator-departures
 
 # Retained under its historical name so existing invocations keep working. It is
 # NOT a money-movement gate: V2 release is keeper-only until Settlement, so no
