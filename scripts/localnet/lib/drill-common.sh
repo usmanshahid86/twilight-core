@@ -66,6 +66,56 @@ setup_localnet() {
 
 teardown_localnet() { "$ROOT/scripts/localnet/stop.sh" || true; }
 
+# join_node <index> — prepare a node home that is NOT in genesis: same document,
+# its own keys and ports, peered at every node already running. This is what an
+# operator does before asking to be admitted; admission itself is a separate
+# authority transaction.
+#
+# Additive: no existing drill calls this, and the genesis-time path in init.sh is
+# untouched.
+join_node() {
+  local i="$1" home; home="$(node_home "$i")"
+  "$BIN" init "node$i" --chain-id "$CHAIN_ID" --home "$home" >/dev/null 2>&1
+  "$BIN" keys add "operator$i" --keyring-backend test --home "$home" --output json \
+    >"$NET/operator$i.json" 2>/dev/null
+  cp "$(node_home 0)/config/genesis.json" "$home/config/genesis.json"
+  # Peer to every node already running, not just node 0. With pex disabled a
+  # joiner that knows only node 0 relies on it to relay every consensus message
+  # for every other member, which is one node away from a stall.
+  local rpc p2p grpc peers="" j jid
+  for ((j = 0; j < i; j++)); do
+    jid="$("$BIN" tendermint show-node-id --home "$(node_home "$j")")"
+    peers="${peers}${peers:+,}${jid}@127.0.0.1:$((26656 + j * 100))"
+  done
+  rpc=$((26657 + i * 100)); p2p=$((26656 + i * 100)); grpc=$((9090 + i * 100))
+  sed -i.bak \
+    -e "s#laddr = \"tcp://127.0.0.1:26657\"#laddr = \"tcp://127.0.0.1:${rpc}\"#" \
+    -e "s#laddr = \"tcp://0.0.0.0:26656\"#laddr = \"tcp://0.0.0.0:${p2p}\"#" \
+    -e "s#persistent_peers = \"\"#persistent_peers = \"${peers}\"#" \
+    -e "s#pex = true#pex = false#" \
+    -e "s#allow_duplicate_ip = false#allow_duplicate_ip = true#" \
+    -e "s#^timeout_commit = .*#timeout_commit = \"${TWILIGHT_LOCALNET_TIMEOUT_COMMIT:-200ms}\"#" \
+    "$home/config/config.toml"
+  sed -i.bak -e "s#address = \"localhost:9090\"#address = \"localhost:${grpc}\"#" "$home/config/app.toml"
+  rm -f "$home/config/"*.bak
+}
+
+# wait_synced <index> [seconds] — true once the node reports it is no longer
+# catching up AND is within two blocks of node 0. A node must be caught up
+# BEFORE it is admitted: a validator that is still syncing produces nothing, and
+# quorum stalls waiting for it.
+wait_synced() {
+  local i="$1" deadline=$((SECONDS + ${2:-90})) h_new h_ref
+  while ((SECONDS < deadline)); do
+    if [[ "$(rpc_get "$i" /status 2>/dev/null | jq -r '.result.sync_info.catching_up' 2>/dev/null)" == "false" ]]; then
+      h_new="$(latest_height "$i")"; h_ref="$(latest_height 0)"
+      if (( h_new > 0 && h_ref - h_new <= 2 )); then return 0; fi
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 # ---- height helpers --------------------------------------------------------
 
 latest_height() {

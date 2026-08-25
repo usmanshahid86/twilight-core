@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -80,6 +80,13 @@ localnet-validator-departures:
 # operator settles its own entitlement alone from its own node.
 localnet-join-and-settle:
 	./scripts/localnet/join-and-settle.sh
+
+# Three Slots over three epochs. Membership moves in both directions with
+# settlements outstanding behind it, every settlement bound is pushed, and both
+# finalization arms are reached — including the deadline, which no other run gets
+# to. Long by nature: three epoch boundaries plus a 720-block window.
+localnet-settlement-matrix:
+	./scripts/localnet/settlement-lifecycle-matrix.sh
 
 # The whole validator-set behaviour study.
 validator-set-study: localnet-quorum-table localnet-validator-growth localnet-validator-departures
