@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
 	dbm "github.com/cosmos/cosmos-db"
@@ -105,6 +106,20 @@ func (a *App) AutoCliOpts() autocli.AppOptions {
 			modules[name] = am
 		}
 	}
+	// x/upgrade is withheld from the module set autocli scans for CUSTOM commands.
+	//
+	// autocli composes a command tree from two independent sources: generated
+	// commands, enumerated from ModuleOptions, and custom commands, collected by
+	// calling GetTxCmd/GetQueryCmd on every entry in Modules that implements them.
+	// x/upgrade's AppModuleBasic implements GetTxCmd, which is how
+	// `tx upgrade software-upgrade` and `cancel-software-upgrade` appear — both
+	// build governance proposals this chain has no module to route.
+	//
+	// Withholding it here removes exactly those two and nothing else. x/upgrade
+	// supplies no custom QUERY command, and its queries are generated from
+	// ModuleOptions, which is a separate field left untouched — so
+	// `query upgrade plan` survives, which is how an operator sees a pending halt.
+	delete(modules, upgradetypes.ModuleName)
 	moduleOptions := runtimeservices.ExtractAutoCLIOptions(a.ModuleManager.Modules)
 	// x/upgrade's generated tx commands all submit GOVERNANCE proposals, and this
 	// chain has no governance module — so `tx upgrade software-upgrade` and its
@@ -251,6 +266,32 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 	if homePath != "" {
 		setUpgradeStoreLoader(runtimeApp, upgradeKeeper)
 	}
+
+	// Set BEFORE Load, which installs the default only when none is present.
+	//
+	// Genesis must leave a COMPLETE module version map committed to state. The map
+	// prepared above is written by x/upgrade's InitGenesis, and the module manager
+	// skips a module entirely when the genesis document carries no section for it
+	// (`if genesisData[moduleName] == nil { continue }`). x/upgrade also declares
+	// no ValidateGenesis, so a document with no "upgrade" section passes every
+	// existing check, starts, and produces blocks with an EMPTY stored map — the
+	// precise state the version-map wiring exists to prevent, reached by a
+	// different route.
+	//
+	// Checking the committed map rather than the presence of a JSON key catches
+	// that cause and any other. A chain that cannot record what versions it
+	// started at cannot be migrated later, so this refuses at InitChain rather
+	// than starting and discovering it at the first upgrade.
+	runtimeApp.SetInitChainer(func(ctx sdk.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
+		res, err := runtimeApp.InitChainer(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireCompleteModuleVersionMap(ctx, runtimeApp, upgradeKeeper); err != nil {
+			return nil, err
+		}
+		return res, nil
+	})
 
 	if err := runtimeApp.Load(loadLatest); err != nil {
 		panic(err)

@@ -28,9 +28,6 @@ import (
 // scheduled a plan would leave the chain halting at a height nobody authorized,
 // and asserting only on the returned error would not notice.
 type recordingScheduler struct {
-	// known is the set of upgrade names this "binary" can execute. Empty means the
-	// registry is empty, which is the released binary's actual state.
-	known       map[string]bool
 	pending     string
 	scheduled   []scheduledPlan
 	cancels     int
@@ -43,14 +40,6 @@ type scheduledPlan struct {
 	name   string
 	height int64
 	info   string
-}
-
-func knowing(names ...string) *recordingScheduler {
-	known := make(map[string]bool, len(names))
-	for _, n := range names {
-		known[n] = true
-	}
-	return &recordingScheduler{known: known}
 }
 
 func (s *recordingScheduler) ScheduleUpgrade(_ context.Context, name string, height int64, info string) error {
@@ -70,8 +59,6 @@ func (s *recordingScheduler) CancelUpgrade(_ context.Context) error {
 	s.pending = ""
 	return nil
 }
-
-func (s *recordingScheduler) HasUpgradeHandler(name string) bool { return s.known[name] }
 
 func (s *recordingScheduler) PendingUpgrade(_ context.Context) (string, error) {
 	if s.pendingErr != nil {
@@ -118,7 +105,7 @@ func setupUpgrade(t *testing.T, scheduler types.UpgradeScheduler) (types.MsgServ
 }
 
 func TestScheduleUpgradeByAuthority(t *testing.T) {
-	scheduler := knowing("v2")
+	scheduler := &recordingScheduler{}
 	msgs, ctx, authority := setupUpgrade(t, scheduler)
 
 	_, err := msgs.ScheduleUpgrade(ctx, &types.MsgScheduleUpgrade{
@@ -133,7 +120,7 @@ func TestScheduleUpgradeByAuthority(t *testing.T) {
 }
 
 func TestScheduleUpgradeRefusesNonAuthority(t *testing.T) {
-	scheduler := knowing("v2")
+	scheduler := &recordingScheduler{}
 	msgs, ctx, authority := setupUpgrade(t, scheduler)
 	stranger := sdk.AccAddress(append([]byte{9}, make([]byte, 19)...)).String()
 	require.NotEqual(t, authority, stranger)
@@ -146,7 +133,7 @@ func TestScheduleUpgradeRefusesNonAuthority(t *testing.T) {
 }
 
 func TestCancelUpgradeRefusesNonAuthority(t *testing.T) {
-	scheduler := knowing("v2")
+	scheduler := &recordingScheduler{}
 	msgs, ctx, authority := setupUpgrade(t, scheduler)
 	stranger := sdk.AccAddress(append([]byte{9}, make([]byte, 19)...)).String()
 	require.NotEqual(t, authority, stranger)
@@ -157,7 +144,7 @@ func TestCancelUpgradeRefusesNonAuthority(t *testing.T) {
 }
 
 func TestCancelUpgradeByAuthority(t *testing.T) {
-	scheduler := knowing("v2")
+	scheduler := &recordingScheduler{}
 	msgs, ctx, authority := setupUpgrade(t, scheduler)
 
 	_, err := msgs.ScheduleUpgrade(ctx, &types.MsgScheduleUpgrade{Authority: authority, Name: "v2", Height: 500})
@@ -197,7 +184,7 @@ func TestScheduleUpgradeRejectsUnusablePlans(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			scheduler := knowing("v2")
+			scheduler := &recordingScheduler{}
 			msgs, ctx, authority := setupUpgrade(t, scheduler)
 
 			_, err := msgs.ScheduleUpgrade(ctx, tc.msg(authority))
@@ -224,37 +211,17 @@ func TestUpgradeMessagesRefusedWithoutAScheduler(t *testing.T) {
 // leaves the operator believing a halt is scheduled when none is.
 func TestScheduleUpgradePropagatesModuleError(t *testing.T) {
 	boom := errors.New("upgrade module refused")
-	scheduler := knowing("v2")
-	scheduler.scheduleErr = boom
+	scheduler := &recordingScheduler{scheduleErr: boom}
 	msgs, ctx, authority := setupUpgrade(t, scheduler)
 
 	_, err := msgs.ScheduleUpgrade(ctx, &types.MsgScheduleUpgrade{Authority: authority, Name: "v2", Height: 500})
 	require.ErrorIs(t, err, boom)
 }
 
-// The released binary carries an EMPTY upgrade registry, so this is the default
-// state, not an edge case: every name is unknown until one is compiled in.
-//
-// x/upgrade would accept such a plan — it validates the plan, refuses a past
-// height and refuses a completed name, and checks nothing else. The whole network
-// would then halt at that height with no way to withdraw it, because the chain
-// cannot produce the block that would carry the cancellation.
-func TestScheduleUpgradeRefusesAnUpgradeThisBinaryCannotRun(t *testing.T) {
-	scheduler := knowing() // empty registry, as shipped
-	msgs, ctx, authority := setupUpgrade(t, scheduler)
-
-	_, err := msgs.ScheduleUpgrade(ctx, &types.MsgScheduleUpgrade{
-		Authority: authority, Name: "v2", Height: 500,
-	})
-	require.ErrorIs(t, err, types.ErrInvalidUpgrade)
-	require.Contains(t, err.Error(), "no handler for upgrade")
-	require.Empty(t, scheduler.scheduled, "a plan the binary cannot execute must never reach the upgrade module")
-}
-
 // ClearUpgradePlan returns success when nothing is scheduled, so without an
 // explicit check the message would report a withdrawal that never happened.
 func TestCancelUpgradeRefusesWhenNothingIsScheduled(t *testing.T) {
-	scheduler := knowing("v2")
+	scheduler := &recordingScheduler{}
 	msgs, ctx, authority := setupUpgrade(t, scheduler)
 
 	_, err := msgs.CancelUpgrade(ctx, &types.MsgCancelUpgrade{Authority: authority})
@@ -268,7 +235,7 @@ func TestCancelUpgradeRefusesWhenNothingIsScheduled(t *testing.T) {
 // halt had been withdrawn when it had not.
 func TestCancelUpgradePropagatesModuleError(t *testing.T) {
 	boom := errors.New("upgrade module refused")
-	scheduler := knowing("v2")
+	scheduler := &recordingScheduler{}
 	msgs, ctx, authority := setupUpgrade(t, scheduler)
 
 	_, err := msgs.ScheduleUpgrade(ctx, &types.MsgScheduleUpgrade{Authority: authority, Name: "v2", Height: 500})
@@ -284,7 +251,7 @@ func TestCancelUpgradePropagatesModuleError(t *testing.T) {
 // of surfacing the corruption.
 func TestCancelUpgradePropagatesPendingLookupError(t *testing.T) {
 	boom := errors.New("plan unreadable")
-	scheduler := knowing("v2")
+	scheduler := &recordingScheduler{}
 	scheduler.pendingErr = boom
 	msgs, ctx, authority := setupUpgrade(t, scheduler)
 

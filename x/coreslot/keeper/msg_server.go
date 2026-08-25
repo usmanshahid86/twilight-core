@@ -705,16 +705,29 @@ func (m msgServer) ScheduleUpgrade(
 		return nil, types.ErrInvalidUpgrade.Wrapf(
 			"upgrade height %d is not in the future; the current height is %d", msg.Height, height)
 	}
-	// The binary must already know the name. x/upgrade accepts a plan naming an
-	// upgrade nothing can execute, and the whole network then halts at that height
-	// with no way to withdraw it — the chain cannot produce the block that would
-	// carry the cancellation. Refusing at proposal time is the difference between
-	// a rejected transaction and a coordinated --unsafe-skip-upgrades restart.
-	if !m.upgrades.HasUpgradeHandler(msg.Name) {
-		return nil, types.ErrInvalidUpgrade.Wrapf(
-			"this binary has no handler for upgrade %q, so scheduling it would halt the chain "+
-				"at height %d with no way to cancel", msg.Name, msg.Height)
-	}
+	// Deliberately NOT checked here: whether the RUNNING binary knows this upgrade
+	// name.
+	//
+	// The whole point of a scheduled upgrade is that the binary which executes it
+	// does not exist yet on the nodes that schedule it. x/upgrade enforces the
+	// opposite of a present-handler requirement, and enforces it as a consensus
+	// rule: while a plan is pending and its height has not arrived, a node whose
+	// binary already contains that handler ABORTS THE BLOCK ("BINARY UPDATED
+	// BEFORE TRIGGER"). A scheduling-time requirement that the handler be present
+	// would therefore guarantee a network halt one block later.
+	//
+	// Nor would such a check buy anything. It can only inspect the node that
+	// submits this transaction; it cannot stop a different operator swapping their
+	// binary early days afterwards, which is the failure that actually occurs.
+	// That is x/upgrade's PreBlocker's job, and it runs on every node on every
+	// block for the whole pre-height window.
+	//
+	// A plan naming an upgrade no binary has is recoverable, not fatal: it is
+	// visible through `query upgrade plan` and the event emitted below, and the
+	// authority may cancel it at any point before the height arrives. Only once
+	// the height is reached does the chain stop producing blocks, and by then the
+	// operational answer is to supply the binary. Verifying the name against a
+	// pre-staged, hash-verified build is an operational step, not a chain rule.
 	if err := m.upgrades.ScheduleUpgrade(ctx, msg.Name, msg.Height, msg.Info); err != nil {
 		return nil, err
 	}
