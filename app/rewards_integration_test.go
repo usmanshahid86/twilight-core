@@ -77,9 +77,15 @@ func TestRewardsModuleWiringAndOrdering(t *testing.T) {
 	// mining materializes settlements for whatever epoch rewards just closed, so
 	// it must initialize and end-block after rewards. Its genesis additionally
 	// cross-checks already-imported CoreSlot policies, which is why it is last.
+	// upgrade initializes first: it carries the module version map every other
+	// module's migration path is resolved against.
 	require.Equal(t,
-		[]string{"auth", "bank", "consensus", "coreslot", "rewards", "mining"},
+		[]string{"upgrade", "auth", "bank", "consensus", "coreslot", "rewards", "mining"},
 		a.ModuleManager.OrderInitGenesis)
+	// x/upgrade applies a scheduled plan in PreBlock, before any BeginBlocker.
+	// Pinned here because omitting the entry is silent: plans would still be
+	// accepted and stored, and the chain would run past its own halt height.
+	require.Equal(t, []string{"upgrade", "auth"}, a.ModuleManager.OrderPreBlockers)
 
 	rewModule := a.ModuleManager.Modules[rewardstypes.ModuleName]
 	// Rewards uses the modern, error-only lifecycle interfaces...

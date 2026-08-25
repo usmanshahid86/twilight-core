@@ -23,6 +23,8 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgUpdateSettlementAddress{},
 		&MsgUpdateSelectionPolicy{},
 		&MsgUpdateParams{},
+		&MsgScheduleUpgrade{},
+		&MsgCancelUpgrade{},
 	)
 	cryptocodec.RegisterInterfaces(registry)
 	msgservice.RegisterMsgServiceDesc(registry, &_Msg_serviceDesc)

@@ -44,7 +44,7 @@ func setupWithRawStore(t *testing.T, blocked ...string) (keeper.Keeper, sdk.Cont
 	key := keys[types.StoreKey]
 	cms := integration.CreateMultiStore(keys, log.NewNopLogger())
 	ctx := sdk.NewContext(cms, cmtproto.Header{Height: 1}, false, log.NewNopLogger())
-	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(key), testEconomicAddresses(t, blocked...))
+	k := keeper.NewKeeper(cdc, runtime.NewKVStoreService(key), testEconomicAddresses(t, blocked...), nil)
 	authority := sdk.AccAddress(make([]byte, 20)).String()
 	emergency := sdk.AccAddress(append([]byte{1}, make([]byte, 19)...)).String()
 	return k, ctx, authority, emergency, key

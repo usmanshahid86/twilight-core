@@ -7,6 +7,7 @@ import (
 	bankmodulev1 "cosmossdk.io/api/cosmos/bank/module/v1"
 	consensusmodulev1 "cosmossdk.io/api/cosmos/consensus/module/v1"
 	txconfigv1 "cosmossdk.io/api/cosmos/tx/config/v1"
+	upgrademodulev1 "cosmossdk.io/api/cosmos/upgrade/module/v1"
 	"cosmossdk.io/core/appconfig"
 	"cosmossdk.io/depinject"
 
@@ -58,7 +59,21 @@ var AppConfig = depinject.Configs(
 					// mining initializes last: its genesis cross-checks already-imported
 					// CoreSlot policies against the initial Selection parameters, and
 					// x/coreslot must gain no dependency on x/mining for that check.
-					InitGenesis: []string{"auth", "bank", "consensus", "coreslot", "rewards", "mining"},
+					InitGenesis: []string{"upgrade", "auth", "bank", "consensus", "coreslot", "rewards", "mining"},
+					// x/upgrade executes a scheduled plan in PreBlock, before any
+					// BeginBlocker runs. Omitting it here is silent and total: plans
+					// are still stored and still queryable, but nothing ever applies
+					// them, so the chain sails past its own halt height and the
+					// upgrade appears to have been ignored.
+					//
+					// Every module that HAS a PreBlocker must be listed: the module
+					// manager refuses a partial list rather than silently skipping
+					// what was left out. x/auth has one (the unordered-transaction
+					// manager), so it appears here even though nothing about the
+					// upgrade path needs it. Upgrade runs first, matching the SDK's
+					// own ordering — a scheduled halt must be decided before any
+					// other module does per-block work.
+					PreBlockers: []string{"upgrade", "auth"},
 					// rewards credits active blocks at BeginBlock; coreslot has no
 					// BeginBlocker.
 					BeginBlockers: []string{"rewards"},
@@ -79,6 +94,13 @@ var AppConfig = depinject.Configs(
 				}),
 			},
 			{Name: "bank", Config: appconfig.WrapAny(&bankmodulev1.Module{Authority: AuthorityModuleName})},
+			// x/upgrade defaults its authority to the governance module account,
+			// which is why the module is often assumed to require governance. It
+			// does not. Pointing it at the authority this chain already uses for
+			// auth, bank and consensus adds no new trust assumption: the role that
+			// admits validators and updates parameters also schedules upgrades.
+			// See ADR-0003.
+			{Name: "upgrade", Config: appconfig.WrapAny(&upgrademodulev1.Module{Authority: AuthorityModuleName})},
 			{Name: "consensus", Config: appconfig.WrapAny(&consensusmodulev1.Module{Authority: AuthorityModuleName})},
 			{Name: "tx", Config: appconfig.WrapAny(&txconfigv1.Config{})},
 		},

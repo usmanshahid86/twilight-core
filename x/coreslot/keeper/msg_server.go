@@ -655,3 +655,105 @@ func (m msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams)
 	emitParamsUpdated(ctx, msg.Authority)
 	return &types.MsgUpdateParamsResponse{}, nil
 }
+
+// ScheduleUpgrade records a coordinated halt at a height.
+//
+// # Why this lives in x/coreslot
+//
+// x/upgrade fixes its authority at keeper construction and compares a message
+// signer against it directly. This application gives it the coreslot-authority
+// MODULE address, which is derived from a name and has no private key, so
+// MsgSoftwareUpgrade cannot be signed by anyone and this handler is the only way
+// a plan is ever scheduled.
+//
+// That is deliberate rather than a workaround. The alternative — compiling a real
+// account address into the binary as a second authority — would create a role that
+// can drift from Params.authority, sits outside the authority-rotation rules, and
+// can only be changed by performing an upgrade. Reading the authority from chain
+// state here means there is exactly one authority on this chain, and rotating it
+// rotates who may upgrade with nothing to keep in sync. See ADR-0003.
+func (m msgServer) ScheduleUpgrade(
+	ctx context.Context, msg *types.MsgScheduleUpgrade,
+) (*types.MsgScheduleUpgradeResponse, error) {
+	if m.upgrades == nil {
+		return nil, types.ErrUpgradeUnavailable
+	}
+	params, err := m.Params.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if msg.Authority != params.Authority {
+		return nil, types.ErrUnauthorized
+	}
+	// Checked after authorization, so an unauthorized caller learns nothing about
+	// which plans the chain would accept.
+	if msg.Name == "" {
+		return nil, types.ErrInvalidUpgrade.Wrap("upgrade name is required")
+	}
+	// A height at or below the current one cannot be halted at.
+	//
+	// x/upgrade does NOT refuse the equal case — it compares plan.Height < current
+	// and deliberately permits same-height scheduling as an emergency hard-fork
+	// recovery path. This chain has no use for that and refuses it, so the rule is
+	// this handler's own rather than inherited.
+	//
+	// HeaderInfo().Height, not BlockHeight(): x/upgrade reads the former, and the
+	// two diverge in any context not built by baseapp because WithBlockHeight
+	// updates only the header. Reading the same source is what makes this check
+	// agree with the module it delegates to.
+	if height := sdk.UnwrapSDKContext(ctx).HeaderInfo().Height; msg.Height <= height {
+		return nil, types.ErrInvalidUpgrade.Wrapf(
+			"upgrade height %d is not in the future; the current height is %d", msg.Height, height)
+	}
+	// The binary must already know the name. x/upgrade accepts a plan naming an
+	// upgrade nothing can execute, and the whole network then halts at that height
+	// with no way to withdraw it — the chain cannot produce the block that would
+	// carry the cancellation. Refusing at proposal time is the difference between
+	// a rejected transaction and a coordinated --unsafe-skip-upgrades restart.
+	if !m.upgrades.HasUpgradeHandler(msg.Name) {
+		return nil, types.ErrInvalidUpgrade.Wrapf(
+			"this binary has no handler for upgrade %q, so scheduling it would halt the chain "+
+				"at height %d with no way to cancel", msg.Name, msg.Height)
+	}
+	if err := m.upgrades.ScheduleUpgrade(ctx, msg.Name, msg.Height, msg.Info); err != nil {
+		return nil, err
+	}
+	emitUpgradeScheduled(ctx, msg.Authority, msg.Name, msg.Height, msg.Info)
+	return &types.MsgScheduleUpgradeResponse{}, nil
+}
+
+// CancelUpgrade withdraws a scheduled plan before its height.
+//
+// Withdrawing is authorized identically to scheduling. A plan that could be set
+// but not unset would turn a mistyped height into an unavoidable halt.
+func (m msgServer) CancelUpgrade(
+	ctx context.Context, msg *types.MsgCancelUpgrade,
+) (*types.MsgCancelUpgradeResponse, error) {
+	if m.upgrades == nil {
+		return nil, types.ErrUpgradeUnavailable
+	}
+	params, err := m.Params.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if msg.Authority != params.Authority {
+		return nil, types.ErrUnauthorized
+	}
+	// Refuse when nothing is scheduled. x/upgrade's ClearUpgradePlan returns
+	// success in that case, so without this the message would emit
+	// coreslot_upgrade_canceled for a withdrawal that never happened — telling an
+	// indexer that a plan was pulled, and telling an operator who mistyped that
+	// they just canceled a real one.
+	pending, err := m.upgrades.PendingUpgrade(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if pending == "" {
+		return nil, types.ErrInvalidUpgrade.Wrap("no upgrade is scheduled")
+	}
+	if err := m.upgrades.CancelUpgrade(ctx); err != nil {
+		return nil, err
+	}
+	emitUpgradeCanceled(ctx, msg.Authority, pending)
+	return &types.MsgCancelUpgradeResponse{}, nil
+}
