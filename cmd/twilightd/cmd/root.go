@@ -68,6 +68,13 @@ func BasicManager() module.BasicManager {
 		// x/upgrade mounts a store, so `twilightd init` must write its genesis
 		// section. A module the node initializes but the CLI omits produces a
 		// genesis whose store is never written.
+		//
+		// The zero value leaves the module's address codec nil, and there is no
+		// exported constructor in x/upgrade v0.2.0 to supply one — the field is
+		// unexported. That is safe only because this manager is used for genesis
+		// alone (InitCmd and DefaultGenesis); AppModuleBasic.GetTxCmd would
+		// dereference the nil codec, so do not pass this manager to
+		// AddTxCommands.
 		upgrade.AppModuleBasic{},
 	)
 }

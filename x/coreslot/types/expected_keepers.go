@@ -20,4 +20,14 @@ type UpgradeScheduler interface {
 	ScheduleUpgrade(ctx context.Context, name string, height int64, info string) error
 	// CancelUpgrade withdraws the scheduled plan, if any.
 	CancelUpgrade(ctx context.Context) error
+	// HasUpgradeHandler reports whether the running binary can execute the named
+	// upgrade.
+	//
+	// The upgrade module does NOT check this when a plan is scheduled, so without
+	// it a plan naming an unknown upgrade is accepted and every node halts at its
+	// height with no way to cancel — the chain cannot produce the block that would
+	// carry the cancellation.
+	HasUpgradeHandler(name string) bool
+	// PendingUpgrade returns the scheduled plan's name, or "" when none is set.
+	PendingUpgrade(ctx context.Context) (string, error)
 }

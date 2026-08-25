@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 
 	storetypes "cosmossdk.io/store/types"
 	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
@@ -12,6 +13,9 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/module"
 
 	coreslotkeeper "github.com/twilight-project/twilight-core/x/coreslot/keeper"
+	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
+	miningkeeper "github.com/twilight-project/twilight-core/x/mining/keeper"
+	rewardskeeper "github.com/twilight-project/twilight-core/x/rewards/keeper"
 )
 
 // The registry of every named upgrade this binary can execute.
@@ -38,16 +42,33 @@ type Upgrade struct {
 	//
 	// It runs AFTER module migrations, so it observes state already at the new
 	// consensus version rather than a half-migrated mixture.
-	Migrate func(ctx sdk.Context, coreSlot coreslotkeeper.Keeper) error
+	Migrate func(ctx sdk.Context, k MigrationKeepers) error
+}
+
+// MigrationKeepers is everything a migration may reach.
+//
+// All three are passed even though no upgrade exists yet, deliberately. Entries
+// in the registry are append-only and may never be edited once released, so a
+// later signature change to reach rewards or mining state would have to rewrite
+// handlers that shipped — which is exactly what that rule forbids. The cost of
+// widening it now is nothing; the cost of widening it later is a rule violation.
+//
+// It matters most for the value-critical modules: the fail-closed reasoning below
+// is about outstanding entitlement liability, which lives in rewards, not in
+// CoreSlot.
+type MigrationKeepers struct {
+	CoreSlot coreslotkeeper.Keeper
+	Rewards  rewardskeeper.Keeper
+	Mining   miningkeeper.Keeper
 }
 
 // Upgrades is the live registry. It is deliberately empty in the released binary:
 // no upgrade has been performed on any long-lived chain yet, and an entry here is
 // a commitment that cannot be withdrawn.
 //
-// The upgrade drill appends a test entry under the `upgradedrill` build tag, so
-// the mechanism is exercised end to end without shipping a test upgrade to
-// operators.
+// Because it is empty, NO upgrade name is currently executable. ScheduleUpgrade
+// refuses a plan naming an upgrade this binary does not know, which is what stops
+// an empty registry from turning an accepted plan into an unrecoverable halt.
 var Upgrades []Upgrade
 
 // registerUpgradeHandlers binds every declared upgrade to the keeper.
@@ -60,7 +81,10 @@ func registerUpgradeHandlers(
 	runtimeApp *runtime.App,
 	upgradeKeeper *upgradekeeper.Keeper,
 	coreSlot coreslotkeeper.Keeper,
+	rewards rewardskeeper.Keeper,
+	mining miningkeeper.Keeper,
 ) {
+	keepers := MigrationKeepers{CoreSlot: coreSlot, Rewards: rewards, Mining: mining}
 	for _, upgrade := range Upgrades {
 		upgrade := upgrade
 		upgradeKeeper.SetUpgradeHandler(
@@ -78,7 +102,7 @@ func registerUpgradeHandlers(
 					// the node halts. A migration that half-applied against
 					// outstanding entitlement liability would not be recoverable by
 					// retrying.
-					if err := upgrade.Migrate(sdk.UnwrapSDKContext(ctx), coreSlot); err != nil {
+					if err := upgrade.Migrate(sdk.UnwrapSDKContext(ctx), keepers); err != nil {
 						return nil, err
 					}
 				}
@@ -126,10 +150,51 @@ func setUpgradeStoreLoader(runtimeApp *runtime.App, upgradeKeeper *upgradekeeper
 // than validated away.
 type upgradeScheduler struct{ keeper *upgradekeeper.Keeper }
 
+// The nil checks guard the keeper, not the interface. x/coreslot holds this as a
+// non-nil interface value wrapping a struct, so a nil check on its side can never
+// fire in the real application — only the pointer inside can be absent, and
+// dereferencing it would panic inside a message handler, halting the chain at an
+// arbitrary block.
 func (s upgradeScheduler) ScheduleUpgrade(ctx context.Context, name string, height int64, info string) error {
+	if s.keeper == nil {
+		return coreslottypes.ErrUpgradeUnavailable
+	}
 	return s.keeper.ScheduleUpgrade(ctx, upgradetypes.Plan{Name: name, Height: height, Info: info})
 }
 
 func (s upgradeScheduler) CancelUpgrade(ctx context.Context) error {
+	if s.keeper == nil {
+		return coreslottypes.ErrUpgradeUnavailable
+	}
 	return s.keeper.ClearUpgradePlan(ctx)
+}
+
+// HasUpgradeHandler reports whether THIS binary can execute the named upgrade.
+//
+// x/upgrade does not check this when a plan is scheduled — it validates the plan,
+// refuses a past height and refuses a completed name, and nothing more. So a plan
+// naming an upgrade no binary knows is accepted, and every node then panics at the
+// halt height with UPGRADE NEEDED. Recovery at that point requires every operator
+// to restart with --unsafe-skip-upgrades, because the chain cannot produce the
+// block that would carry a cancellation.
+func (s upgradeScheduler) HasUpgradeHandler(name string) bool {
+	if s.keeper == nil {
+		return false
+	}
+	return s.keeper.HasHandler(name)
+}
+
+// PendingUpgrade reports the name of the scheduled plan, or "" when none is set.
+func (s upgradeScheduler) PendingUpgrade(ctx context.Context) (string, error) {
+	if s.keeper == nil {
+		return "", coreslottypes.ErrUpgradeUnavailable
+	}
+	plan, err := s.keeper.GetUpgradePlan(ctx)
+	if err != nil {
+		if errors.Is(err, upgradetypes.ErrNoUpgradePlanFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	return plan.Name, nil
 }

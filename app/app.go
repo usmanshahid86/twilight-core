@@ -17,8 +17,12 @@ import (
 	storetypes "cosmossdk.io/store/types"
 	_ "cosmossdk.io/x/upgrade"
 	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
+
+	"github.com/spf13/cast"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
+	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/codec"
 	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
@@ -101,9 +105,22 @@ func (a *App) AutoCliOpts() autocli.AppOptions {
 			modules[name] = am
 		}
 	}
+	moduleOptions := runtimeservices.ExtractAutoCLIOptions(a.ModuleManager.Modules)
+	// x/upgrade's generated tx commands all submit GOVERNANCE proposals, and this
+	// chain has no governance module — so `tx upgrade software-upgrade` and its
+	// siblings build a MsgSubmitProposal nothing can route, and an operator who
+	// finds them instead of `tx coreslot schedule-upgrade` gets a failure at
+	// broadcast time with no indication why.
+	//
+	// Only the tx tree is dropped. The queries stay: `query upgrade plan` is how an
+	// operator sees a pending halt, which matters more here than anywhere, because
+	// scheduling is deliberately routed through x/coreslot instead.
+	if opts, ok := moduleOptions[upgradetypes.ModuleName]; ok && opts != nil {
+		opts.Tx = nil
+	}
 	return autocli.AppOptions{
 		Modules:               modules,
-		ModuleOptions:         runtimeservices.ExtractAutoCLIOptions(a.ModuleManager.Modules),
+		ModuleOptions:         moduleOptions,
 		AddressCodec:          addresscodec.NewBech32Codec(AccountPrefix),
 		ValidatorAddressCodec: addresscodec.NewBech32Codec(AccountPrefix + "valoper"),
 		ConsensusAddressCodec: addresscodec.NewBech32Codec(AccountPrefix + "valcons"),
@@ -124,6 +141,12 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 	// simply never learns that it is resuming into a new store layout, which is a
 	// silent divergence rather than an error. depinject marks the input optional,
 	// so the omission would not be reported either.
+	// Resolved here as well as inside x/upgrade, because the store-loader call
+	// below has to know whether a real home exists before touching the filesystem.
+	var homePath string
+	if appOpts != nil {
+		homePath = cast.ToString(appOpts.Get(flags.FlagHome))
+	}
 	configs := []depinject.Config{AppConfig, depinject.Supply(logger)}
 	if appOpts != nil {
 		// Supplied separately because depinject panics on a nil interface value
@@ -197,11 +220,37 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 	if err := runtimeApp.RegisterModules(coreSlotModule, rewardsModule, miningModule); err != nil {
 		panic(err)
 	}
-	// Both must run BEFORE Load: the store loader decides which stores are mounted,
-	// and handler registration has to be in place for the keeper to answer whether
-	// it knows an upgrade name at the moment a plan is proposed.
-	registerUpgradeHandlers(runtimeApp, upgradeKeeper, coreSlotKeeper)
-	setUpgradeStoreLoader(runtimeApp, upgradeKeeper)
+	// The version map persisted at genesis MUST cover every module the app mounts.
+	//
+	// x/upgrade's depinject invoker (PopulateVersionMap) only sees the modules
+	// depinject itself wired — auth, bank, consensus, runtime, upgrade. The three
+	// custom modules are registered above, afterwards, so without this line they
+	// never reach the map InitGenesis stores.
+	//
+	// The consequence is not a missing entry, it is data loss. At the first
+	// upgrade, RunMigrations reads the stored map, finds coreslot, rewards and
+	// mining absent, classifies each as a NEW module, and runs its InitGenesis
+	// with DefaultGenesis over live state — a default validator set over the real
+	// one, and a default rewards genesis over outstanding entitlement liability.
+	//
+	// Set from the module manager, after RegisterModules, so the map is the one
+	// the app actually runs rather than the one depinject happened to assemble.
+	upgradeKeeper.SetInitVersionMap(runtimeApp.ModuleManager.GetVersionMap())
+
+	// Must run BEFORE Load: handler registration has to be in place for the keeper
+	// to answer whether it knows an upgrade name at the moment a plan is proposed.
+	registerUpgradeHandlers(runtimeApp, upgradeKeeper, coreSlotKeeper, rewardsKeeper, miningKeeper)
+
+	// Only when a home directory is actually configured. Reading the upgrade-info
+	// file creates <home>/data, so with an empty home it would create a relative
+	// "data" directory in the process's working directory — on every twilightd
+	// invocation, including `version` and `--help`, because the root command
+	// builds a throwaway app to extract AutoCLI options. It also panics outright
+	// when the working directory is read-only, which is a routine container and
+	// systemd hardening setup.
+	if homePath != "" {
+		setUpgradeStoreLoader(runtimeApp, upgradeKeeper)
+	}
 
 	if err := runtimeApp.Load(loadLatest); err != nil {
 		panic(err)

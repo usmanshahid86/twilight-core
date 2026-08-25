@@ -174,8 +174,11 @@ func emitUpgradeScheduled(ctx context.Context, authority, name string, height in
 	)
 }
 
-func emitUpgradeCanceled(ctx context.Context, authority string) {
+// emitUpgradeCanceled names the plan that was actually withdrawn, so the event
+// records which halt was called off rather than only that someone called one off.
+func emitUpgradeCanceled(ctx context.Context, authority, name string) {
 	emit(ctx, types.EventTypeUpgradeCanceled,
 		sdk.NewAttribute(types.AttributeKeyAuthority, authority),
+		sdk.NewAttribute(types.AttributeKeyUpgradeName, name),
 	)
 }
