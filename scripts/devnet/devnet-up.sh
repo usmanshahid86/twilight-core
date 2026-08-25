@@ -11,12 +11,17 @@ set -euo pipefail
 #   PUBLIC_IP   the instance's public IP or DNS (advertised to peers)
 # Optional env (devnet defaults):
 #   CHAIN_ID=twilight-devnet-1  HOME_DIR=~/.twilight-devnet
-#   MONIKER=twilight-devnet-validator  EPOCH_LENGTH=60 (~5 min epochs at 5s blocks)
+#   MONIKER=twilight-devnet-validator  EPOCH_LENGTH=360 (the ratified minimum)
 #   RPC_PORT=26657  P2P_PORT=26656  FAUCET_BALANCE=1000000000000
 #
 # Re-running wipes HOME_DIR and regenerates a FRESH genesis (the upgrade/reboot
 # path — team re-joins). To restart without losing state, just restart the node;
 # do not re-run this script.
+#
+# The wipe destroys priv_validator_key.json and the keyring along with chain
+# state, so it refuses to run over an existing validator identity unless FORCE=1
+# is set. Re-genesis is the intended path; doing it by accident on a host whose
+# key matters is not.
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${BIN:-$ROOT/build/twilightd}"
@@ -24,7 +29,13 @@ PUBLIC_IP="${PUBLIC_IP:?set PUBLIC_IP to the instance public IP/DNS}"
 CHAIN_ID="${CHAIN_ID:-twilight-devnet-1}"
 HOME_DIR="${HOME_DIR:-$HOME/.twilight-devnet}"
 MONIKER="${MONIKER:-twilight-devnet-validator}"
-EPOCH_LENGTH="${EPOCH_LENGTH:-60}"
+# The admissible interval is immutable and genesis refuses anything outside it
+# (app/params/bounds.go). The old default of 60 predates that floor and could not
+# open a chain at all — the node failed in rewards InitGenesis after this script
+# had already printed its success banner.
+EPOCH_LENGTH="${EPOCH_LENGTH:-360}"
+EPOCH_MIN=360
+EPOCH_MAX=720
 RPC_PORT="${RPC_PORT:-26657}"
 P2P_PORT="${P2P_PORT:-26656}"
 FAUCET_BALANCE="${FAUCET_BALANCE:-1000000000000}"
@@ -35,6 +46,20 @@ command -v jq >/dev/null || { echo "need jq" >&2; exit 2; }
 if [[ ! -x "$BIN" ]]; then
   mkdir -p "$ROOT/build"
   GOCACHE="${GOCACHE:-$HOME/.cache/go-build}" go build -o "$BIN" "$ROOT/cmd/twilightd"
+fi
+
+if ! [[ "$EPOCH_LENGTH" =~ ^[0-9]+$ ]] \
+   || (( EPOCH_LENGTH < EPOCH_MIN )) || (( EPOCH_LENGTH > EPOCH_MAX )); then
+  echo "EPOCH_LENGTH=$EPOCH_LENGTH is outside the immutable interval [$EPOCH_MIN, $EPOCH_MAX];" >&2
+  echo "genesis would be refused at start. Refusing here instead." >&2
+  exit 2
+fi
+
+if [[ -f "$HOME_DIR/config/priv_validator_key.json" && "${FORCE:-0}" != "1" ]]; then
+  echo "$HOME_DIR already holds a validator identity (priv_validator_key.json)." >&2
+  echo "Wiping it would destroy that key and the keyring, not just chain state." >&2
+  echo "Re-run with FORCE=1 if a fresh genesis really is intended." >&2
+  exit 2
 fi
 
 rm -rf "$HOME_DIR"
@@ -57,12 +82,22 @@ pubkey="$(sed -n 's/.*"value": "\([^"]*\)".*/\1/p' "$HOME_DIR/config/priv_valida
 "$BIN" coreslot-genesis add "$authority" "$authority" "$authority" "$pubkey" "$MONIKER" --home "$HOME_DIR"
 "$BIN" coreslot-genesis validate --home "$HOME_DIR"
 
-# Devnet-friendly epoch length so rewards are visible in minutes.
+# Epoch geometry. All THREE fields move together: EpochConfigVersion is the sole
+# authority and the other two are deprecated mirrors that fresh genesis requires
+# to AGREE with it. Patching only the mirrors produced a genesis that fails
+# validation for every value, valid ones included — the old two-field patch was
+# broken at 720 exactly as it was at 60.
 g="$HOME_DIR/config/genesis.json"; tmp="$g.tmp"
 jq --arg e "$EPOCH_LENGTH" '
   .app_state.rewards.params.epoch_length_blocks = $e
   | .app_state.rewards.current_epoch_config.epoch_length_blocks = $e
+  | .app_state.rewards.epoch_config_versions[0].epoch_length_blocks = $e
 ' "$g" >"$tmp" && mv "$tmp" "$g"
+
+# Validate the WHOLE document, not one module. `coreslot-genesis validate` checks
+# only coreslot state, which is why this script could report success and leave a
+# genesis that dies at start. This runs every module's ValidateGenesis.
+"$BIN" validate-genesis "$g" --home "$HOME_DIR"
 
 # Expose: RPC on 0.0.0.0, advertise public p2p address, CORS for web tools,
 # gasless. Single seed node => no persistent_peers, pex stays on for discovery.

@@ -120,6 +120,12 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(
 		genutilcli.InitCmd(basicManager, app.DefaultNodeHome),
 		genutilcli.AddGenesisAccountCmd(app.DefaultNodeHome, encoding.InterfaceRegistry.SigningContext().AddressCodec()),
+		// Validates the WHOLE document by running every module's ValidateGenesis.
+		// Without it the only genesis check on the binary was
+		// `coreslot-genesis validate`, which inspects one module's state and says
+		// nothing about the rest — so an assembly tool could report success and
+		// leave a genesis that fails at `start`, which is exactly what happened.
+		genutilcli.ValidateGenesisCmd(basicManager),
 		debug.Cmd(),
 		pruning.Cmd(newApp, app.DefaultNodeHome),
 		snapshot.Cmd(newApp),
