@@ -338,9 +338,27 @@ phase_begin
 echo "=== 5. epoch geometry and a settlement that will span the boundary ==="
 read_required_uint EPOCH_LEN q_epoch_len 0 || die "the epoch length could not be read"
 ok "epoch length is $EPOCH_LEN blocks (protocol value, not shortened)"
-for n in 0 1 2 3; do
-  wait_height_node "$n" $((EPOCH_LEN + 2)) 900 || die "node$n did not reach the first epoch boundary"
-done
+# Waited for with a liveness guard rather than a bare timeout: if the validators
+# are gone, the chain is not slow, and spending the full timeout to discover that
+# hides the difference between a stalled chain and processes that died or were
+# killed. Those are different failures and the report must not conflate them.
+wait_epoch_close() {
+  local target=$((EPOCH_LEN + 2)) deadline=$((SECONDS + 900)) n live h reached
+  while ((SECONDS < deadline)); do
+    live=0
+    for n in 0 1 2 3; do node_alive "$n" && live=$((live + 1)); done
+    (( live < 4 )) && die "only $live of 4 validators are still running before the epoch boundary; the chain did not stall, its processes are gone"
+    reached=0
+    for n in 0 1 2 3; do
+      h="$(app_height "$n" 2>/dev/null)"
+      [[ "$h" =~ ^[0-9]+$ ]] && (( h >= target )) && reached=$((reached + 1))
+    done
+    (( reached == 4 )) && return 0
+    sleep 2
+  done
+  die "the validators did not reach the first epoch boundary within the timeout"
+}
+wait_epoch_close
 sleep 2
 SLOT_ID=1; SETTLE_EPOCH=1
 SETTLEMENT="$(q_node 0 mining-query settlement "$SLOT_ID" "$SETTLE_EPOCH")"
