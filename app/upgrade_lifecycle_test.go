@@ -235,6 +235,12 @@ func TestRealUpgradeLifecycleOldBinarySchedulesNewBinaryExecutes(t *testing.T) {
 	require.Equal(t, upgradeName, info.Name)
 	require.Equal(t, upgradeHeight, info.Height)
 
+	// Stated rather than implied: the halted binary committed nothing at H. B
+	// resuming that height would otherwise be the only evidence, and that is an
+	// inference about the harness rather than an assertion about the chain.
+	require.Equal(t, upgradeHeight-1, binaryA.LastBlockHeight(),
+		"the halted binary must not have committed the upgrade height")
+
 	// ---------- Binary B: knows probe-v2, same database ----------
 	migrated := 0
 	withUpgrades(t, []app.Upgrade{{
@@ -268,6 +274,21 @@ func TestRealUpgradeLifecycleOldBinarySchedulesNewBinaryExecutes(t *testing.T) {
 	for name := range binaryB.ModuleManager.Modules {
 		require.Contains(t, stored, name, "module %q missing from the post-upgrade version map", name)
 	}
+
+	// A restart AFTER the upgrade, with the stale upgrade-info.json still on disk
+	// and the handler still compiled in, must not re-apply anything. Operators
+	// restart nodes for unrelated reasons, and the file is not cleaned up — so the
+	// only thing standing between a routine restart and a second migration is the
+	// store loader's height guard and the consumed plan.
+	require.FileExists(t, infoPath, "the upgrade-info file is deliberately left in place")
+	binaryC := newAppWithHome(t, db, home)
+	require.Equal(t, upgradeHeight+1, binaryC.LastBlockHeight(),
+		"a restart must resume from the committed height")
+	require.NoError(t, finalize(binaryC, upgradeHeight+2))
+	_, err = binaryC.Commit()
+	require.NoError(t, err)
+	require.Equal(t, 1, migrated,
+		"restarting with a stale upgrade-info file must not re-run the migration")
 }
 
 // Upstream's rule, pinned: a binary that ALREADY holds a pending upgrade's

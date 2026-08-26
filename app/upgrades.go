@@ -82,17 +82,19 @@ type MigrationKeepers struct {
 // no upgrade has been performed on any long-lived chain yet, and an entry here is
 // a commitment that cannot be withdrawn.
 //
-// Because it is empty, NO upgrade name is currently executable. ScheduleUpgrade
-// refuses a plan naming an upgrade this binary does not know, which is what stops
-// an empty registry from turning an accepted plan into an unrecoverable halt.
+// An empty registry does NOT prevent a plan being scheduled, and must not — the
+// binary that executes an upgrade does not exist yet on the nodes that schedule
+// it. What makes an empty registry safe is that a plan naming an upgrade this
+// binary cannot run stays visible through `query upgrade plan` and the
+// coreslot_upgrade_scheduled event, and remains cancellable by the authority for
+// the whole window before its height. Only when that height arrives do blocks
+// stop, and the answer then is to supply the binary.
+//
+// A scheduling-time check that the name is known would be worse than useless: it
+// is the state upstream aborts the block on for every height before the upgrade's
+// own. See ADR-0003 §1b.
 var Upgrades []Upgrade
 
-// registerUpgradeHandlers binds every declared upgrade to the keeper.
-//
-// Registration is unconditional and happens on every start, not only when an
-// upgrade is pending: the keeper has to be able to answer "do I know this name?"
-// at the moment a plan is submitted, so that a plan naming an unknown upgrade is
-// refused when it is proposed rather than discovered at the halt height.
 // ValidateUpgrades rejects a registry that cannot be executed unambiguously.
 //
 // A duplicate name is the dangerous case, and it is dangerous asymmetrically:
@@ -122,6 +124,14 @@ func ValidateUpgrades(upgrades []Upgrade) error {
 	return nil
 }
 
+// registerUpgradeHandlers binds every declared upgrade to the keeper, and refuses
+// to start on a registry that cannot be executed unambiguously.
+//
+// Registration is unconditional and happens on every start, not only when an
+// upgrade is pending. It exists so that the binary carrying a handler can EXECUTE
+// it at the upgrade height — Binary B's job. It is not there to let a binary vet
+// a name being scheduled: a binary that holds a pending upgrade's handler before
+// that upgrade's height is precisely what upstream aborts the block on.
 func registerUpgradeHandlers(
 	runtimeApp *runtime.App,
 	upgradeKeeper *upgradekeeper.Keeper,
@@ -260,9 +270,15 @@ func requireCompleteModuleVersionMap(
 		return nil
 	}
 	sort.Strings(missing)
+	// State what was observed, then offer the likeliest cause. The guard is broader
+	// than that one cause — it also catches a version map prepared incompletely at
+	// wiring time, where the section IS present and InitGenesis DID run — and an
+	// error naming only the missing section would send an operator to inspect a
+	// genesis file that is correct.
 	return fmt.Errorf(
-		"genesis left no committed module version for %s; the genesis document is missing the "+
-			"%q section, so x/upgrade's InitGenesis never ran and the first upgrade would treat "+
-			"those modules as newly added and run their InitGenesis over live state",
+		"genesis committed no module version for %s, so the stored version map does not describe "+
+			"every mounted module; the first upgrade would treat those modules as newly added and "+
+			"run their InitGenesis over live state. The usual cause is a genesis document with no "+
+			"%q section, which makes the module manager skip x/upgrade's InitGenesis entirely",
 		strings.Join(missing, ", "), upgradetypes.ModuleName)
 }
