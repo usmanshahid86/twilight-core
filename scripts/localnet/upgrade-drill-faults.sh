@@ -279,7 +279,7 @@ mk_evidence() { # <dir>
     echo x >"$1/$f"
   done
   : >"$1/upgrade.jsonl"
-  printf '{"assertion":"only_one"}\n' >"$1/upgrade.jsonl"
+  printf '{"assertion":"only_one","node":"-"}\n' >"$1/upgrade.jsonl"
 }
 run_finish() { # <dir> <multiset> <total> <rows-recorded> [<phases-expected>]
   local d="$1" rc
@@ -290,21 +290,46 @@ run_finish() { # <dir> <multiset> <total> <rows-recorded> [<phases-expected>]
   printf '%s:%s' "$rc" "$(cat "$d/verdict.txt" 2>/dev/null)"
 }
 D="$TMP/e1"; mk_evidence "$D"
-check "complete evidence passes"    "0:PASS" "$(run_finish "$D" "only_one:1" 1 15)"
+check "complete evidence passes"    "0:PASS" "$(run_finish "$D" "only_one|-:1" 1 15)"
 D="$TMP/e2"; mk_evidence "$D"; rm "$D/hashes.jsonl"
-check "a missing file fails"        "1:FAIL" "$(run_finish "$D" "only_one:1" 1 15)"
+check "a missing file fails"        "1:FAIL" "$(run_finish "$D" "only_one|-:1" 1 15)"
 D="$TMP/e3"; mk_evidence "$D"; rm "$D/plan-response-cleared.json"
-check "missing plan evidence fails" "1:FAIL" "$(run_finish "$D" "only_one:1" 1 15)"
+check "missing plan evidence fails" "1:FAIL" "$(run_finish "$D" "only_one|-:1" 1 15)"
 D="$TMP/e4"; mk_evidence "$D"
-check "a wrong multiset fails"      "1:FAIL" "$(run_finish "$D" "only_one:4" 1 15)"
+check "a wrong multiset fails"      "1:FAIL" "$(run_finish "$D" "only_one|-:4" 1 15)"
 D="$TMP/e5"; mk_evidence "$D"
-check "a redistributed multiset fails" "1:FAIL" "$(run_finish "$D" "other_name:1" 1 15)"
+check "a redistributed multiset fails" "1:FAIL" "$(run_finish "$D" "other_name|-:1" 1 15)"
 D="$TMP/e6"; mk_evidence "$D"
-check "a short phase count fails"   "1:FAIL" "$(run_finish "$D" "only_one:1" 1 14 15)"
+check "a short phase count fails"   "1:FAIL" "$(run_finish "$D" "only_one|-:1" 1 14 15)"
 # A failed closing write must never leave PASS behind on disk.
 D="$TMP/e7"; mk_evidence "$D"; chmod 400 "$D/summary.csv"
-check "unwritable summary leaves FAIL" "1:FAIL" "$(run_finish "$D" "only_one:1" 1 15)"
+check "unwritable summary leaves FAIL" "1:FAIL" "$(run_finish "$D" "only_one|-:1" 1 15)"
 chmod 600 "$D/summary.csv"
+
+# The concrete regression the name-only multiset could not see.
+#
+# migration_applied legitimately spans two phases — nodes 0-2 when the upgraded
+# majority crosses the boundary, node 3 after the stale node rejoins. So a run that
+# lost the node-3 check and double-counted node 0 still emits four of them, and a
+# contract keyed on the name alone cannot tell that apart from the correct fan-out.
+# What is lost is the proof that the stale node ever applied the migration.
+D="$TMP/e8"; mk_evidence "$D"
+printf '%s\n' \
+  '{"assertion":"migration_applied","node":"0"}' \
+  '{"assertion":"migration_applied","node":"0"}' \
+  '{"assertion":"migration_applied","node":"1"}' \
+  '{"assertion":"migration_applied","node":"2"}' >"$D/upgrade.jsonl"
+check "name-only view cannot see the loss" "migration_applied:4" \
+  "$(jq -r '.assertion' "$D/upgrade.jsonl" | sort | uniq -c | awk '{printf "%s:%s\n",$2,$1}' | paste -sd, -)"
+NODE_CONTRACT="migration_applied|0:1,migration_applied|1:1,migration_applied|2:1,migration_applied|3:1"
+check "node-keyed contract rejects it"     "1:FAIL" "$(run_finish "$D" "$NODE_CONTRACT" 4 15)"
+D="$TMP/e9"; mk_evidence "$D"
+printf '%s\n' \
+  '{"assertion":"migration_applied","node":"0"}' \
+  '{"assertion":"migration_applied","node":"1"}' \
+  '{"assertion":"migration_applied","node":"2"}' \
+  '{"assertion":"migration_applied","node":"3"}' >"$D/upgrade.jsonl"
+check "the correct fan-out still passes"   "0:PASS" "$(run_finish "$D" "$NODE_CONTRACT" 4 15)"
 
 # ---------------------------------------------------------------------------
 echo
@@ -319,7 +344,7 @@ printf '  %3d  TOTAL\n' "$TOTAL"
 # An exact count, for the same reason the drill pins its assertion multiset: an
 # approximate target lets a silently-dropped case pass unnoticed, which is the very
 # defect this file exists to catch.
-EXPECTED_CHECKS=122
+EXPECTED_CHECKS=125
 echo
 if (( TOTAL != EXPECTED_CHECKS )); then
   echo "upgrade drill negative tests: FAIL — $TOTAL checks ran, the contract is $EXPECTED_CHECKS" >&2
