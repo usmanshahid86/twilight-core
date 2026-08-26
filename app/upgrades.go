@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
+	"strings"
 
 	storetypes "cosmossdk.io/store/types"
 	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
@@ -25,10 +28,23 @@ import (
 // height carrying a name it does not know halts rather than guessing, so an
 // operator running the wrong build stops instead of diverging from the network.
 //
-// Entries are appended and never edited once released. A released upgrade name
-// is a permanent part of the chain's history — a node replaying from genesis has
-// to execute the same handler the network executed at that height, so changing
-// one silently rewrites history for every node that syncs afterwards.
+// Entries are appended and never edited once released.
+//
+// The reason is NOT that a later binary replays every historical upgrade from
+// genesis — it cannot. Upstream aborts any block where a pending plan's handler
+// is already registered and its height has not arrived, so a binary carrying a
+// historical handler halts when it replays the block that scheduled it. Replay
+// across an upgrade boundary uses the historical binary sequence, or a snapshot
+// taken after the boundary.
+//
+// The reason is that a released entry is an executed artifact. Editing what runs
+// under a name the network already applied changes what a node constructed from
+// this source would do at that height, which is a silent rewrite of history for
+// anyone rebuilding or auditing it. Retention is also what upstream's own
+// completed-upgrade and downgrade checks consult — though those need only the
+// most recently completed upgrade, so keeping all of them is a deliberately
+// stronger local policy than upstream requires, not a requirement inherited from
+// it.
 type Upgrade struct {
 	// Name must match the name in the on-chain plan exactly.
 	Name string
@@ -66,17 +82,56 @@ type MigrationKeepers struct {
 // no upgrade has been performed on any long-lived chain yet, and an entry here is
 // a commitment that cannot be withdrawn.
 //
-// Because it is empty, NO upgrade name is currently executable. ScheduleUpgrade
-// refuses a plan naming an upgrade this binary does not know, which is what stops
-// an empty registry from turning an accepted plan into an unrecoverable halt.
+// An empty registry does NOT prevent a plan being scheduled, and must not — the
+// binary that executes an upgrade does not exist yet on the nodes that schedule
+// it. What makes an empty registry safe is that a plan naming an upgrade this
+// binary cannot run stays visible through `query upgrade plan` and the
+// coreslot_upgrade_scheduled event, and remains cancellable by the authority for
+// the whole window before its height. Only when that height arrives do blocks
+// stop, and the answer then is to supply the binary.
+//
+// A scheduling-time check that the name is known would be worse than useless: it
+// is the state upstream aborts the block on for every height before the upgrade's
+// own. See ADR-0003 §1b.
 var Upgrades []Upgrade
 
-// registerUpgradeHandlers binds every declared upgrade to the keeper.
+// ValidateUpgrades rejects a registry that cannot be executed unambiguously.
+//
+// A duplicate name is the dangerous case, and it is dangerous asymmetrically:
+// handler registration is a map assignment, so the LAST entry with a given name
+// wins, while the store loader scans the slice and takes the FIRST entry with
+// non-nil StoreUpgrades. Two entries sharing a name can therefore pair one
+// declaration's store layout with another's migration, under a name the operator
+// believes identifies a single upgrade.
+//
+// An empty name is rejected because it can never match a plan: x/upgrade's
+// Plan.ValidateBasic requires a non-empty name, so such an entry is unreachable
+// and its presence means the registry does not say what its author thought.
+//
+// Exported for testing. The registry is compiled in, so a violation is a build
+// mistake rather than an operational one, and the caller panics.
+func ValidateUpgrades(upgrades []Upgrade) error {
+	seen := make(map[string]struct{}, len(upgrades))
+	for i, upgrade := range upgrades {
+		if upgrade.Name == "" {
+			return fmt.Errorf("upgrade registry entry %d has an empty name", i)
+		}
+		if _, duplicate := seen[upgrade.Name]; duplicate {
+			return fmt.Errorf("upgrade registry declares %q more than once", upgrade.Name)
+		}
+		seen[upgrade.Name] = struct{}{}
+	}
+	return nil
+}
+
+// registerUpgradeHandlers binds every declared upgrade to the keeper, and refuses
+// to start on a registry that cannot be executed unambiguously.
 //
 // Registration is unconditional and happens on every start, not only when an
-// upgrade is pending: the keeper has to be able to answer "do I know this name?"
-// at the moment a plan is submitted, so that a plan naming an unknown upgrade is
-// refused when it is proposed rather than discovered at the halt height.
+// upgrade is pending. It exists so that the binary carrying a handler can EXECUTE
+// it at the upgrade height — Binary B's job. It is not there to let a binary vet
+// a name being scheduled: a binary that holds a pending upgrade's handler before
+// that upgrade's height is precisely what upstream aborts the block on.
 func registerUpgradeHandlers(
 	runtimeApp *runtime.App,
 	upgradeKeeper *upgradekeeper.Keeper,
@@ -84,6 +139,12 @@ func registerUpgradeHandlers(
 	rewards rewardskeeper.Keeper,
 	mining miningkeeper.Keeper,
 ) {
+	// Fail at construction rather than at the upgrade height. A malformed registry
+	// is a property of the binary, so every node carrying it is wrong in the same
+	// way, and the cheapest moment to say so is before the node starts.
+	if err := ValidateUpgrades(Upgrades); err != nil {
+		panic(err)
+	}
 	keepers := MigrationKeepers{CoreSlot: coreSlot, Rewards: rewards, Mining: mining}
 	for _, upgrade := range Upgrades {
 		upgrade := upgrade
@@ -169,21 +230,6 @@ func (s upgradeScheduler) CancelUpgrade(ctx context.Context) error {
 	return s.keeper.ClearUpgradePlan(ctx)
 }
 
-// HasUpgradeHandler reports whether THIS binary can execute the named upgrade.
-//
-// x/upgrade does not check this when a plan is scheduled — it validates the plan,
-// refuses a past height and refuses a completed name, and nothing more. So a plan
-// naming an upgrade no binary knows is accepted, and every node then panics at the
-// halt height with UPGRADE NEEDED. Recovery at that point requires every operator
-// to restart with --unsafe-skip-upgrades, because the chain cannot produce the
-// block that would carry a cancellation.
-func (s upgradeScheduler) HasUpgradeHandler(name string) bool {
-	if s.keeper == nil {
-		return false
-	}
-	return s.keeper.HasHandler(name)
-}
-
 // PendingUpgrade reports the name of the scheduled plan, or "" when none is set.
 func (s upgradeScheduler) PendingUpgrade(ctx context.Context) (string, error) {
 	if s.keeper == nil {
@@ -197,4 +243,42 @@ func (s upgradeScheduler) PendingUpgrade(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return plan.Name, nil
+}
+
+// requireCompleteModuleVersionMap fails genesis unless every mounted module's
+// version was committed to state.
+//
+// The map is what a future upgrade reads to decide, per module, whether to run a
+// migration or to treat the module as newly added and run its InitGenesis with
+// DefaultGenesis. A module missing from it is therefore not a missing record but
+// a scheduled overwrite of live state, deferred until the first upgrade — long
+// after the genesis that caused it.
+func requireCompleteModuleVersionMap(
+	ctx sdk.Context, runtimeApp *runtime.App, upgradeKeeper *upgradekeeper.Keeper,
+) error {
+	stored, err := upgradeKeeper.GetModuleVersionMap(ctx)
+	if err != nil {
+		return fmt.Errorf("reading the committed module version map: %w", err)
+	}
+	missing := make([]string, 0, len(runtimeApp.ModuleManager.Modules))
+	for name := range runtimeApp.ModuleManager.Modules {
+		if _, ok := stored[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	// State what was observed, then offer the likeliest cause. The guard is broader
+	// than that one cause — it also catches a version map prepared incompletely at
+	// wiring time, where the section IS present and InitGenesis DID run — and an
+	// error naming only the missing section would send an operator to inspect a
+	// genesis file that is correct.
+	return fmt.Errorf(
+		"genesis committed no module version for %s, so the stored version map does not describe "+
+			"every mounted module; the first upgrade would treat those modules as newly added and "+
+			"run their InitGenesis over live state. The usual cause is a genesis document with no "+
+			"%q section, which makes the module manager skip x/upgrade's InitGenesis entirely",
+		strings.Join(missing, ", "), upgradetypes.ModuleName)
 }
