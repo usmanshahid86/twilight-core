@@ -52,10 +52,34 @@ stop_node() {
   fi
 }
 
+# node_bin <index> — the binary this node runs.
+#
+# Defaults to $BIN, so ordinary localnet behaviour is unchanged when nothing is
+# set. Exporting NODE_BIN_<index> overrides one node, which is what makes a
+# partial binary rollout expressible: the upgrade drill runs nodes 0-2 on the new
+# build while node 3 stays on the old one, and that asymmetry is the whole point
+# of the exercise.
+node_bin() {
+  local var="NODE_BIN_$1"
+  echo "${!var:-$BIN}"
+}
+
 start_node() {
-  local i="$1"
-  "$BIN" start --home "$(node_home "$i")" --minimum-gas-prices 0utwlt --log_no_color >>"$NET/logs/node$i.log" 2>&1 &
+  local i="$1" bin
+  bin="$(node_bin "$i")"
+  "$bin" start --home "$(node_home "$i")" --minimum-gas-prices 0utwlt --log_no_color >>"$NET/logs/node$i.log" 2>&1 &
   echo "$!" >"$NET/node$i.pid"
+}
+
+# node_alive <index> — true while the node's recorded process is still running.
+# A halted node is a DEAD process here: x/upgrade's PreBlocker returns an error at
+# the upgrade height, which CometBFT turns into a panic and the process exits.
+# Distinguishing that from an RPC that merely stopped answering is what keeps the
+# drill from reading a crash as a successful halt.
+node_alive() {
+  local i="$1" pidfile="$NET/node$1.pid"
+  [[ -f "$pidfile" ]] || return 1
+  kill -0 "$(cat "$pidfile")" 2>/dev/null
 }
 
 setup_localnet() {
