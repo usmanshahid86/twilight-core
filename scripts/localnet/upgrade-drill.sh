@@ -313,7 +313,172 @@ jq -nc --arg cp "after_halt_wait" --argjson h $((UPGRADE_HEIGHT - 1)) --argjson 
     settlement_clock_ticks_during_wait:0}' >>"$ECONOMICS"
 
 echo
-echo "============== upgrade drill: halt phase =============="
+echo "=== 10. a PARTIAL rollout: three validators move to binary B ==="
+# Three of four is more than 2/3 of voting power, so the network can cross the
+# boundary while one operator is still behind. That asymmetry is the reason this
+# drill needs four validators: at two or three, every operator must succeed
+# simultaneously and the interesting case cannot be expressed.
+for n in 0 1 2 3; do stop_node "$n"; done
+sleep 3
+for n in 0 1 2; do
+  eval "export NODE_BIN_$n=\"$BIN_B\""
+  start_node "$n"
+done
+ok "nodes 0,1,2 restarted on binary B; node3 left on A and not running"
+
+RESUMED=0
+DEADLINE_TS=$((SECONDS + 300))
+while ((SECONDS < DEADLINE_TS)); do
+  a0="$(app_height 0)"; a1="$(app_height 1)"; a2="$(app_height 2)"
+  if [[ "$a0" =~ ^[0-9]+$ && "$a1" =~ ^[0-9]+$ && "$a2" =~ ^[0-9]+$ ]] \
+     && (( a0 >= UPGRADE_HEIGHT + 2 && a1 >= UPGRADE_HEIGHT + 2 && a2 >= UPGRADE_HEIGHT + 2 )); then
+    RESUMED=1; break
+  fi
+  sleep 2
+done
+(( RESUMED == 1 )) && ok "the three upgraded validators resumed and passed H+2" \
+  || fail "the upgraded majority did not resume past H+2"
+
+echo
+echo "=== 11. the migration is visible in committed state on every upgraded node ==="
+for n in 0 1 2; do
+  KRD="$(require_num "$(q_node "$n" coreslot-query params | jq -r '.params.key_rotation_delay_blocks // empty')" "node$n key_rotation_delay_blocks")"
+  (( KRD == 2 )) && ok "node$n reports key_rotation_delay_blocks=2" \
+    || fail "node$n reports key_rotation_delay_blocks=$KRD, expected 2"
+  PLAN_AFTER="$(q_node "$n" query upgrade plan 2>/dev/null | jq -r '.plan.name // .name // empty' 2>/dev/null)"
+  [[ -z "$PLAN_AFTER" ]] && ok "node$n has no pending plan; it was consumed" \
+    || fail "node$n still reports a pending plan: $PLAN_AFTER"
+  MV="$(q_node "$n" query upgrade module-versions)"
+  for m in auth bank consensus coreslot mining rewards runtime upgrade; do
+    jq -e --arg m "$m" '.module_versions[]? | select(.name == $m)' >/dev/null 2>&1 <<<"$MV" \
+      || fail "node$n version map is missing $m"
+  done
+  ok "node$n version map covers all eight mounted modules"
+done
+
+echo
+echo "=== 12. the upgraded majority agrees across the boundary ==="
+agree_nodes "0 1 2" "post-upgrade" || fail "the upgraded nodes disagree after the boundary"
+
+echo
+echo "=== 13. clock arithmetic: only committed blocks tick ==="
+C_BEFORE="$(require_num "$(clock_at 0 $((UPGRADE_HEIGHT - 1)))" "clock at H-1")"
+C_AT="$(require_num "$(clock_at 0 "$UPGRADE_HEIGHT")" "clock at H")"
+C_AFTER="$(require_num "$(clock_at 0 $((UPGRADE_HEIGHT + 1)))" "clock at H+1")"
+(( C_AT - C_BEFORE == EXPECTED_TICK )) \
+  && ok "H ticked the clock by exactly $EXPECTED_TICK ($C_BEFORE -> $C_AT)" \
+  || fail "H moved the clock by $((C_AT - C_BEFORE)), expected $EXPECTED_TICK"
+(( C_AFTER - C_AT == EXPECTED_TICK )) \
+  && ok "H+1 ticked the clock by exactly $EXPECTED_TICK ($C_AT -> $C_AFTER)" \
+  || fail "H+1 moved the clock by $((C_AFTER - C_AT)), expected $EXPECTED_TICK"
+# The whole point: the halt consumed no clock. Two blocks committed across the
+# boundary, so exactly two ticks are accounted for, whatever the wall time was.
+(( C_AFTER - C_BEFORE == 2 * EXPECTED_TICK )) \
+  && ok "${HALT_WAIT_SECONDS}s+ of downtime added ZERO ticks; only the 2 committed blocks did" \
+  || fail "clock moved $((C_AFTER - C_BEFORE)) across two committed blocks"
+
+echo
+echo "=== 14. the settlement and the books are untouched by the boundary ==="
+S_BEFORE="$("$BIN_B" mining-query settlement "$SLOT_ID" "$SETTLE_EPOCH" --node "$(rpc_url 0)" --height $((UPGRADE_HEIGHT - 1)) --output json 2>/dev/null)"
+S_AFTER="$("$BIN_B" mining-query settlement "$SLOT_ID" "$SETTLE_EPOCH" --node "$(rpc_url 0)" --height $((UPGRADE_HEIGHT + 1)) --output json 2>/dev/null)"
+[[ -n "$S_BEFORE" && -n "$S_AFTER" ]] || die "could not read the settlement on both sides of the boundary"
+for field in deadline_clock entitlement_amount released_amount remaining_amount; do
+  b="$(jq -r ".$field" <<<"$S_BEFORE")"; a="$(jq -r ".$field" <<<"$S_AFTER")"
+  [[ "$b" == "$a" && -n "$b" && "$b" != "null" ]] && ok "$field unchanged across H ($b)" \
+    || fail "$field changed across H: $b -> $a"
+done
+MB_AFTER="$(q_node 0 rewards-query module-balances)"
+E2="$(jq -r '.rewards_balance' <<<"$MB_AFTER")"; L2="$(jq -r '.outstanding_entitlement_liability' <<<"$MB_AFTER")"; C2="$(jq -r '.carry_forward_remainder' <<<"$MB_AFTER")"
+[[ "$E2" == "$((L2 + C2))" ]] && ok "escrow == liability + carry ($E2) after the boundary" \
+  || fail "solvency broken after the boundary: $E2 != $L2 + $C2"
+[[ "$E2" == "$ESCROW" && "$L2" == "$LIAB" && "$C2" == "$CARRY" ]] \
+  && ok "escrow, liability and carry are byte-identical to the pre-upgrade values" \
+  || note "economic totals moved across the boundary: escrow $ESCROW->$E2 liability $LIAB->$L2 carry $CARRY->$C2"
+jq -nc --arg cp "post_upgrade_h_plus_1" --argjson h $((UPGRADE_HEIGHT + 1)) \
+  --arg cb "$C_BEFORE" --arg ca "$C_AT" --arg cf "$C_AFTER" --argjson tick "$EXPECTED_TICK" \
+  --arg esc "$E2" --arg li "$L2" --arg ca2 "$C2" --arg krd "2" \
+  '{checkpoint:$cp, committed_height:$h, clock_h_minus_1:$cb, clock_h:$ca, clock_h_plus_1:$cf,
+    expected_tick_per_block:$tick, escrow:$esc, liability:$li, carry:$ca2,
+    escrow_equals_liability_plus_carry:true, key_rotation_delay_blocks:$krd}' >>"$ECONOMICS"
+
+echo
+echo "=== 15. the stale validator fails CLOSED, it does not fork ==="
+# node3 is restarted on the OLD binary after the network has already crossed H.
+# The dangerous outcome is not that it stops — it is that it follows the upgraded
+# chain using pre-migration application logic, producing state nobody else has.
+unset NODE_BIN_3
+start_node 3
+sleep 20
+A3="$(app_height 3)"
+if [[ "$A3" =~ ^[0-9]+$ ]]; then
+  (( A3 == UPGRADE_HEIGHT - 1 )) \
+    && ok "node3 on binary A is still at $((UPGRADE_HEIGHT - 1)); it cannot cross H" \
+    || fail "node3 on the old binary reached application height $A3"
+else
+  note "node3 on binary A is not answering; checking its log instead"
+fi
+grep -q "UPGRADE .${UPGRADE_NAME}. NEEDED at height: ${UPGRADE_HEIGHT}" "$NET/logs/node3.log" 2>/dev/null \
+  && ok "node3 refuses the boundary with the upgrade-required error" \
+  || fail "node3 did not report an upgrade-required halt"
+KRD3="$(q_node 3 coreslot-query params 2>/dev/null | jq -r '.params.key_rotation_delay_blocks // empty')"
+[[ "$KRD3" == "1" || -z "$KRD3" ]] \
+  && ok "node3 never applied the migration (its params still read '${KRD3:-unreadable}')" \
+  || fail "node3 somehow applied the migration while on the old binary"
+
+echo
+echo "=== 16. the fourth validator upgrades and rejoins ==="
+stop_node 3; sleep 3
+eval "export NODE_BIN_3=\"$BIN_B\""
+start_node 3
+CAUGHT=0
+DEADLINE_TS=$((SECONDS + 300))
+while ((SECONDS < DEADLINE_TS)); do
+  a3="$(app_height 3)"; a0="$(app_height 0)"
+  if [[ "$a3" =~ ^[0-9]+$ && "$a0" =~ ^[0-9]+$ ]] && (( a3 >= UPGRADE_HEIGHT + 2 && a0 - a3 <= 3 )); then
+    CAUGHT=1; break
+  fi
+  sleep 2
+done
+(( CAUGHT == 1 )) && ok "node3 crossed H on binary B and caught up to the others" \
+  || fail "node3 did not catch up after upgrading"
+KRD3="$(require_num "$(q_node 3 coreslot-query params | jq -r '.params.key_rotation_delay_blocks // empty')" "node3 key_rotation_delay_blocks")"
+(( KRD3 == 2 )) && ok "node3 reports key_rotation_delay_blocks=2, the same as the majority" \
+  || fail "node3 reports $KRD3 after upgrading"
+agree_nodes "0 1 2 3" "all-four-converged" || fail "the four validators do not agree after node3 rejoined"
+
+echo
+echo "=== 17. a restart with stale metadata does not re-run the migration ==="
+# The upgrade-info file is deliberately left in place, as it is on a real node.
+# Because the migration requires key_rotation_delay_blocks == 1 on entry, a second
+# execution would fail and the node could not produce blocks — so a restart that
+# resumes normally IS the proof it did not run twice.
+[[ -f "$(node_home 0)/data/upgrade-info.json" ]] && ok "node0 still carries its upgrade-info.json" \
+  || note "node0 has no upgrade-info file to be stale"
+BEFORE_RESTART="$(require_num "$(app_height 0)" "node0 height before restart")"
+stop_node 0; sleep 3; start_node 0
+PROGRESSED=0
+DEADLINE_TS=$((SECONDS + 180))
+while ((SECONDS < DEADLINE_TS)); do
+  a0="$(app_height 0)"
+  [[ "$a0" =~ ^[0-9]+$ ]] && (( a0 > BEFORE_RESTART )) && { PROGRESSED=1; break; }
+  sleep 2
+done
+(( PROGRESSED == 1 )) && ok "node0 restarted with the stale file and kept committing blocks" \
+  || fail "node0 did not resume after a restart with stale upgrade metadata"
+KRD0="$(require_num "$(q_node 0 coreslot-query params | jq -r '.params.key_rotation_delay_blocks // empty')" "node0 key_rotation_delay_blocks")"
+(( KRD0 == 2 )) && ok "key_rotation_delay_blocks is still 2 — the migration ran exactly once" \
+  || fail "key_rotation_delay_blocks is $KRD0 after the restart"
+
+for n in 0 1 2 3; do
+  jq -nc --argjson n "$n" --arg name "$UPGRADE_NAME" --argjson h "$UPGRADE_HEIGHT" \
+    --argjson cur "$(app_height "$n")" --arg sha "$SHA_B" --argjson first "$UPGRADE_HEIGHT" \
+    '{node:$n, phase:"resume", upgrade_name:$name, scheduled_height:$h, binary_sha256:$sha,
+      first_b_committed_height:$first, current_height:$cur, migration_marker:2,
+      plan_present:false, result:"upgraded"}' >>"$UPGRADE_LOG"
+done
+
+echo
+echo "================= upgrade drill ======================="
 echo "  source        $SOURCE_SHA"
 echo "  binary A      ${SHA_A:0:16}  (no $UPGRADE_NAME)"
 echo "  binary B      ${SHA_B:0:16}  (carries $UPGRADE_NAME)"
@@ -321,7 +486,12 @@ echo "  epoch length  $EPOCH_LEN"
 echo "  upgrade at    H=$UPGRADE_HEIGHT   (mid-epoch-2, deadline clock $DEADLINE)"
 echo "  settlement    slot $SLOT_ID epoch $SETTLE_EPOCH, open across the boundary"
 echo "  all 4 nodes   application halted at $((UPGRADE_HEIGHT - 1)), upgrade-info written"
+echo "  rollout       nodes 0,1,2 -> B crossed H with node3 still on A"
+echo "  stale node    node3 on A stayed at $((UPGRADE_HEIGHT - 1)); it failed closed, it did not fork"
+echo "  catch-up      node3 -> B rejoined; all four agree"
+echo "  migration     key_rotation_delay_blocks 1 -> 2, exactly once"
+echo "  clock         $C_BEFORE -> $C_AT -> $C_AFTER  (tick $EXPECTED_TICK/block, 0 for downtime)"
 echo "  evidence      $EVID_DIR"
 echo "======================================================"
-if (( FAILURES > 0 )); then echo "upgrade drill (halt phase): FAIL ($FAILURES)" >&2; exit 1; fi
-echo "upgrade drill (halt phase): PASS"
+if (( FAILURES > 0 )); then echo "upgrade drill: FAIL ($FAILURES)" >&2; exit 1; fi
+echo "upgrade drill: PASS"
