@@ -72,10 +72,13 @@ start_node() {
 }
 
 # node_alive <index> — true while the node's recorded process is still running.
-# A halted node is a DEAD process here: x/upgrade's PreBlocker returns an error at
-# the upgrade height, which CometBFT turns into a panic and the process exits.
-# Distinguishing that from an RPC that merely stopped answering is what keeps the
-# drill from reading a crash as a successful halt.
+#
+# Liveness is NOT the same as progress, and at an upgrade boundary the two come
+# apart: x/upgrade returns an error from PreBlock, CometBFT panics its consensus
+# routine, and the process stays UP — often still serving RPC — with consensus
+# stopped. So a halted node commonly reads as alive here. Use this to tell an
+# expected halt from a process that actually died; use the committed application
+# height to tell whether the chain is making progress.
 node_alive() {
   local i="$1" pidfile="$NET/node$1.pid"
   [[ -f "$pidfile" ]] || return 1
