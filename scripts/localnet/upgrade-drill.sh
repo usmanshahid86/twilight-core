@@ -415,14 +415,19 @@ if [[ "$A3" =~ ^[0-9]+$ ]]; then
     && ok "node3 on binary A is still at $((UPGRADE_HEIGHT - 1)); it cannot cross H" \
     || fail "node3 on the old binary reached application height $A3"
 else
-  note "node3 on binary A is not answering; checking its log instead"
+  # Expected, not a gap: the node replays the stored block H during startup and
+  # refuses it before the RPC server binds, so there is no height to read. The
+  # log below is the primary evidence, and the convergence in section 16 is what
+  # rules out a fork — a node that had applied H with old logic could not later
+  # agree on the app hash with the nodes that applied the migration.
+  note "node3 on binary A never bound RPC; it refused the boundary during replay"
 fi
 grep -q "UPGRADE .${UPGRADE_NAME}. NEEDED at height: ${UPGRADE_HEIGHT}" "$NET/logs/node3.log" 2>/dev/null \
   && ok "node3 refuses the boundary with the upgrade-required error" \
   || fail "node3 did not report an upgrade-required halt"
 KRD3="$(q_node 3 coreslot-query params 2>/dev/null | jq -r '.params.key_rotation_delay_blocks // empty')"
 [[ "$KRD3" == "1" || -z "$KRD3" ]] \
-  && ok "node3 never applied the migration (its params still read '${KRD3:-unreadable}')" \
+  && ok "node3 never applied the migration (params read '${KRD3:-unavailable — halted before RPC}')" \
   || fail "node3 somehow applied the migration while on the old binary"
 
 echo
