@@ -138,39 +138,43 @@ version_map_canon() {
 
 # plan_state <node> — "none" | "pending:<name>" | non-zero exit.
 #
-# An empty result must never be read as "no plan": a transport failure, a CLI
-# error or malformed JSON all produce empty output, and treating that as absence
-# would report a consumed plan on a node nobody could reach. The canonical
-# no-plan answer on this CLI is an error naming it, so it is recognised
-# explicitly and everything else fails.
+# The canonical no-plan answer is a SUCCESSFUL, EMPTY response: x/upgrade's
+# CurrentPlan handler returns QueryCurrentPlanResponse{} with a nil error when no
+# plan is found. So "the query errored" is not the signal for absence, and an
+# earlier version of this function said otherwise.
+#
+# That makes the exit-zero path the dangerous one. Zero bytes, truncated JSON and
+# a response shape nobody recognises all produce an empty name, and mapping any of
+# them to "no plan" would report a consumed plan on the strength of output that
+# was never valid. Each is rejected explicitly; only a well-formed object whose
+# plan is absent or null counts as absence.
 plan_state() {
   local out rc nm
-  out="$("$BIN_B" query upgrade plan --node "$(rpc_url "$1")" --output json 2>&1)"; rc=$?
-  if (( rc == 0 )); then
-    nm="$(jq -r '.plan.name // .name // empty' <<<"$out" 2>/dev/null)"
-    [[ -n "$nm" ]] && echo "pending:$nm" || echo "none"
-    return 0
-  fi
-  grep -qiE "no upgrade (scheduled|plan)|upgrade plan not found|no plan" <<<"$out" && { echo "none"; return 0; }
-  return 1
+  out="$("$BIN_B" query upgrade plan --node "$(rpc_url "$1")" --output json 2>/dev/null)"; rc=$?
+  (( rc == 0 )) || return 1                                        # transport or CLI failure
+  [[ -n "$out" ]] || return 1                                      # exit 0 with no output is not an answer
+  jq -e 'type == "object"' >/dev/null 2>&1 <<<"$out" || return 1   # malformed, or not a response object
+  if jq -e 'has("plan") | not' >/dev/null 2>&1 <<<"$out"; then echo "none"; return 0; fi
+  if jq -e '.plan == null' >/dev/null 2>&1 <<<"$out"; then echo "none"; return 0; fi
+  nm="$(jq -r '.plan.name // empty' <<<"$out" 2>/dev/null)"
+  [[ -n "$nm" ]] || return 1                                       # a plan with no name is not a shape we know
+  echo "pending:$nm"
 }
 
-# app_height_after_offset <node> <log-offset> — the committed application height
-# reported by THIS start, when RPC never came up.
+# Liveness and stop, with the same identity check the cleanup uses.
 #
-# A node that refuses an upgrade during replay dies before binding RPC, so there
-# is no endpoint to ask. CometBFT logs the height at the ABCI handshake, and
-# reading only past the recorded offset means the answer comes from this start
-# rather than from an earlier one still sitting in the append-only log.
-app_height_after_offset() {
-  local n="$1" off="$2" v
-  if v="$(app_height "$n" 2>/dev/null)" && [[ "$v" =~ ^[0-9]+$ ]]; then echo "$v"; return 0; fi
-  v="$(tail -n +$((off + 1)) "$NET/logs/node$n.log" 2>/dev/null | grep -o 'appHeight=[0-9]\+' | tail -1 | cut -d= -f2)"
-  [[ "$v" =~ ^[0-9]+$ ]] || return 1
-  echo "$v"
+# drill-common's helpers trust the pid file alone, which is fine for their
+# callers; here a reused pid could make a dead validator look alive, or send a
+# stop to whatever inherited the number. These wrappers are drill-local so the
+# shared helpers keep their existing behaviour for every other drill.
+drill_node_alive() {
+  local pid; pid="$(cat "$NET/node$1.pid" 2>/dev/null)"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  node_process_matches "$pid" "$1"
 }
+drill_stop_node() { kill_recorded_node "$1"; }
 
-# node_exe_sha <node> — SHA-256 of the executable the recorded pid is running.
+# node_exe_sha <node># node_exe_sha <node> — SHA-256 of the executable the recorded pid is running.
 # A shell variable saying which binary was requested is not evidence that it is
 # the binary running; this reads the process.
 node_exe_sha() {
@@ -185,6 +189,19 @@ node_exe_sha() {
 # ---- evidence: derived from outcomes, never written on entry to a phase -----
 SUMMARY_ROWS=0
 ASSERT_ROWS=0
+
+# What a complete run looks like. These are checked at the end so that a run which
+# stopped early cannot print PASS on a clean failure count: the absence of work is
+# not the same as work that passed.
+EXPECTED_PHASES=15
+EXPECTED_ASSERTIONS_MIN=80
+
+# The module version map this build carries. Pinned rather than derived, so that a
+# module silently dropped from the app, an unexpected one appearing, or a migration
+# that failed to bump a consensus version all fail here. Bumping a module version
+# is expected to require updating this line — that edit is the point. "tx" is
+# absent deliberately: it is not a ModuleManager module and never appears here.
+EXPECTED_VERSION_MAP="auth:5,bank:4,consensus:1,coreslot:1,mining:1,rewards:1,runtime:0,upgrade:2"
 record_phase() { # <phase> <result> <detail>
   printf '%s,%s,%s\n' "$1" "$2" "${3//,/;}" >>"$SUMMARY" || die "could not write a summary row"
   SUMMARY_ROWS=$((SUMMARY_ROWS + 1))
@@ -216,17 +233,58 @@ expect() {
 # finish <forced-fail?> — single exit point. Verifies the evidence it is about to
 # stand behind actually exists before declaring anything.
 finish() {
-  local forced="${1:-}" verdict="PASS" f
+  local forced="${1:-}" verdict="PASS" f wrote
+
   (( FAILURES > 0 )) && verdict="FAIL"
   [[ -n "$forced" ]] && verdict="FAIL"
+
   if [[ -n "${EVID_DIR:-}" && -d "$EVID_DIR" ]]; then
-    for f in binaries.json upgrade.jsonl economics.jsonl summary.csv; do
+    # Everything the run should have produced by now. A drill that prints PASS on
+    # top of missing evidence is asserting something nobody can check afterwards,
+    # so an incomplete set is itself a failure. verdict.txt and the final summary
+    # row are written below and so are verified after, not here.
+    for f in binaries.json upgrade.jsonl economics.jsonl summary.csv hashes.jsonl \
+             node0-upgrade-info.json node1-upgrade-info.json \
+             node2-upgrade-info.json node3-upgrade-info.json \
+             node0-stale-upgrade-info-before-restart.json; do
       [[ -s "$EVID_DIR/$f" ]] || { echo "  FAIL: mandatory evidence $f is missing or empty" >&2; verdict="FAIL"; }
     done
-    (( ASSERT_ROWS >= 20 )) || { echo "  FAIL: only $ASSERT_ROWS assertions recorded; the run did not reach its checks" >&2; verdict="FAIL"; }
-    printf '%s\n' "$verdict" >"$EVID_DIR/verdict.txt"
-    record_phase "final" "$verdict" "failures=$FAILURES assertions=$ASSERT_ROWS" 2>/dev/null || true
+
+    # Coverage, not just a floor: every operational phase must have recorded a row.
+    # A run that died in phase 9 leaves nine rows and a clean FAILURES count, and
+    # only the expected count separates that from a complete run.
+    (( SUMMARY_ROWS == EXPECTED_PHASES )) || {
+      echo "  FAIL: $SUMMARY_ROWS of $EXPECTED_PHASES phase rows recorded; the run did not complete" >&2
+      verdict="FAIL"
+    }
+    (( ASSERT_ROWS >= EXPECTED_ASSERTIONS_MIN )) || {
+      echo "  FAIL: only $ASSERT_ROWS assertions recorded, expected at least $EXPECTED_ASSERTIONS_MIN" >&2
+      verdict="FAIL"
+    }
+
+    # Both final writes are checked. If either fails the printed verdict is the
+    # authority and it is FAIL — a verdict file that could not be written must
+    # never be the thing a reader trusts.
+    wrote=1
+    printf '%s\n' "$verdict" >"$EVID_DIR/verdict.txt" || {
+      echo "  FAIL: could not write verdict.txt" >&2; verdict="FAIL"; wrote=0
+    }
+    printf '%s,%s,%s\n' "final" "$verdict" "failures=$FAILURES assertions=$ASSERT_ROWS" >>"$SUMMARY" || {
+      echo "  FAIL: could not append the final summary row" >&2; verdict="FAIL"; wrote=0
+    }
+    if (( wrote == 1 )); then
+      [[ -s "$EVID_DIR/verdict.txt" && "$(cat "$EVID_DIR/verdict.txt" 2>/dev/null)" == "$verdict" ]] || {
+        echo "  FAIL: verdict.txt does not read back as $verdict" >&2; verdict="FAIL"
+      }
+      # Rewrite once if a late check flipped the verdict, so the file and the
+      # printed result cannot disagree.
+      [[ "$(cat "$EVID_DIR/verdict.txt" 2>/dev/null)" == "$verdict" ]] || printf '%s\n' "$verdict" >"$EVID_DIR/verdict.txt" || true
+    fi
+  else
+    echo "  FAIL: no evidence directory; nothing about this run can be checked" >&2
+    verdict="FAIL"
   fi
+
   echo
   if [[ "$verdict" == "PASS" ]]; then
     echo "upgrade drill: PASS"; exit 0
@@ -268,6 +326,11 @@ LEFTOVER="$(pgrep -f "$ROOT/build/twilightd.* start --home $NET/" 2>/dev/null | 
 if [[ -n "${LEFTOVER// /}" ]]; then
   echo "  ABORT: processes are already serving $NET (pids: $LEFTOVER); stop them first" >&2; exit 2
 fi
+# The negative tests source this file to exercise the real helpers rather than
+# copies of them; a fault test that checks its own transcription of a function
+# proves nothing about the one that ships.
+[[ "${UPGRADE_DRILL_SOURCE_ONLY:-0}" == "1" ]] && return 0
+
 trap cleanup_drill EXIT
 
 echo "=== 1. a four-validator localnet ==="
@@ -346,7 +409,7 @@ wait_epoch_close() {
   local target=$((EPOCH_LEN + 2)) deadline=$((SECONDS + 900)) n live h reached
   while ((SECONDS < deadline)); do
     live=0
-    for n in 0 1 2 3; do node_alive "$n" && live=$((live + 1)); done
+    for n in 0 1 2 3; do drill_node_alive "$n" && live=$((live + 1)); done
     (( live < 4 )) && die "only $live of 4 validators are still running before the epoch boundary; the chain did not stall, its processes are gone"
     reached=0
     for n in 0 1 2 3; do
@@ -459,7 +522,7 @@ for n in 0 1 2 3; do
   if read_required_uint BLK store_height "$n"; then
     expect "halt_block_store_height" "$UPGRADE_HEIGHT" "$BLK" "$n"
   fi
-  if node_alive "$n"; then
+  if drill_node_alive "$n"; then
     if grep -q "UPGRADE .${UPGRADE_NAME}. NEEDED at height: ${UPGRADE_HEIGHT}" "$NET/logs/node$n.log" 2>/dev/null; then
       expect "halt_logged_upgrade_required" "logged" "logged" "$n"
     else
@@ -514,7 +577,7 @@ echo "=== 10. a PARTIAL rollout: three validators move to binary B ==="
 # Three of four is more than 2/3 of voting power, so the network can cross the
 # boundary while one operator is still behind. That asymmetry is the reason this
 # drill needs four validators.
-for n in 0 1 2 3; do stop_node "$n"; done
+for n in 0 1 2 3; do drill_stop_node "$n"; done
 sleep 3
 for n in 0 1 2; do eval "export NODE_BIN_$n=\"$BIN_B\""; start_node "$n"; done
 sleep 5
@@ -652,7 +715,7 @@ record_phase "stale_A_negative" "$([[ $FAILURES -eq 0 ]] && echo PASS || echo FA
 echo
 phase_begin
 echo "=== 16. the fourth validator upgrades and rejoins ==="
-stop_node 3; sleep 3
+drill_stop_node 3; sleep 3
 eval "export NODE_BIN_3=\"$BIN_B\""
 start_node 3
 CAUGHT=0; DEADLINE_TS=$((SECONDS + 300))
@@ -665,11 +728,20 @@ expect "stale_node_caught_up_on_B" "caught_up" "$([[ $CAUGHT -eq 1 ]] && echo ca
 if read_required_uint KRD3 krd_at 3; then expect "migration_applied" "2" "$KRD3" 3; fi
 agree_nodes "0 1 2 3" "all-four-converged" || fail "the four validators do not agree after node3 rejoined"
 
-# Full version maps, compared exactly across all four — names, versions, and no
-# extras. Checking names alone would miss a node that disagreed on a version.
+# Full version maps, checked against the map this build is expected to carry —
+# not merely against each other. Four nodes running the same wrong binary agree
+# perfectly, so cross-node equality alone would accept a missing module, an extra
+# one, or a version that is the same everywhere and wrong everywhere. The expected
+# map is the assertion; agreement between nodes is the second, weaker one.
+#
+# A module whose version is absent renders as 0, which is indistinguishable from a
+# genuine 0 — runtime is legitimately 0. Pinning the whole string is what closes
+# that: any module that should be non-zero and arrives absent reads as 0 and fails
+# against the expected value.
 VM_REF=""
 for n in 0 1 2 3; do
   if read_required_str VM version_map_canon "$n"; then
+    expect "version_map_is_expected" "$EXPECTED_VERSION_MAP" "$VM" "$n"
     [[ -z "$VM_REF" ]] && VM_REF="$VM"
     expect "version_map_matches_node0" "$VM_REF" "$VM" "$n"
   else fail "node$n: the module version map could not be read"; fi
@@ -694,7 +766,7 @@ else
   expect "stale_upgrade_info_present" "present" "missing" 0
 fi
 if read_required_uint BEFORE_RESTART app_height 0; then
-  stop_node 0; sleep 3; start_node 0
+  drill_stop_node 0; sleep 3; start_node 0
   PROGRESSED=0; DEADLINE_TS=$((SECONDS + 180))
   while ((SECONDS < DEADLINE_TS)); do
     a0="$(app_height 0 2>/dev/null)"
