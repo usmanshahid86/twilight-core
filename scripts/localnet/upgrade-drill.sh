@@ -161,6 +161,21 @@ plan_state() {
   echo "pending:$nm"
 }
 
+# app_height_after_offset <node> <log-offset> — the committed application height
+# reported by THIS start, when RPC never came up.
+#
+# A node that refuses an upgrade during replay dies before binding RPC, so there
+# is no endpoint to ask. CometBFT logs the height at the ABCI handshake, and
+# reading only past the recorded offset means the answer comes from this start
+# rather than from an earlier one still sitting in the append-only log.
+app_height_after_offset() {
+  local n="$1" off="$2" v
+  if v="$(app_height "$n" 2>/dev/null)" && [[ "$v" =~ ^[0-9]+$ ]]; then echo "$v"; return 0; fi
+  v="$(tail -n +$((off + 1)) "$NET/logs/node$n.log" 2>/dev/null | grep -o 'appHeight=[0-9]\+' | tail -1 | cut -d= -f2)"
+  [[ "$v" =~ ^[0-9]+$ ]] || return 1
+  echo "$v"
+}
+
 # Liveness and stop, with the same identity check the cleanup uses.
 #
 # drill-common's helpers trust the pid file alone, which is fine for their
