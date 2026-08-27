@@ -123,6 +123,14 @@ check "rewards[0].claimed"            "differs" "$(differs '.epochs[0].rewards[0
 check "a removed rewards[] entry"     "differs" "$(differs '.epochs[0].rewards = [.epochs[0].rewards[0]]')"
 check "an added rewards[] entry"      "differs" "$(differs '.epochs[0].rewards += [.epochs[0].rewards[0] * {slot_id:"3"}]')"
 check "an emptied rewards[]"          "differs" "$(differs '.epochs[0].rewards = []')"
+# B2: reordering the same rewards is the SAME state. Leaving the nested
+# collection unsorted would have produced a false mismatch between two
+# semantically identical representations.
+check "nested rewards reordered"      "same" \
+  "$([[ "$(econ_canon "$(jq -c '.epochs[0].rewards = [.epochs[0].rewards[1], .epochs[0].rewards[0]]' <<<"$GOOD")")" \
+     == "$BASE" ]] && echo same || echo differs)"
+check "reordered AND mutated"         "differs" \
+  "$(differs '.epochs[0].rewards = [(.epochs[0].rewards[1] | .amount = "1"), .epochs[0].rewards[0]]')"
 
 # --- nested EpochReward.config : the other residual ---
 check "config.initial_block_subsidy"  "differs" "$(differs '.epochs[0].config.initial_block_subsidy="1"')"
@@ -189,6 +197,64 @@ check "object key order"              "same" \
   "$([[ "$(econ_canon "$GOOD")" == "$(econ_canon "$(jq -c 'to_entries | reverse | from_entries' <<<"$GOOD")")" ]] && echo same || echo differs)"
 check "empty input is refused"        "1" "$(econ_canon "" >/dev/null 2>&1; echo $?)"
 check "malformed input is refused"    "1" "$(econ_canon '{oops' >/dev/null 2>&1; echo $?)"
+
+# ---------------------------------------------------------------------------
+group capture "build_state_json — a source it could not read is not an empty one"
+# B1: an unchecked CoreSlot query yielded null, `.slots // []` made that an empty
+# array, and a gate counting only epochs/entitlements/settlements never noticed.
+# A defective export omitting CoreSlots then compared equal to a capture that had
+# lost them too. Validity here is structural and referential, not syntactic.
+SL='{"slots":[{"slot_id":"1","status":"A"},{"slot_id":"2","status":"A"}]}'
+BAL='{"outstanding_entitlement_liability":"10","carry_forward_remainder":"0","rewards_balance":"10"}'
+E1='{"epoch_reward":{"epoch_number":"1"}}'
+E2='{"epoch_reward":{"epoch_number":"2"}}'
+T1='{"entitlements":[{"slot_id":"1","epoch":"1"},{"slot_id":"2","epoch":"1"}]}'
+T2='{"entitlements":[{"slot_id":"1","epoch":"2"},{"slot_id":"2","epoch":"2"}]}'
+ST='[{"slot_id":"1","epoch":"1"},{"slot_id":"2","epoch":"1"},{"slot_id":"1","epoch":"2"},{"slot_id":"2","epoch":"2"}]'
+# ${x-default} substitutes only when the argument is UNSET, so an explicitly
+# empty argument stays empty — otherwise the "unreadable query" cases would
+# silently test the default instead.
+bsj() { build_state_json "${1-$SL}" "${2-$BAL}" "${3-$E1}" "${4-$E2}" "${5-$T1}" "${6-$T2}" "${7-$ST}" 2>/dev/null; }
+ok_or() { bsj "$@" >/dev/null 2>&1 && echo accepted || echo refused; }
+
+GOODSTATE="$(bsj)"
+check "a complete capture is accepted"     "accepted"  "$(ok_or)"
+check "and counts every collection"        "2/4/4/2"   "$(state_counts "$GOODSTATE")"
+check "and reports balances present"       "true"      "$(state_balances_present "$GOODSTATE")"
+# The exact reproduction: an empty slot set must never become a usable reference.
+check "an empty object as the slot source" "refused"   "$(ok_or '{}')"
+check "an explicitly empty slot array"     "refused"   "$(ok_or '{"slots":[]}')"
+check "an unreadable slot query"           "refused"   "$(ok_or '')"
+check "malformed slot JSON"                "refused"   "$(ok_or '{"slots":')"
+check "a duplicate CoreSlot id"            "refused"   "$(ok_or '{"slots":[{"slot_id":"1"},{"slot_id":"1"}]}')"
+check "a zero CoreSlot id"                 "refused"   "$(ok_or '{"slots":[{"slot_id":"0"}]}')"
+check "a non-numeric CoreSlot id"          "refused"   "$(ok_or '{"slots":[{"slot_id":"abc"}]}')"
+check "an unreadable balances query"       "refused"   "$(ok_or "$SL" '')"
+check "balances missing a field"           "refused"   "$(ok_or "$SL" '{"outstanding_entitlement_liability":"1","carry_forward_remainder":"0"}')"
+check "a non-decimal balance"              "refused"   "$(ok_or "$SL" '{"outstanding_entitlement_liability":"x","carry_forward_remainder":"0","rewards_balance":"1"}')"
+check "a negative balance"                 "refused"   "$(ok_or "$SL" '{"outstanding_entitlement_liability":"-1","carry_forward_remainder":"0","rewards_balance":"1"}')"
+check "a missing epoch document"           "refused"   "$(ok_or "$SL" "$BAL" '{}')"
+check "the wrong epoch number"             "refused"   "$(ok_or "$SL" "$BAL" '{"epoch_reward":{"epoch_number":"3"}}')"
+check "epochs transposed"                  "refused"   "$(ok_or "$SL" "$BAL" "$E2" "$E1")"
+check "no entitlements"                    "refused"   "$(ok_or "$SL" "$BAL" "$E1" "$E2" '{"entitlements":[]}' '{"entitlements":[]}' '[]')"
+check "a duplicate entitlement identity"   "refused" \
+  "$(ok_or "$SL" "$BAL" "$E1" "$E2" '{"entitlements":[{"slot_id":"1","epoch":"1"},{"slot_id":"1","epoch":"1"}]}' '{"entitlements":[]}' '[{"slot_id":"1","epoch":"1"}]')"
+check "a duplicate settlement identity"    "refused" \
+  "$(ok_or "$SL" "$BAL" "$E1" "$E2" "$T1" "$T2" '[{"slot_id":"1","epoch":"1"},{"slot_id":"1","epoch":"1"},{"slot_id":"2","epoch":"1"},{"slot_id":"1","epoch":"2"}]')"
+# A settlement for no entitlement, or an entitlement with no settlement, is a
+# broken reference rather than a smaller one.
+check "a settlement with no entitlement"   "refused" \
+  "$(ok_or "$SL" "$BAL" "$E1" "$E2" "$T1" "$T2" '[{"slot_id":"1","epoch":"1"},{"slot_id":"2","epoch":"1"},{"slot_id":"1","epoch":"2"},{"slot_id":"2","epoch":"2"},{"slot_id":"9","epoch":"9"}]')"
+check "an entitlement with no settlement"  "refused" \
+  "$(ok_or "$SL" "$BAL" "$E1" "$E2" "$T1" "$T2" '[{"slot_id":"1","epoch":"1"},{"slot_id":"2","epoch":"1"},{"slot_id":"1","epoch":"2"}]')"
+check "an unreadable settlement source"    "refused"   "$(ok_or "$SL" "$BAL" "$E1" "$E2" "$T1" "$T2" '')"
+
+# settlement_row: a query answering about a different settlement must not count.
+check "the requested settlement"           "0"  "$(settlement_row '{"settlement":{"slot_id":"1","epoch":"2"}}' 1 2 >/dev/null 2>&1; echo $?)"
+check "a different slot"                   "1"  "$(settlement_row '{"settlement":{"slot_id":"3","epoch":"2"}}' 1 2 >/dev/null 2>&1; echo $?)"
+check "a different epoch"                  "1"  "$(settlement_row '{"settlement":{"slot_id":"1","epoch":"9"}}' 1 2 >/dev/null 2>&1; echo $?)"
+check "an empty settlement response"       "1"  "$(settlement_row '' 1 2 >/dev/null 2>&1; echo $?)"
+check "a response with no settlement"      "1"  "$(settlement_row '{}' 1 2 >/dev/null 2>&1; echo $?)"
 
 # ---------------------------------------------------------------------------
 group participation "preservation is answered from the artifact, not the restart"
@@ -328,17 +394,18 @@ printf '  %3d  TOTAL\n' "$TOTAL"
 # Derived from the test inventory below, per group, so a dropped case names the
 # group it went missing from rather than just changing a total.
 EXPECTED_REFUSAL=8
-EXPECTED_ECON=60
+EXPECTED_ECON=62
 EXPECTED_CLASSIFY=28
+EXPECTED_CAPTURE=28
 EXPECTED_PARTICIPATION=7
 EXPECTED_PORTS=8
 EXPECTED_AGREEMENT=13
 EXPECTED_VERDICTS=13
 EXPECTED_ENDTOEND=4
-EXPECTED_CHECKS=$(( EXPECTED_REFUSAL + EXPECTED_ECON + EXPECTED_CLASSIFY + EXPECTED_PARTICIPATION \
+EXPECTED_CHECKS=$(( EXPECTED_REFUSAL + EXPECTED_ECON + EXPECTED_CLASSIFY + EXPECTED_CAPTURE + EXPECTED_PARTICIPATION \
                   + EXPECTED_PORTS + EXPECTED_AGREEMENT + EXPECTED_VERDICTS + EXPECTED_ENDTOEND ))
 echo
-PER_GROUP_EXPECTED=("$EXPECTED_REFUSAL" "$EXPECTED_CLASSIFY" "$EXPECTED_ECON" "$EXPECTED_PARTICIPATION" \
+PER_GROUP_EXPECTED=("$EXPECTED_REFUSAL" "$EXPECTED_CLASSIFY" "$EXPECTED_ECON" "$EXPECTED_CAPTURE" "$EXPECTED_PARTICIPATION" \
                     "$EXPECTED_PORTS" "$EXPECTED_AGREEMENT" "$EXPECTED_VERDICTS" "$EXPECTED_ENDTOEND")
 for i in $(seq 0 $GROUP_IDX); do
   if (( GROUP_COUNTS[i] != PER_GROUP_EXPECTED[i] )); then

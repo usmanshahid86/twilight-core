@@ -251,6 +251,11 @@ econ_canon() { # <state-json> -> canonical JSON, or non-zero
   #
   # jq -S orders object keys recursively, and each collection is sorted by its
   # canonical identity first, so the comparison is semantic rather than textual.
+  # That includes the one nested repeated collection that matters in the current
+  # persisted structures, EpochReward.rewards[]: two representations listing the
+  # same rewards in a different order are the same state, and leaving them
+  # unsorted would have produced a false MISMATCH. Only that collection is
+  # normalized — arbitrary arrays are left exactly as stored.
   #
   # CoreSlot is compared WHOLE as well. An earlier version projected only
   # slot_id/status/consensus_power on the theory that the remaining fields carry
@@ -263,7 +268,11 @@ econ_canon() { # <state-json> -> canonical JSON, or non-zero
   jq -Sec '
     def idx(x): ((x // "0") | tostring | tonumber);
     {
-      epochs:       ((.epochs       // []) | sort_by(idx(.epoch_number))),
+      epochs:       ((.epochs // [])
+                       | map(if (.rewards | type) == "array"
+                             then .rewards |= sort_by([idx(.epoch_number), idx(.slot_id)])
+                             else . end)
+                       | sort_by(idx(.epoch_number))),
       entitlements: ((.entitlements // []) | sort_by([idx(.epoch), idx(.slot_id)])),
       settlements:  ((.settlements  // []) | sort_by([idx(.epoch), idx(.slot_id)])),
       slots:        ((.slots // []) | sort_by(idx(.slot_id))),
@@ -271,6 +280,95 @@ econ_canon() { # <state-json> -> canonical JSON, or non-zero
                   carry:     ((.balances.carry     // "") | tostring),
                   escrow:    ((.balances.escrow    // "") | tostring) }
     }' <<<"$j" 2>/dev/null || return 1
+}
+
+# build_state_json <slots> <balances> <ep1> <ep2> <ents1> <ents2> <settlements-array>
+#
+# Assembles the canonical-comparison input from raw query documents, and refuses
+# rather than substituting an empty collection for a source it could not read.
+#
+# The failure this closes: an unchecked CoreSlot query yielded null, `.slots // []`
+# turned that into an empty array, and a completeness gate that counted only
+# epochs/entitlements/settlements never noticed. A defective export omitting
+# CoreSlots then compared equal to a capture that had lost them too.
+#
+# Validity is structural and referential, not merely syntactic. A well-formed
+# `{}` or `{"slots":[]}` is not a usable source:
+#
+#   - every input present and parseable
+#   - CoreSlot ids unique and positive, at least one slot
+#   - entitlement (slot, epoch) identities unique
+#   - settlement identities unique AND equal to the entitlement identity set — a
+#     settlement for no entitlement, or an entitlement with no settlement, is a
+#     broken reference rather than a smaller one
+#   - the two epoch documents are epochs 1 and 2 specifically
+#   - all three balances present and non-negative decimals
+build_state_json() {
+  local slots="$1" bal="$2" ep1="$3" ep2="$4" ents1="$5" ents2="$6" sets="$7" name
+  for name in slots bal ep1 ep2 ents1 ents2 sets; do
+    local v="${!name}"
+    [[ -n "$v" ]] || { echo "build_state_json: $name is empty" >&2; return 1; }
+    jq -e . >/dev/null 2>&1 <<<"$v" || { echo "build_state_json: $name is not valid JSON" >&2; return 1; }
+  done
+  jq -ecn \
+    --argjson slots "$slots" --argjson bal "$bal" \
+    --argjson ep1 "$ep1" --argjson ep2 "$ep2" \
+    --argjson t1 "$ents1" --argjson t2 "$ents2" --argjson sets "$sets" '
+    def idn(x): ((x // "") | tostring);
+    def dec(x): ((x // "") | tostring | test("^[0-9]+$"));
+    ($slots.slots // []) as $sl
+    | (($t1.entitlements // []) + ($t2.entitlements // [])) as $ents
+    | ($sets // []) as $st
+    | ($ep1.epoch_reward // null) as $e1
+    | ($ep2.epoch_reward // null) as $e2
+    | if ($sl | length) == 0 then error("no CoreSlots captured")
+      elif ([$sl[] | idn(.slot_id)] | unique | length) != ($sl | length) then error("duplicate CoreSlot id")
+      elif ([$sl[] | select((idn(.slot_id) | test("^[1-9][0-9]*$")) | not)] | length) > 0 then error("non-positive CoreSlot id")
+      elif ($e1 == null) or ($e2 == null) then error("a finalized epoch document is missing")
+      elif idn($e1.epoch_number) != "1" then error("first epoch document is not epoch 1")
+      elif idn($e2.epoch_number) != "2" then error("second epoch document is not epoch 2")
+      elif ($ents | length) == 0 then error("no entitlements captured")
+      elif ([$ents[] | "\(idn(.slot_id))/\(idn(.epoch))"] | unique | length) != ($ents | length)
+        then error("duplicate entitlement identity")
+      elif ([$st[] | "\(idn(.slot_id))/\(idn(.epoch))"] | unique | length) != ($st | length)
+        then error("duplicate settlement identity")
+      elif ([$ents[] | "\(idn(.slot_id))/\(idn(.epoch))"] | sort)
+           != ([$st[] | "\(idn(.slot_id))/\(idn(.epoch))"] | sort)
+        then error("settlement identities do not match the entitlement identity set")
+      elif (dec($bal.outstanding_entitlement_liability) and dec($bal.carry_forward_remainder)
+            and dec($bal.rewards_balance)) | not
+        then error("a balance is missing or not a non-negative decimal")
+      else
+        { epochs: [$e1, $e2], entitlements: $ents, settlements: $st, slots: $sl,
+          balances: { liability: idn($bal.outstanding_entitlement_liability),
+                      carry:     idn($bal.carry_forward_remainder),
+                      escrow:    idn($bal.rewards_balance) } }
+      end' 2>/dev/null || return 1
+}
+
+# state_counts <state-json> — "epochs/entitlements/settlements/slots". The slot
+# count is included precisely because omitting it is what let an empty captured
+# slot set pass.
+state_counts() {
+  jq -er '"\(.epochs|length)/\(.entitlements|length)/\(.settlements|length)/\(.slots|length)"' \
+    <<<"$1" 2>/dev/null || return 1
+}
+
+# state_balances_present <state-json> — all three present and non-negative decimals.
+state_balances_present() {
+  jq -er 'def dec(x): ((x // "") | tostring | test("^[0-9]+$"));
+          if dec(.balances.liability) and dec(.balances.carry) and dec(.balances.escrow)
+          then "true" else "false" end' <<<"$1" 2>/dev/null || echo "false"
+}
+
+# settlement_row <query-json> <slot> <epoch> — the settlement, only if it is the
+# one that was asked for. A query answering about a different settlement must not
+# populate the identity set.
+settlement_row() {
+  jq -ec --arg s "$2" --arg e "$3" '
+    (.settlement // empty)
+    | if ((.slot_id | tostring) == $s and (.epoch | tostring) == $e) then .
+      else error("settlement identity mismatch") end' <<<"${1:-null}" 2>/dev/null || return 1
 }
 
 # econ_counts <canonical-json> — object counts, so a failure names WHICH class of
@@ -607,39 +705,49 @@ if [[ -n "${H_EXPORT:-}" ]]; then
 
   # The settlement identity set is derived from the ENTITLEMENTS, not from the
   # export. Taking it from the document would let an omitted row vanish from both
-  # sides of the comparison and pass unnoticed.
-  SET_ROWS="[]"
+  # sides of the comparison. Each row is additionally required to BE the
+  # settlement that was asked for.
+  SET_ROWS="[]"; SET_OK=1
   IDENTS="$(jq -r '[(.entitlements // [])[] | "\(.slot_id) \(.epoch)"] | .[]' \
              <<<"$(jq -sc '{entitlements: (map(.entitlements // []) | add)}' <<<"$ENT1 $ENT2")" 2>/dev/null)"
   while read -r sid ep; do
     [[ -n "$sid" && -n "$ep" ]] || continue
-    row="$(hq mining-query settlement "$sid" "$ep" | jq -c '.settlement // empty' 2>/dev/null)"
-    [[ -n "$row" ]] && SET_ROWS="$(jq -c --argjson r "$row" '. + [$r]' <<<"$SET_ROWS")"
+    if row="$(settlement_row "$(hq mining-query settlement "$sid" "$ep")" "$sid" "$ep")"; then
+      SET_ROWS="$(jq -c --argjson r "$row" '. + [$r]' <<<"$SET_ROWS")"
+    else
+      fail "the settlement query for slot $sid epoch $ep did not return that settlement"
+      SET_OK=0
+    fi
   done <<<"$IDENTS"
 
-  jq -nc \
-    --argjson ab "${AB_AT:-null}" --argjson slots "${SLOTS_AT:-null}" \
-    --argjson mb "${MB_AT:-null}" --argjson e1 "${EP1:-null}" --argjson e2 "${EP2:-null}" \
-    --argjson t1 "${ENT1:-null}" --argjson t2 "${ENT2:-null}" \
-    --argjson sets "${SET_ROWS:-[]}" --argjson h "$H_EXPORT" \
-    '{height:$h, active_blocks:$ab, raw_slots:$slots, module_balances:$mb,
-      state:{
-        epochs: [ ($e1.epoch_reward // empty), ($e2.epoch_reward // empty) ],
-        entitlements: (($t1.entitlements // []) + ($t2.entitlements // [])),
-        settlements: $sets,
-        slots: ($slots.slots // []),
-        balances: { liability: ($mb.outstanding_entitlement_liability // ""),
-                    carry: ($mb.carry_forward_remainder // ""),
-                    escrow: ($mb.rewards_balance // "") }
-      }}' >"$CAPTURE" 2>/dev/null
+  # The active-block capture is fail-closed in its own right: it is the TW-011
+  # probe, and an unreadable answer must not read as "no participation".
+  AB_NONZERO_CAP=""
+  if [[ -n "$AB_AT" ]] && jq -e '(.active_blocks | type) == "array"' >/dev/null 2>&1 <<<"$AB_AT"; then
+    AB_NONZERO_CAP="$(jq -r '[(.active_blocks // [])[] | select((.blocks_active|tonumber) > 0)] | length' <<<"$AB_AT" 2>/dev/null)"
+  fi
+  [[ "$AB_NONZERO_CAP" =~ ^[0-9]+$ ]] || { fail "the height-pinned active-block capture is unreadable"; AB_NONZERO_CAP=""; }
+
+  # Assembled through the validating builder, which refuses a source it could not
+  # read rather than substituting an empty collection for it.
+  CAPTURED_STATE=""
+  if (( SET_OK == 1 )); then
+    CAPTURED_STATE="$(build_state_json "$SLOTS_AT" "$MB_AT" "$EP1" "$EP2" "$ENT1" "$ENT2" "$SET_ROWS" 2>&1)" \
+      || { fail "the captured reference is incomplete: $CAPTURED_STATE"; CAPTURED_STATE=""; }
+  fi
+
+  if [[ -n "$CAPTURED_STATE" ]]; then
+    jq -nc --argjson ab "${AB_AT:-null}" --argjson st "$CAPTURED_STATE" --argjson h "$H_EXPORT" \
+      '{height:$h, active_blocks:$ab, state:$st}' >"$CAPTURE" 2>/dev/null
+  fi
   expect "state_captured_at_export_height" "true" "$([[ -s "$CAPTURE" ]] && echo true || echo false)"
-  CAP_AB_NONZERO="$(jq -r '[(.active_blocks.active_blocks // [])[] | select((.blocks_active|tonumber) > 0)] | length' "$CAPTURE" 2>/dev/null)"
+  CAP_AB_NONZERO="${AB_NONZERO_CAP:-0}"
   expect "captured_active_blocks_nonzero" "true" \
-    "$([[ "${CAP_AB_NONZERO:-0}" -ge 2 ]] && echo true || echo false)"
-  # The capture is only a proof if it actually contains the settled objects the
-  # export is going to be compared against.
-  CAP_COUNTS="$(jq -r '"\(.state.epochs|length)/\(.state.entitlements|length)/\(.state.settlements|length)"' "$CAPTURE" 2>/dev/null)"
-  expect "captured_state_is_populated" "2/8/8" "$CAP_COUNTS"
+    "$([[ -n "$AB_NONZERO_CAP" && "$AB_NONZERO_CAP" -ge 2 ]] && echo true || echo false)"
+  # The slot count is included precisely because omitting it is what let an empty
+  # captured slot set compare equal to a defective export that also lost them.
+  expect "captured_state_is_populated" "2/8/8/4" "$(state_counts "${CAPTURED_STATE:-null}" 2>/dev/null)"
+  expect "captured_balances_present" "true" "$(state_balances_present "${CAPTURED_STATE:-null}")"
 else
   fail "no exported height; the state capture cannot be pinned"
 fi
@@ -674,8 +782,7 @@ if [[ -s "$EXPORT_DOC" && -s "$CAPTURE" ]]; then
   EXP_ESCROW="$(jq -r --arg a "$REWARDS_ADDR" '[.app_state.bank.balances[]? | select(.address == $a) | .coins[]? | select(.denom == "utwlt") | .amount] | first // "0"' "$EXPORT_DOC" 2>/dev/null)"
   EXPORT_STATE="$(jq -c --arg e "$EXP_ESCROW" '.balances.escrow = $e' <<<"$EXPORT_STATE")"
 
-  CAPTURED_STATE="$(jq -c '.state' "$CAPTURE" 2>/dev/null)"
-  CANON_CAPTURED="$(econ_canon "$CAPTURED_STATE")"
+  CANON_CAPTURED="$(econ_canon "${CAPTURED_STATE:-}")"
   CANON_EXPORT="$(econ_canon "$EXPORT_STATE")"
   if [[ -z "$CANON_CAPTURED" || -z "$CANON_EXPORT" ]]; then
     fail "the canonical economic state could not be computed on both sides"
@@ -746,7 +853,10 @@ JOIN_OWNS="false"
 if [[ "$JOIN_PID" =~ ^[0-9]+$ ]] && node_process_matches "$JOIN_PID" "$JOIN_HOME"; then JOIN_OWNS="true"; fi
 expect "join_process_owns_home" "true" "$JOIN_OWNS" "$JOIN_NODE"
 JOIN_RPC_ID="$(rpc_get "$JOIN_NODE" /status 2>/dev/null | jq -r '.result.node_info.id // ""' 2>/dev/null)"
-expect "join_rpc_identity_matches_home" "$JOIN_EXPECT_ID" "$JOIN_RPC_ID" "$JOIN_NODE"
+# A computed predicate, not raw string equality: two empty strings are equal, so
+# comparing them directly turned "we could not derive an identity" into a pass.
+JOIN_ID_OK="$([[ -n "$JOIN_EXPECT_ID" && "$JOIN_RPC_ID" == "$JOIN_EXPECT_ID" ]] && echo true || echo false)"
+expect "join_rpc_identity_matches_home" "true" "$JOIN_ID_OK" "$JOIN_NODE"
 if wait_synced "$JOIN_NODE" 300; then JOIN_SYNCED="synced"; fi
 JOIN_SECONDS=$((SECONDS - JOIN_T0))
 expect "join_node_synced" "synced" "$JOIN_SYNCED" "$JOIN_NODE"
@@ -868,26 +978,25 @@ if [[ -s "$EXPORT_DOC" ]]; then
     # export, so a lost finalized epoch, entitlement, released value or
     # settlement record is a mismatch rather than something nobody compared.
     rq_r() { "$BIN" "$@" --node "http://127.0.0.1:$(restore_rpc_port 0)" --output json 2>/dev/null; }
-    R_SETS="[]"
+    R_SETS="[]"; R_SET_OK=1
     R_ENT1="$(rq_r rewards-query epoch-entitlements 1)"; R_ENT2="$(rq_r rewards-query epoch-entitlements 2)"
     R_IDENTS="$(jq -r '[(.entitlements // [])[] | "\(.slot_id) \(.epoch)"] | .[]' \
                  <<<"$(jq -sc '{entitlements: (map(.entitlements // []) | add)}' <<<"$R_ENT1 $R_ENT2")" 2>/dev/null)"
     while read -r sid ep; do
       [[ -n "$sid" && -n "$ep" ]] || continue
-      row="$(rq_r mining-query settlement "$sid" "$ep" | jq -c '.settlement // empty' 2>/dev/null)"
-      [[ -n "$row" ]] && R_SETS="$(jq -c --argjson r "$row" '. + [$r]' <<<"$R_SETS")"
+      if row="$(settlement_row "$(rq_r mining-query settlement "$sid" "$ep")" "$sid" "$ep")"; then
+        R_SETS="$(jq -c --argjson r "$row" '. + [$r]' <<<"$R_SETS")"
+      else R_SET_OK=0; fi
     done <<<"$R_IDENTS"
-    R_MB="$(rq_r rewards-query module-balances)"
-    R_STATE_JSON="$(jq -nc \
-      --argjson e1 "$(rq_r rewards-query epoch-reward 1)" --argjson e2 "$(rq_r rewards-query epoch-reward 2)" \
-      --argjson t1 "${R_ENT1:-null}" --argjson t2 "${R_ENT2:-null}" --argjson sets "$R_SETS" \
-      --argjson sl "$(rq_r coreslot-query slots)" --argjson mb "${R_MB:-null}" \
-      '{epochs: [ ($e1.epoch_reward // empty), ($e2.epoch_reward // empty) ],
-        entitlements: (($t1.entitlements // []) + ($t2.entitlements // [])),
-        settlements: $sets, slots: ($sl.slots // []),
-        balances: { liability: ($mb.outstanding_entitlement_liability // ""),
-                    carry: ($mb.carry_forward_remainder // ""),
-                    escrow: ($mb.rewards_balance // "") }}' 2>/dev/null)"
+    # The same validating assembler as the capture, so a restored chain that lost
+    # a finalized epoch, an entitlement or a settlement produces a refusal rather
+    # than a smaller state that happens to compare equal to a smaller reference.
+    R_STATE_JSON=""
+    if (( R_SET_OK == 1 )); then
+      R_STATE_JSON="$(build_state_json "$(rq_r coreslot-query slots)" "$(rq_r rewards-query module-balances)" \
+                        "$(rq_r rewards-query epoch-reward 1)" "$(rq_r rewards-query epoch-reward 2)" \
+                        "$R_ENT1" "$R_ENT2" "$R_SETS" 2>/dev/null)" || R_STATE_JSON=""
+    fi
     CANON_RESTORED="$(econ_canon "${R_STATE_JSON:-}")"
     if [[ -n "$CANON_RESTORED" && "$CANON_RESTORED" == "${CANON_CAPTURED:-}" ]]; then
       R_STATE="match"
@@ -917,7 +1026,11 @@ fi
 RESTORE_NODES_JSON="[]"
 for (( i = 0; i < NODE_COUNT; i++ )); do
   nlog="$RESTORE_NET/logs/node$i.log"
-  [[ -f "$nlog" ]] && cp "$nlog" "$EVID_DIR/restore-node$i.log" 2>/dev/null
+  if [[ -f "$nlog" ]]; then
+    cp "$nlog" "$EVID_DIR/restore-node$i.log" || fail "node$i's restore log could not be preserved"
+  else
+    fail "node$i produced no restore log; its refusal is not reconstructible"
+  fi
   nclass="$(refusal_class "$nlog")"
   nexcerpt="$(grep -hoE 'initialize coreslot genesis.{0,200}' "$nlog" 2>/dev/null | head -1)"
   [[ -n "$nexcerpt" ]] || nexcerpt="$(grep -hoE '(panic|ERR).{0,200}' "$nlog" 2>/dev/null | head -1)"
@@ -966,16 +1079,29 @@ echo "  restore       $RESTORE_OUTCOME"
 echo "  evidence      $EVID_DIR"
 echo "======================================================="
 
+# The 16 files a complete run must produce before finalization. verdict.txt is
+# written by the finalizer and read back there. provenance.jsonl belongs to
+# drill-common and is unused by this drill, and export-stderr.txt is diagnostic
+# and legitimately empty on success; neither is promoted merely to inflate the
+# count. The four restore logs ARE mandatory: REFUSED_AS_DESIGNED has to be
+# reconstructible from evidence alone.
 DRILL_MANDATORY_FILES=(
-  binaries.json export.json export.sha256 export-summary.json
+  binaries.json export.json export.sha256 export-zero-height.json export-summary.json
   state-at-export-height.json join.json restore-attempt.json restore-nodes.json
+  restore-node0.log restore-node1.log restore-node2.log restore-node3.log
   summary.csv assertions.jsonl hashes.jsonl
+)
+# Component outcomes are gated, so a run cannot exit zero carrying join=FAIL.
+DRILL_VERDICT_GATES=(
+  "export=PASS"
+  "join=PASS"
+  "restore=SUPPORTED|REFUSED_AS_DESIGNED"
 )
 DRILL_VERDICT_LINES=(
   "export=$(export_outcome "${EXPORT_ARTIFACT_OK:-false}" "${EXPORT_HEIGHT_OK:-false}" "${EXPORT_SEMANTIC_OK:-false}")"
   "restore=$RESTORE_OUTCOME"
   "join=$(join_outcome "${JOIN_EMPTY:-false}" "${JOIN_OWNS:-false}" \
-            "$([[ -n "${JOIN_EXPECT_ID:-}" && "${JOIN_RPC_ID:-}" == "${JOIN_EXPECT_ID:-x}" ]] && echo true || echo false)" \
+            "${JOIN_ID_OK:-false}" \
             "${JOIN_SYNCED:-stalled}" "${JOIN_OWNS_AFTER:-false}" "${JOIN_AGREE:-disagree}")"
 )
 # The exact proof contract: how many phases a complete run records, how many
@@ -987,6 +1113,6 @@ DRILL_VERDICT_LINES=(
 # per-name total is unchanged. Adding or renaming an assertion is meant to require
 # editing this line.
 DRILL_EXPECTED_PHASES=9
-DRILL_EXPECTED_ASSERTIONS=33
-DRILL_EXPECTED_MULTISET="active_blocks_nonzero_slots|-:1,captured_active_blocks_nonzero|-:1,captured_state_is_populated|-:1,chain_id_recorded|-:1,current_epoch_before_export|-:1,epoch_length_is_expected|-:1,export_active_blocks_classified|-:1,export_artifact_nonempty|-:1,export_height_epoch_is_3|-:1,export_height_from_artifact|-:1,export_height_is_mid_epoch|-:1,export_object_counts_match|-:1,export_open_reward_blocks_classified|-:1,export_state_matches_captured|-:1,export_succeeded|-:1,export_target_in_epoch_3|-:1,export_target_not_boundary|-:1,for_zero_height_is_inert|-:1,join_app_hash_agrees|4:1,join_node_synced|4:1,join_process_owns_home_after_sync|4:1,join_process_owns_home|4:1,join_rpc_identity_matches_home|4:1,join_started_from_empty_state|-:1,open_participation_preservation_classified|-:1,restore_outcome_classified|-:1,restore_outcome_is_not_defect|-:1,settlement_chunk_delivered|-:1,settlement_finalize_delivered|-:1,settlement_finalized|-:1,settlement_materialized|-:1,settlement_released_value|-:1,state_captured_at_export_height|-:1"
+DRILL_EXPECTED_ASSERTIONS=34
+DRILL_EXPECTED_MULTISET="active_blocks_nonzero_slots|-:1,captured_active_blocks_nonzero|-:1,captured_balances_present|-:1,captured_state_is_populated|-:1,chain_id_recorded|-:1,current_epoch_before_export|-:1,epoch_length_is_expected|-:1,export_active_blocks_classified|-:1,export_artifact_nonempty|-:1,export_height_epoch_is_3|-:1,export_height_from_artifact|-:1,export_height_is_mid_epoch|-:1,export_object_counts_match|-:1,export_open_reward_blocks_classified|-:1,export_state_matches_captured|-:1,export_succeeded|-:1,export_target_in_epoch_3|-:1,export_target_not_boundary|-:1,for_zero_height_is_inert|-:1,join_app_hash_agrees|4:1,join_node_synced|4:1,join_process_owns_home_after_sync|4:1,join_process_owns_home|4:1,join_rpc_identity_matches_home|4:1,join_started_from_empty_state|-:1,open_participation_preservation_classified|-:1,restore_outcome_classified|-:1,restore_outcome_is_not_defect|-:1,settlement_chunk_delivered|-:1,settlement_finalize_delivered|-:1,settlement_finalized|-:1,settlement_materialized|-:1,settlement_released_value|-:1,state_captured_at_export_height|-:1"
 finalize_verdict

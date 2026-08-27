@@ -45,7 +45,9 @@ more block between being asked and exiting.
 Verified by projecting **both** the export and state captured at exactly the exported height
 through one canonical form and requiring exact equality — every field below, not a sample:
 
-- **CoreSlot** — every slot with its status and consensus power
+- **CoreSlot** — the whole persisted record for every slot (18 fields at this baseline),
+  including `operator_address`, `payout_address`, `settlement_address`, `consensus_pubkey`,
+  activation generation and effective height, selection-policy identity and metadata
 - **finalized epochs** — with their emission records
 - **entitlements** — `entitlement_amount`, `released_amount`, `payout_address`,
   `total_blocks_active`, reward-config version, lifecycle audit fields and created height, per

@@ -151,6 +151,49 @@ check "extra outcome lines are written" "probe=yes" "$(grep '^probe=' "$D/verdic
 check "overall is written separately"   "overall=PASS" "$(grep '^overall=' "$D/verdict.txt")"
 
 # ---------------------------------------------------------------------------
+group gates "component verdicts must be able to fail the run"
+# Writing per-component outcomes into verdict.txt without consulting them let a
+# run exit zero carrying "join=FAIL overall=PASS" — worse than not reporting
+# them, because it looks like a checked claim.
+run_gated() { # <dir> <gates-csv> <lines-csv> -> "<rc>:<persisted overall>"
+  local d="$1" rc
+  ( DRILL_EVID_DIR="$d"; DRILL_ASSERT_LOG="$d/assertions.jsonl"; DRILL_SUMMARY="$d/summary.csv"
+    DRILL_MANDATORY_FILES=(mandatory-one.json mandatory-two.json)
+    DRILL_NAME="selftest"; FAILURES=0; SUMMARY_ROWS=1; ASSERT_ROWS=2
+    DRILL_EXPECTED_PHASES=1; DRILL_EXPECTED_ASSERTIONS=2; DRILL_EXPECTED_MULTISET="$MS_OK"
+    IFS=',' read -r -a DRILL_VERDICT_GATES <<<"$2"
+    IFS=',' read -r -a DRILL_VERDICT_LINES <<<"$3"
+    [[ -z "$2" ]] && DRILL_VERDICT_GATES=()
+    [[ -z "$3" ]] && DRILL_VERDICT_LINES=()
+    finalize_verdict >/dev/null 2>&1 ); rc=$?
+  printf '%s:%s' "$rc" "$(grep '^overall=' "$d/verdict.txt" 2>/dev/null | cut -d= -f2)"
+}
+GATES='export=PASS,join=PASS,restore=SUPPORTED|REFUSED_AS_DESIGNED'
+mkg() { mk_evidence "$TMP/$1" "$A1" "$A2"; echo "$TMP/$1"; }
+
+check "all components satisfied"        "0:PASS" "$(run_gated "$(mkg g1)"  "$GATES" 'export=PASS,restore=REFUSED_AS_DESIGNED,join=PASS')"
+check "the other allowed restore value" "0:PASS" "$(run_gated "$(mkg g2)"  "$GATES" 'export=PASS,restore=SUPPORTED,join=PASS')"
+# The exact reported defect.
+check "join=FAIL forces overall=FAIL"   "1:FAIL" "$(run_gated "$(mkg g3)"  "$GATES" 'export=PASS,restore=REFUSED_AS_DESIGNED,join=FAIL')"
+check "export=FAIL forces overall=FAIL" "1:FAIL" "$(run_gated "$(mkg g4)"  "$GATES" 'export=FAIL,restore=REFUSED_AS_DESIGNED,join=PASS')"
+check "restore=DEFECT forces FAIL"      "1:FAIL" "$(run_gated "$(mkg g5)"  "$GATES" 'export=PASS,restore=DEFECT,join=PASS')"
+check "a value outside the set"         "1:FAIL" "$(run_gated "$(mkg g6)"  "$GATES" 'export=MAYBE,restore=SUPPORTED,join=PASS')"
+# Absence is not satisfaction.
+check "a gated component never emitted" "1:FAIL" "$(run_gated "$(mkg g7)"  "$GATES" 'export=PASS,restore=SUPPORTED')"
+check "no component lines at all"       "1:FAIL" "$(run_gated "$(mkg g8)"  "$GATES" '')"
+# A malformed gate must be fatal, never silently permissive.
+check "a gate with no ="                "1:FAIL" "$(run_gated "$(mkg g9)"  'exportPASS' 'export=PASS')"
+check "a gate with an empty key"        "1:FAIL" "$(run_gated "$(mkg g10)" '=PASS' 'export=PASS')"
+check "a gate with an empty value"      "1:FAIL" "$(run_gated "$(mkg g11)" 'export=' 'export=PASS')"
+# A component reported twice is ambiguous.
+check "a duplicate component key"       "1:FAIL" "$(run_gated "$(mkg g12)" "$GATES" 'export=PASS,export=FAIL,restore=SUPPORTED,join=PASS')"
+# Backward compatibility: no gates preserves the previous behaviour.
+check "no gates, components ignored"    "0:PASS" "$(run_gated "$(mkg g13)" '' 'export=FAIL,join=FAIL')"
+# A prefix of an allowed value is not that value.
+check "a prefix is not a match"         "1:FAIL" "$(run_gated "$(mkg g14)" 'restore=SUPPORTED' 'restore=SUPP')"
+check "a superstring is not a match"    "1:FAIL" "$(run_gated "$(mkg g15)" 'restore=SUPPORTED' 'restore=SUPPORTEDX')"
+
+# ---------------------------------------------------------------------------
 group setu "failure-path variables under set -u"
 # A drill runs with `set -u`. A phase_end on a failure path that expands a variable
 # the failed read never set would abort the shell mid-run and lose the phase row
@@ -198,7 +241,7 @@ printf '  %3d  TOTAL\n' "$TOTAL"
 
 # Exact, for the same reason the library pins its multiset: an approximate target
 # lets a dropped case pass unnoticed.
-EXPECTED_CHECKS=39
+EXPECTED_CHECKS=54
 echo
 if (( TOTAL != EXPECTED_CHECKS )); then
   echo "drill-assert selftest: FAIL — $TOTAL checks ran, the contract is $EXPECTED_CHECKS" >&2

@@ -35,6 +35,7 @@ DRILL_EXPECTED_ASSERTIONS="${DRILL_EXPECTED_ASSERTIONS:-0}"
 DRILL_EXPECTED_MULTISET="${DRILL_EXPECTED_MULTISET:-}"
 DRILL_MANDATORY_FILES=()                   # evidence that must exist and be non-empty
 DRILL_VERDICT_LINES=()                     # extra "key=value" lines for verdict.txt
+DRILL_VERDICT_GATES=()                     # "key=allowed|allowed" — see verdict_gates_ok
 
 # ---- counters ---------------------------------------------------------------
 FAILURES=0
@@ -129,6 +130,75 @@ assert_multiset_observed() {
     | LC_ALL=C sort | paste -sd, - 2>/dev/null
 }
 
+# ---- component verdict gates ------------------------------------------------
+#
+# A drill can report per-component outcomes, and those outcomes have to be able to
+# fail the run. Writing them into verdict.txt without consulting them let a run
+# exit zero carrying "join=FAIL overall=PASS", which is worse than not reporting
+# them at all: it looks like a checked claim.
+#
+# Gates are "component=allowed" or "component=allowedA|allowedB", compared as
+# exact literal strings. No eval and no pattern matching: a gate is data, and
+# treating it as code or as a regex would make a malformed gate silently
+# permissive rather than fatal.
+#
+# Undefined or empty gates preserve the previous behaviour, so a drill that does
+# not report components is unaffected.
+#
+# Returns 0 only if every gate is satisfied; prints the reason otherwise.
+verdict_gates_ok() {
+  local gate key allowed line lkey lval found matched seen=""
+  (( ${#DRILL_VERDICT_GATES[@]:-0} > 0 )) || return 0
+
+  # A component reported twice is ambiguous, and picking either occurrence would
+  # be a guess about which one the drill meant.
+  for line in "${DRILL_VERDICT_LINES[@]:-}"; do
+    [[ -n "$line" && "$line" == *=* ]] || continue
+    lkey="${line%%=*}"
+    case " $seen " in
+      *" $lkey "*) echo "  FAIL: component '$lkey' is reported more than once" >&2; return 1 ;;
+    esac
+    seen="$seen $lkey"
+  done
+
+  for gate in "${DRILL_VERDICT_GATES[@]:-}"; do
+    [[ -n "$gate" ]] || continue
+    if [[ "$gate" != *=* ]]; then
+      echo "  FAIL: malformed verdict gate '$gate' (expected component=allowed[|allowed])" >&2
+      return 1
+    fi
+    key="${gate%%=*}"; allowed="${gate#*=}"
+    if [[ -z "$key" || -z "$allowed" ]]; then
+      echo "  FAIL: malformed verdict gate '$gate'" >&2
+      return 1
+    fi
+    found=""; matched=0
+    for line in "${DRILL_VERDICT_LINES[@]:-}"; do
+      [[ -n "$line" && "$line" == *=* ]] || continue
+      lkey="${line%%=*}"; lval="${line#*=}"
+      [[ "$lkey" == "$key" ]] || continue
+      found=yes
+      # Literal comparison against each allowed value, split on '|'.
+      local rest="$allowed" one
+      while [[ -n "$rest" ]]; do
+        one="${rest%%|*}"
+        [[ "$one" == "$lval" ]] && { matched=1; break; }
+        [[ "$rest" == *"|"* ]] && rest="${rest#*|}" || rest=""
+      done
+      break
+    done
+    if [[ -z "$found" ]]; then
+      echo "  FAIL: verdict gate '$key' has no reported component; absence is not satisfaction" >&2
+      return 1
+    fi
+    if (( matched == 0 )); then
+      echo "  FAIL: component '$key' is outside its allowed set ($allowed)" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 # ---- finalization -----------------------------------------------------------
 #
 # Everything a printed PASS stands on is checked here, and both closing writes are
@@ -164,6 +234,10 @@ finalize_verdict() { # [forced]
       echo "  FAIL: $ASSERT_ROWS assertions recorded, the contract is exactly $DRILL_EXPECTED_ASSERTIONS" >&2
       verdict="FAIL"
     fi
+
+    # Gates are evaluated BEFORE the verdict file is written, so the persisted
+    # overall= can never disagree with the status this function returns.
+    verdict_gates_ok || verdict="FAIL"
 
     # The verdict file carries every outcome the drill wants exposed, not just an
     # overall word, so a later reader cannot collapse a nuanced result into "PASS".
