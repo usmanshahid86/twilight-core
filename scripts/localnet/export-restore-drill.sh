@@ -414,7 +414,7 @@ if [[ -s "$EXPORT_DOC" && -s "$CAPTURE" ]]; then
   EXP_EPOCHS="$(jq -r '[.app_state.rewards.finalized_epochs[]?.epoch_number] | sort | join(",")' "$EXPORT_DOC" 2>/dev/null)"
   expect "export_finalized_epochs_present" "1,2" "$EXP_EPOCHS"
 
-  EXP_ENT="$(jq -r '[.app_state.rewards.slot_entitlements[]? | "\(.slot_id)/\(.epoch_number):\(.entitlement_amount)"] | sort | join(",")' "$EXPORT_DOC" 2>/dev/null)"
+  EXP_ENT="$(jq -r '[.app_state.rewards.slot_entitlements[]? | "\(.slot_id)/\(.epoch):\(.entitlement_amount)"] | sort | join(",")' "$EXPORT_DOC" 2>/dev/null)"
   expect "export_entitlements_nonempty" "true" "$([[ -n "$EXP_ENT" ]] && echo true || echo false)"
 
   # The workflow state lives in x/mining; the money lives in x/rewards. Both are
