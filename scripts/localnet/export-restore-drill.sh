@@ -162,6 +162,78 @@ mining_submit() { # <key> <home> <mining-subcommand...>
 # text order, so it is derived from the address bytes themselves.
 addr_hex() { "$BIN" debug addr "$1" 2>/dev/null | awk '/hex/ { print $3 }'; }
 
+# ---- outcome classification -------------------------------------------------
+# Deterministic, and deliberately separate from the code that gathers the inputs,
+# so the fast suite exercises the SHIPPED classifier rather than a copy of its
+# branches. Every input is an explicit value; nothing is read from the machine.
+
+MIN_RESTORE_PROGRESS=3
+
+# refusal_class <logfile> — which refusal, if any, a restored node recorded.
+#
+# "the process died" is not evidence of a designed refusal. Only the specific
+# CoreSlot fresh-genesis rejection counts: a mid-life document describes ACTIVE
+# slots activated long before the height it would resume at, and that is what the
+# rule exists to catch. Slot numbers and heights are left unpinned — they vary per
+# run — but the semantic class is required in full.
+refusal_class() {
+  local f="$1" body
+  [[ -f "$f" ]] || { echo "none"; return 0; }
+  body="$(tr 'A-Z' 'a-z' <"$f" 2>/dev/null)"
+  if [[ "$body" == *"initialize coreslot genesis"* \
+     && "$body" == *"activation-effective heights equal to the initial height"* \
+     && "$body" == *"invalid core slot genesis"* ]]; then
+    echo "coreslot-fresh-genesis"; return 0
+  fi
+  if [[ "$body" == *"panic"* || "$body" == *"err"* ]]; then echo "other"; return 0; fi
+  echo "none"
+}
+
+# classify_restore_outcome <nodes> <alive> <refused_as_designed> <progress>
+#                          <hash_agree> <state_match> <open_participation>
+#
+#   hash_agree           agree | disagree | n/a
+#   state_match          match | mismatch | n/a
+#   open_participation   present | absent | n/a
+#
+# Progress alone does not make a continuation supported. A chain that accepts the
+# document and then runs on state that silently lost something is worse than one
+# that refuses, because nobody finds out.
+classify_restore_outcome() {
+  local nodes="$1" alive="$2" refused="$3" progress="$4"
+  local agree="$5" state="$6" participation="$7"
+  for v in "$nodes" "$alive" "$refused" "$progress"; do
+    [[ "$v" =~ ^[0-9]+$ ]] || { echo "DEFECT"; return 0; }
+  done
+  (( nodes > 0 )) || { echo "DEFECT"; return 0; }
+
+  if (( alive == 0 )); then
+    # Every node must have refused for the identified reason. All-dead for any
+    # other reason is a defect, not a designed refusal.
+    (( refused == nodes )) && { echo "REFUSED_AS_DESIGNED"; return 0; }
+    echo "DEFECT"; return 0
+  fi
+
+  (( progress >= MIN_RESTORE_PROGRESS )) || { echo "DEFECT"; return 0; }
+  [[ "$agree" == "agree" ]] || { echo "DEFECT"; return 0; }
+  [[ "$state" == "match" ]] || { echo "DEFECT"; return 0; }
+  # If the chain accepted the document as a continuation, the open epoch's
+  # per-slot participation had to come with it. Accepting it without is silent
+  # participation loss.
+  [[ "$participation" == "present" ]] || { echo "DEFECT"; return 0; }
+  echo "SUPPORTED"
+}
+
+# Component verdicts are complete sub-proofs, not proxies for one another. An
+# artifact that exists says nothing about whether it carried the right state, and
+# a node that reached height 1 has not joined.
+export_outcome() { # <artifact_nonempty> <height_derived> <semantic_ok>
+  [[ "$1" == "true" && "$2" == "true" && "$3" == "true" ]] && echo PASS || echo FAIL
+}
+join_outcome() { # <started_empty> <synced> <hash_agree>
+  [[ "$1" == "true" && "$2" == "synced" && "$3" == "agree" ]] && echo PASS || echo FAIL
+}
+
 # ---- cleanup, scoped to this drill's own processes --------------------------
 # Never a broad pkill: another twilightd on the machine is not this drill's to
 # kill, and a stale pid file must not authorize killing whatever reused the pid.
@@ -317,18 +389,21 @@ EXPORT_DOC="$EVID_DIR/export.json"
 EXPORT_ERR="$EVID_DIR/export-stderr.txt"
 "$BIN" export --home "$(node_home 0)" --output-document "$EXPORT_DOC" >"$EXPORT_ERR" 2>&1
 EXPORT_RC=$?
-expect "export_succeeded" "0" "$EXPORT_RC"
-expect "export_artifact_nonempty" "true" "$([[ -s "$EXPORT_DOC" ]] && echo true || echo false)"
+EXPORT_ARTIFACT_OK=false; EXPORT_HEIGHT_OK=false; EXPORT_SEMANTIC_OK=true
+expect "export_succeeded" "0" "$EXPORT_RC" || EXPORT_SEMANTIC_OK=false
+if [[ -s "$EXPORT_DOC" ]]; then EXPORT_ARTIFACT_OK=true; fi
+expect "export_artifact_nonempty" "true" "$EXPORT_ARTIFACT_OK"
 sha256_of "$EXPORT_DOC" >"$EVID_DIR/export.sha256"
 
 # H_export comes from the artifact. Everything downstream pins to this number.
 if read_required_uint EXPORT_INITIAL_HEIGHT jq -er '.initial_height | tonumber' "$EXPORT_DOC"; then
   H_EXPORT=$((EXPORT_INITIAL_HEIGHT - 1))
+  EXPORT_HEIGHT_OK=true
   ok "export_height_from_artifact (initial_height=$EXPORT_INITIAL_HEIGHT -> H_export=$H_EXPORT)"
   record_assert "-" "export_height_from_artifact" "derived" "derived" PASS
   expect "export_height_is_mid_epoch" "true" \
-    "$([[ $((H_EXPORT % EPOCH_LENGTH)) -ne 0 ]] && echo true || echo false)"
-  expect "export_height_epoch_is_3" "3" "$(( H_EXPORT / EPOCH_LENGTH + 1 ))"
+    "$([[ $((H_EXPORT % EPOCH_LENGTH)) -ne 0 ]] && echo true || echo false)" || EXPORT_HEIGHT_OK=false
+  expect "export_height_epoch_is_3" "3" "$(( H_EXPORT / EPOCH_LENGTH + 1 ))" || EXPORT_HEIGHT_OK=false
 else
   fail "the exported document carries no usable initial_height"
   record_assert "-" "export_height_from_artifact" "derived" "unreadable" FAIL
@@ -390,43 +465,46 @@ echo "=== 7. what the exported document actually carries ==="
 # check that module keys exist. #108 claims the export contains the settled
 # economic state, and presence does not establish that.
 EXPORT_SUMMARY="$EVID_DIR/export-summary.json"
+# Any failed semantic comparison disqualifies export=PASS; a produced artifact is
+# not the same as a correct one.
+expect_export() { expect "$@" || EXPORT_SEMANTIC_OK=false; }
 if [[ -s "$EXPORT_DOC" && -s "$CAPTURE" ]]; then
   # CoreSlot identity/status/power, canonicalised on both sides.
   EXP_SLOTS="$(jq -r '[.app_state.coreslot.slots[]? | "\(.slot_id):\(.status):\(.consensus_power)"] | sort | join(",")' "$EXPORT_DOC" 2>/dev/null)"
   CAP_SLOTS="$(jq -r '[.slots.slots[]? | "\(.slot_id):\(.status):\(.consensus_power)"] | sort | join(",")' "$CAPTURE" 2>/dev/null)"
-  expect "export_coreslot_matches_captured" "$CAP_SLOTS" "$EXP_SLOTS"
+  expect_export "export_coreslot_matches_captured" "$CAP_SLOTS" "$EXP_SLOTS"
 
   EXP_LIAB="$(jq -r '.app_state.rewards.outstanding_entitlement_liability // ""' "$EXPORT_DOC" 2>/dev/null)"
   CAP_LIAB="$(jq -r '.module_balances.outstanding_entitlement_liability // ""' "$CAPTURE" 2>/dev/null)"
-  expect "export_liability_matches_captured" "$CAP_LIAB" "$EXP_LIAB"
+  expect_export "export_liability_matches_captured" "$CAP_LIAB" "$EXP_LIAB"
 
   EXP_CARRY="$(jq -r '.app_state.rewards.state.carry_forward_remainder // ""' "$EXPORT_DOC" 2>/dev/null)"
   CAP_CARRY="$(jq -r '.module_balances.carry_forward_remainder // ""' "$CAPTURE" 2>/dev/null)"
-  expect "export_carry_matches_captured" "$CAP_CARRY" "$EXP_CARRY"
+  expect_export "export_carry_matches_captured" "$CAP_CARRY" "$EXP_CARRY"
 
   # Escrow is a bank balance, so it is derived from the export's own bank state
   # via the rewards module account rather than read from a rewards field.
   REWARDS_ADDR="$(jq -r '[.app_state.auth.accounts[]? | select(.name == "rewards") | .base_account.address] | first // ""' "$EXPORT_DOC" 2>/dev/null)"
   EXP_ESCROW="$(jq -r --arg a "$REWARDS_ADDR" '[.app_state.bank.balances[]? | select(.address == $a) | .coins[]? | select(.denom == "utwlt") | .amount] | first // "0"' "$EXPORT_DOC" 2>/dev/null)"
   CAP_ESCROW="$(jq -r '.module_balances.rewards_balance // ""' "$CAPTURE" 2>/dev/null)"
-  expect "export_escrow_matches_captured" "$CAP_ESCROW" "$EXP_ESCROW"
+  expect_export "export_escrow_matches_captured" "$CAP_ESCROW" "$EXP_ESCROW"
 
   EXP_EPOCHS="$(jq -r '[.app_state.rewards.finalized_epochs[]?.epoch_number] | sort | join(",")' "$EXPORT_DOC" 2>/dev/null)"
-  expect "export_finalized_epochs_present" "1,2" "$EXP_EPOCHS"
+  expect_export "export_finalized_epochs_present" "1,2" "$EXP_EPOCHS"
 
   EXP_ENT="$(jq -r '[.app_state.rewards.slot_entitlements[]? | "\(.slot_id)/\(.epoch):\(.entitlement_amount)"] | sort | join(",")' "$EXPORT_DOC" 2>/dev/null)"
-  expect "export_entitlements_nonempty" "true" "$([[ -n "$EXP_ENT" ]] && echo true || echo false)"
+  expect_export "export_entitlements_nonempty" "true" "$([[ -n "$EXP_ENT" ]] && echo true || echo false)"
 
   # The workflow state lives in x/mining; the money lives in x/rewards. Both are
   # compared, because a document carrying one without the other would describe a
   # settlement nobody could reconstruct.
   EXP_SET="$(jq -r '[.app_state.mining.settlements[]? | "\(.slot_id)/\(.epoch):\(.finalized)"] | sort | join(",")' "$EXPORT_DOC" 2>/dev/null)"
   CAP_SET11="$(jq -r '"\(.settlement_1_1.settlement.slot_id)/\(.settlement_1_1.settlement.epoch):\(.settlement_1_1.settlement.finalized)"' "$CAPTURE" 2>/dev/null)"
-  expect "export_settlements_match_captured" "true" \
+  expect_export "export_settlements_match_captured" "true" \
     "$([[ "$EXP_SET" == *"$CAP_SET11"* ]] && echo true || echo false)"
   EXP_REL="$(jq -r '[.app_state.rewards.slot_entitlements[]? | select(.slot_id == "1" and .epoch == "1") | .released_amount] | first // ""' "$EXPORT_DOC" 2>/dev/null)"
   CAP_REL="$(jq -r '.settlement_1_1.released_amount // ""' "$CAPTURE" 2>/dev/null)"
-  expect "export_released_amount_matches_captured" "$CAP_REL" "$EXP_REL"
+  expect_export "export_released_amount_matches_captured" "$CAP_REL" "$EXP_REL"
 
   # The TW-011 probe. Recorded either way; the name claims a determination, not
   # an answer. `open_reward_enabled_blocks` is the epoch AGGREGATE and is kept
@@ -457,6 +535,7 @@ if [[ -s "$EXPORT_DOC" && -s "$CAPTURE" ]]; then
       for_zero_height:$zh}' >"$EXPORT_SUMMARY" 2>/dev/null
 else
   fail "the export document or the captured state is missing; no comparison is possible"
+  EXPORT_SEMANTIC_OK=false
 fi
 phase_end "export_content" "active_blocks=${AB_IN_EXPORT:-?} epochs=${EXP_EPOCHS:-?}"
 
@@ -469,7 +548,9 @@ echo "=== 8. a node with no data joins the running network ==="
 # actually faces.
 JOIN_HOME="$(node_home "$JOIN_NODE")"
 rm -rf "$JOIN_HOME"
-expect "join_started_from_empty_state" "true" "$([[ ! -d "$JOIN_HOME/data" ]] && echo true || echo false)"
+JOIN_EMPTY="$([[ ! -d "$JOIN_HOME/data" ]] && echo true || echo false)"
+JOIN_SYNCED="stalled"; JOIN_AGREE="disagree"
+expect "join_started_from_empty_state" "true" "$JOIN_EMPTY"
 if read_required_uint JOIN_START_HEIGHT latest_height 1; then
   note "the joining node starts against a network at height $JOIN_START_HEIGHT"
 else fail "the network height at join time could not be read"; fi
@@ -477,20 +558,13 @@ NODE_COUNT_SAVED="$NODE_COUNT"
 join_node "$JOIN_NODE"
 start_node "$JOIN_NODE"
 JOIN_T0=$SECONDS
-if wait_synced "$JOIN_NODE" 300; then
-  JOIN_SECONDS=$((SECONDS - JOIN_T0))
-  expect "join_node_synced" "synced" "synced" "$JOIN_NODE"
-else
-  JOIN_SECONDS=$((SECONDS - JOIN_T0))
-  expect "join_node_synced" "synced" "stalled" "$JOIN_NODE"
-fi
+if wait_synced "$JOIN_NODE" 300; then JOIN_SYNCED="synced"; fi
+JOIN_SECONDS=$((SECONDS - JOIN_T0))
+expect "join_node_synced" "synced" "$JOIN_SYNCED" "$JOIN_NODE"
 read_required_uint JOIN_END_HEIGHT latest_height "$JOIN_NODE" \
   || fail "the joining node's height could not be read"
-if agree_nodes "0 1 2 3 $JOIN_NODE" "post-join"; then
-  expect "join_app_hash_agrees" "agree" "agree" "$JOIN_NODE"
-else
-  expect "join_app_hash_agrees" "agree" "disagree" "$JOIN_NODE"
-fi
+if agree_nodes "0 1 2 3 $JOIN_NODE" "post-join"; then JOIN_AGREE="agree"; fi
+expect "join_app_hash_agrees" "agree" "$JOIN_AGREE" "$JOIN_NODE"
 jq -nc --argjson s "${JOIN_START_HEIGHT:-0}" --argjson e "${JOIN_END_HEIGHT:-0}" \
   --argjson secs "$JOIN_SECONDS" --arg home "$JOIN_HOME" \
   '{start_height:$s, end_height:$e, sync_seconds:$secs, home:$home,
@@ -553,13 +627,23 @@ if [[ -s "$EXPORT_DOC" ]]; then
   done
   sleep 25
 
-  # Did any node refuse the document outright?
-  REFUSAL="$(grep -hoE '(ERR|panic).*' "$RESTORE_NET"/logs/node*.log 2>/dev/null | head -3 | tr '\n' ' ')"
-  R_ALIVE=0
+  # Per-node refusal classification. "The process died" is not evidence of a
+  # designed refusal, so each log is classified individually and only the
+  # identified CoreSlot fresh-genesis class counts.
+  R_ALIVE=0; R_REFUSED=0; R_CLASSES=""
   for (( i = 0; i < NODE_COUNT; i++ )); do
     rpid="$(cat "$RESTORE_NET/node$i.pid" 2>/dev/null)"
-    [[ "$rpid" =~ ^[0-9]+$ ]] && node_process_matches "$rpid" "$RESTORE_NET/node$i" && R_ALIVE=$((R_ALIVE + 1))
+    if [[ "$rpid" =~ ^[0-9]+$ ]] && node_process_matches "$rpid" "$RESTORE_NET/node$i"; then
+      R_ALIVE=$((R_ALIVE + 1)); rclass="alive"
+    else
+      rclass="$(refusal_class "$RESTORE_NET/logs/node$i.log")"
+      [[ "$rclass" == "coreslot-fresh-genesis" ]] && R_REFUSED=$((R_REFUSED + 1))
+    fi
+    R_CLASSES="${R_CLASSES}${R_CLASSES:+,}node$i=$rclass"
   done
+  REFUSAL="$(grep -hoE 'initialize coreslot genesis[^"]{0,200}' "$RESTORE_NET"/logs/node*.log 2>/dev/null | head -1)"
+  [[ -n "$REFUSAL" ]] || REFUSAL="$(grep -hoE '(panic|ERR).{0,200}' "$RESTORE_NET"/logs/node*.log 2>/dev/null | head -1)"
+
   R_H0="$(curl -fsS "http://127.0.0.1:27657/status" 2>/dev/null | jq -r '.result.sync_info.latest_block_height // 0' 2>/dev/null)"
   [[ "$R_H0" =~ ^[0-9]+$ ]] || R_H0=0
   sleep 12
@@ -567,22 +651,42 @@ if [[ -s "$EXPORT_DOC" ]]; then
   [[ "$R_H1" =~ ^[0-9]+$ ]] || R_H1=0
   R_PROGRESS=$((R_H1 - R_H0))
 
-  if (( R_ALIVE == 0 )); then
-    RESTORE_OUTCOME="REFUSED_AS_DESIGNED"
-    RESTORE_DETAIL="no restored node stayed up; refusal: ${REFUSAL:0:400}"
-  elif (( R_PROGRESS >= 3 )); then
-    # It runs. Whether that is SUPPORTED or a DEFECT depends on what it runs WITH.
-    if [[ "${AB_IN_EXPORT:-absent}" == "absent" ]]; then
-      RESTORE_OUTCOME="DEFECT"
-      RESTORE_DETAIL="the document was accepted as a continuation and the chain progressed ($R_PROGRESS blocks), but per-slot open-epoch participation was absent from it — silent participation loss"
+  # The SUPPORTED branch needs more than progress. These are only evaluated when
+  # the chain is actually running; otherwise they stay n/a and the classifier
+  # never consults them.
+  R_AGREE="n/a"; R_STATE="n/a"; R_PARTICIPATION="n/a"
+  if (( R_ALIVE > 0 && R_PROGRESS >= MIN_RESTORE_PROGRESS )); then
+    if AGREE_NODES="" agree_nodes "" "restored" >/dev/null 2>&1; then R_AGREE="agree"; else R_AGREE="disagree"; fi
+    # Compared against what was exported, for the fields that must survive a
+    # continuation unchanged. Heights and clocks are deliberately excluded: they
+    # advance during the restored blocks and a mismatch there proves nothing.
+    R_SLOTS="$("$BIN" coreslot-query slots --node tcp://127.0.0.1:27657 --output json 2>/dev/null \
+      | jq -r '[.slots[]? | "\(.slot_id):\(.status):\(.consensus_power)"] | sort | join(",")')"
+    R_MB="$("$BIN" rewards-query module-balances --node tcp://127.0.0.1:27657 --output json 2>/dev/null)"
+    R_LIAB="$(jq -r '.outstanding_entitlement_liability // ""' <<<"${R_MB:-{}}")"
+    R_CARRY="$(jq -r '.carry_forward_remainder // ""' <<<"${R_MB:-{}}")"
+    R_ESCROW="$(jq -r '.rewards_balance // ""' <<<"${R_MB:-{}}")"
+    if [[ "$R_SLOTS" == "$EXP_SLOTS" && "$R_LIAB" == "$EXP_LIAB" \
+       && "$R_CARRY" == "$EXP_CARRY" && "$R_ESCROW" == "$EXP_ESCROW" ]]; then
+      R_STATE="match"
     else
-      RESTORE_OUTCOME="SUPPORTED"
-      RESTORE_DETAIL="accepted and committed $R_PROGRESS blocks from height $R_H0"
+      R_STATE="mismatch"
     fi
-  else
-    RESTORE_OUTCOME="DEFECT"
-    RESTORE_DETAIL="the document was accepted but the chain made no progress ($R_PROGRESS blocks in 12s); refusal text: ${REFUSAL:0:400}"
+    R_AB="$("$BIN" rewards-query current-active-blocks --node tcp://127.0.0.1:27657 --output json 2>/dev/null \
+      | jq -r '[(.active_blocks // [])[] | select((.blocks_active|tonumber) > 0)] | length' 2>/dev/null)"
+    [[ "${R_AB:-0}" =~ ^[0-9]+$ ]] && (( R_AB > 0 )) && R_PARTICIPATION="present" || R_PARTICIPATION="absent"
   fi
+
+  RESTORE_OUTCOME="$(classify_restore_outcome "$NODE_COUNT" "$R_ALIVE" "$R_REFUSED" "$R_PROGRESS" \
+                       "$R_AGREE" "$R_STATE" "$R_PARTICIPATION")"
+  case "$RESTORE_OUTCOME" in
+    REFUSED_AS_DESIGNED)
+      RESTORE_DETAIL="every restored node refused the mid-life document under the CoreSlot fresh-genesis rule" ;;
+    SUPPORTED)
+      RESTORE_DETAIL="accepted, committed $R_PROGRESS blocks from height $R_H0, nodes agree, state matches, open-epoch participation present" ;;
+    *)
+      RESTORE_DETAIL="alive=$R_ALIVE refused_as_designed=$R_REFUSED/$NODE_COUNT progress=$R_PROGRESS agree=$R_AGREE state=$R_STATE participation=$R_PARTICIPATION" ;;
+  esac
   for (( i = 0; i < NODE_COUNT; i++ )); do kill_recorded "$RESTORE_NET/node$i.pid" "$RESTORE_NET/node$i"; done
 else
   RESTORE_OUTCOME="NOT_ATTEMPTED"
@@ -596,11 +700,16 @@ record_assert "-" "restore_outcome_classified" "classified" "$RESTORE_OUTCOME" P
 expect "restore_outcome_is_not_defect" "true" \
   "$([[ "$RESTORE_OUTCOME" != "DEFECT" && "$RESTORE_OUTCOME" != "NOT_ATTEMPTED" ]] && echo true || echo false)"
 jq -nc --arg o "$RESTORE_OUTCOME" --arg d "$RESTORE_DETAIL" --arg r "${REFUSAL:-}" \
-  --argjson alive "${R_ALIVE:-0}" --argjson prog "${R_PROGRESS:-0}" \
+  --arg classes "${R_CLASSES:-}" --arg agree "${R_AGREE:-n/a}" --arg state "${R_STATE:-n/a}" \
+  --arg part "${R_PARTICIPATION:-n/a}" \
+  --argjson nodes "$NODE_COUNT" --argjson alive "${R_ALIVE:-0}" \
+  --argjson refused "${R_REFUSED:-0}" --argjson prog "${R_PROGRESS:-0}" \
   --argjson h0 "${R_H0:-0}" --argjson h1 "${R_H1:-0}" \
-  '{outcome:$o, detail:$d, nodes_alive:$alive, blocks_committed:$prog,
-    height_first_seen:$h0, height_after_window:$h1, log_excerpt:$r}' \
-  >"$EVID_DIR/restore-attempt.json" 2>/dev/null
+  '{outcome:$o, detail:$d, nodes:$nodes, nodes_alive:$alive,
+    nodes_refused_as_designed:$refused, per_node_refusal_class:$classes,
+    blocks_committed:$prog, height_first_seen:$h0, height_after_window:$h1,
+    app_hash_agreement:$agree, persistent_state:$state, open_epoch_participation:$part,
+    log_excerpt:$r}' >"$EVID_DIR/restore-attempt.json" 2>/dev/null
 phase_end "restore" "outcome=$RESTORE_OUTCOME alive=${R_ALIVE:-0} progress=${R_PROGRESS:-0}"
 
 echo
@@ -623,9 +732,9 @@ DRILL_MANDATORY_FILES=(
   summary.csv assertions.jsonl hashes.jsonl
 )
 DRILL_VERDICT_LINES=(
-  "export=$([[ -s "$EXPORT_DOC" ]] && echo PASS || echo FAIL)"
+  "export=$(export_outcome "${EXPORT_ARTIFACT_OK:-false}" "${EXPORT_HEIGHT_OK:-false}" "${EXPORT_SEMANTIC_OK:-false}")"
   "restore=$RESTORE_OUTCOME"
-  "join=$([[ "${JOIN_END_HEIGHT:-0}" -gt 0 ]] && echo PASS || echo FAIL)"
+  "join=$(join_outcome "${JOIN_EMPTY:-false}" "${JOIN_SYNCED:-stalled}" "${JOIN_AGREE:-disagree}")"
 )
 # The exact proof contract: how many phases a complete run records, how many
 # assertions it makes, and how many times each one is made. Derived from the phase
