@@ -42,12 +42,14 @@ more block between being asked and exiting.
 
 ### What the document carries
 
-Verified by comparing the export against state captured at exactly the exported height:
+Verified by projecting **both** the export and state captured at exactly the exported height
+through one canonical form and requiring exact equality — every field below, not a sample:
 
 - **CoreSlot** — every slot with its status and consensus power
 - **finalized epochs** — with their emission records
-- **entitlements** — `entitlement_amount`, `released_amount`, `payout_address`, and
-  `total_blocks_active` per slot per closed epoch
+- **entitlements** — `entitlement_amount`, `released_amount`, `payout_address`,
+  `total_blocks_active`, reward-config version, lifecycle audit fields and created height, per
+  slot per closed epoch
 - **settlements** — slot, epoch, `finalized`, `finalized_height`, `finalization_reason`,
   `next_chunk_index`
 - **outstanding entitlement liability**, **carry-forward remainder**
@@ -69,13 +71,19 @@ which slot contributed which share of it.
 That distinction matters. The aggregate alone cannot reconstruct an allocation: it tells you
 how much the epoch is worth, not who earned it.
 
+The drill answers this from the **artifact**, not by asking a restarted chain. A chain restarted
+from the document begins accruing fresh counters immediately, so a non-zero reading there would
+conceal exactly the loss being tested for. Recorded as
+`open_participation_preservation: lost`.
+
 This is tracked as **TW-011**. It is not fixed here, and #108 does not attempt to.
 
 ### `--for-zero-height` does nothing
 
 The flag is accepted and has no effect. Exporting with and without it produces semantically
 identical documents, and `initial_height` is the last block height plus one either way.
-Heights are never rebased.
+Heights are never rebased. The drill **asserts** this rather than recording whichever answer
+appeared, so if the flag ever starts doing something this note fails with it.
 
 This is an export-CLI characteristic, not a state-machine one. It is unrelated to fresh-genesis
 height validation, which works (see below).
@@ -178,8 +186,9 @@ Each run writes `build/localnet/evidence/<run-id>/export-restore/`:
 | `export.json`, `export.sha256` | the exported document and its hash |
 | `export-zero-height.json` | the same export with `--for-zero-height`, for comparison |
 | `state-at-export-height.json` | live state pinned at exactly the exported height |
-| `export-summary.json` | the semantic comparison, and the participation classification |
-| `restore-attempt.json` | outcome, node count, blocks committed, refusal text |
+| `export-summary.json` | the canonical economic state compared, and the participation classification |
+| `restore-attempt.json` | outcome, node count, blocks committed, restored-network agreement, refusal text |
+| `restore-nodes.json`, `restore-node<N>.log` | per-node process state, refusal class and excerpt — the refusal is reconstructible from evidence alone |
 | `join.json` | start/end heights, sync duration, operator inputs required |
 | `assertions.jsonl`, `summary.csv`, `hashes.jsonl` | per-assertion, per-phase, per-height records |
 | `verdict.txt` | `export=`, `restore=`, `join=`, `overall=` — separately |

@@ -56,28 +56,97 @@ group classify "classify_restore_outcome — the branches a passing run never ta
 check "all dead, correct refusal"        "REFUSED_AS_DESIGNED" "$(classify_restore_outcome 4 0 4 0 n/a n/a n/a)"
 check "all dead, unrelated panic"        "DEFECT"              "$(classify_restore_outcome 4 0 0 0 n/a n/a n/a)"
 check "all dead, only some refused"      "DEFECT"              "$(classify_restore_outcome 4 0 3 0 n/a n/a n/a)"
-check "progresses, participation absent" "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree match absent)"
-check "progresses, hashes disagree"      "DEFECT"              "$(classify_restore_outcome 4 4 0 5 disagree match present)"
-check "progresses, state mismatch"       "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree mismatch present)"
-check "alive but no progress"            "DEFECT"              "$(classify_restore_outcome 4 4 0 0 agree match present)"
-check "alive, progress below the floor"  "DEFECT"              "$(classify_restore_outcome 4 4 0 2 agree match present)"
-check "4 of 4, everything holds"         "SUPPORTED"           "$(classify_restore_outcome 4 4 0 3 agree match present)"
+check "progresses, participation lost"   "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree match lost)"
+check "progresses, participation n/a"    "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree match unreadable)"
+check "progresses, participation unread" "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree match unreadable)"
+check "progresses, hashes disagree"      "DEFECT"              "$(classify_restore_outcome 4 4 0 5 disagree match preserved)"
+check "progresses, state mismatch"       "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree mismatch preserved)"
+check "alive but no progress"            "DEFECT"              "$(classify_restore_outcome 4 4 0 0 agree match preserved)"
+check "alive, progress below the floor"  "DEFECT"              "$(classify_restore_outcome 4 4 0 2 agree match preserved)"
+check "4 of 4, everything holds"         "SUPPORTED"           "$(classify_restore_outcome 4 4 0 3 agree match preserved)"
 check "restored RPC disagreement"        "DEFECT"              "$(classify_restore_outcome 4 4 0 5 disagree match present)"
-check "restored nodes unreachable"       "DEFECT"              "$(classify_restore_outcome 4 4 0 5 unreachable match present)"
-check "restored nodes still catching up" "DEFECT"              "$(classify_restore_outcome 4 4 0 5 catching_up match present)"
-check "no common restored height"        "DEFECT"              "$(classify_restore_outcome 4 4 0 5 no_common_height match present)"
+check "restored nodes unreachable"       "DEFECT"              "$(classify_restore_outcome 4 4 0 5 unreachable match preserved)"
+check "restored nodes still catching up" "DEFECT"              "$(classify_restore_outcome 4 4 0 5 catching_up match preserved)"
+check "no common restored height"        "DEFECT"              "$(classify_restore_outcome 4 4 0 5 no_common_height match preserved)"
 # A mixed network is never supported: one validator accepting the document while
 # another rejects it is a determinism failure, not a degraded success.
-check "2 of 4 alive, all else good"      "DEFECT"              "$(classify_restore_outcome 4 2 2 5 agree match present)"
-check "3 of 4 alive, all else good"      "DEFECT"              "$(classify_restore_outcome 4 3 0 5 agree match present)"
-check "3 alive + 1 designed refusal"     "DEFECT"              "$(classify_restore_outcome 4 3 1 5 agree match present)"
-check "all alive but one also refused"   "DEFECT"              "$(classify_restore_outcome 4 4 1 5 agree match present)"
+check "2 of 4 alive, all else good"      "DEFECT"              "$(classify_restore_outcome 4 2 2 5 agree match preserved)"
+check "3 of 4 alive, all else good"      "DEFECT"              "$(classify_restore_outcome 4 3 0 5 agree match preserved)"
+check "3 alive + 1 designed refusal"     "DEFECT"              "$(classify_restore_outcome 4 3 1 5 agree match preserved)"
+check "all alive but one also refused"   "DEFECT"              "$(classify_restore_outcome 4 4 1 5 agree match preserved)"
 # Unevaluated inputs must not be silently accepted as satisfied.
-check "n/a agreement is not agreement"   "DEFECT"              "$(classify_restore_outcome 4 4 0 5 n/a match present)"
-check "n/a state is not a match"         "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree n/a present)"
-check "n/a participation is not present" "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree match n/a)"
-check "non-numeric input is a defect"    "DEFECT"              "$(classify_restore_outcome 4 '' 0 5 agree match present)"
+check "n/a agreement is not agreement"   "DEFECT"              "$(classify_restore_outcome 4 4 0 5 n/a match preserved)"
+check "n/a state is not a match"         "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree n/a preserved)"
+
+check "non-numeric input is a defect"    "DEFECT"              "$(classify_restore_outcome 4 '' 0 5 agree match preserved)"
 check "zero nodes is a defect"           "DEFECT"              "$(classify_restore_outcome 0 0 0 0 n/a n/a n/a)"
+# B4: a height that could not be read is not a height, and must never become 0.
+check "progress n/a with a live network"  "DEFECT"             "$(classify_restore_outcome 4 4 0 n/a agree match preserved)"
+check "progress empty"                    "DEFECT"             "$(classify_restore_outcome 4 4 0 '' agree match preserved)"
+check "progress non-numeric"              "DEFECT"             "$(classify_restore_outcome 4 4 0 unreadable agree match preserved)"
+check "progress negative"                 "DEFECT"             "$(classify_restore_outcome 4 4 0 -4 agree match preserved)"
+# n/a progress is fine on the all-dead designed-refusal branch: nothing was running.
+check "progress n/a on the refusal branch" "REFUSED_AS_DESIGNED" "$(classify_restore_outcome 4 0 4 n/a n/a n/a n/a)"
+
+# ---------------------------------------------------------------------------
+group econ "econ_canon — every field that must survive is compared"
+# B1: the previous export proof compared epoch NUMBERS, required entitlements to
+# be merely non-empty, and checked one released amount. Corrupting economics,
+# amounts, payout addresses, participation or settlement workflow fields left
+# every gate identical. Each mutation below must change the canonical form.
+GOOD='{"epochs":[{"epoch_number":"1","start_height":"1","end_height":"360","minted_emission":"149828400","carry_in":"0","distributable_fees":"0","treasury_amount":"0","reward_pool":"149828400","allocated_amount":"149828400","carry_out":"0","distribution_method":"UNIFORM","remainder_policy":"CARRY","cumulative_emitted_after_epoch":"149828400","reward_enabled_blocks":"360"}],
+       "entitlements":[{"slot_id":"1","epoch":"1","total_blocks_active":"360","entitlement_amount":"37457100","released_amount":"37457100","payout_address":"twilight1aaa","reward_config_version":"1","slot_status_at_epoch_close":"ACTIVE","activation_sequence_at_epoch_close":"1","created_height":"360"}],
+       "settlements":[{"slot_id":"1","epoch":"1","distribution_mode_version":"1","settlement_mode":"TRUSTED_AS","settlement_params_version":"1","next_chunk_index":"1","finalized":true,"finalized_height":"367","finalization_reason":"AUTHORIZED_EARLY"}],
+       "slots":[{"slot_id":"1","status":"ACTIVE","consensus_power":"1"}],
+       "balances":{"liability":"262199700","carry":"0","escrow":"262199700"}}'
+BASE="$(econ_canon "$GOOD")"
+check "a well-formed state canonicalizes" "5" "$(grep -c . <<<"$BASE")"
+mutated() { econ_canon "$(jq -c "$1" <<<"$GOOD")"; }
+differs() { [[ "$(mutated "$1")" != "$BASE" ]] && echo differs || echo same; }
+check "finalized-epoch economics"     "differs" "$(differs '.epochs[0].minted_emission="1"')"
+check "epoch carry_out"               "differs" "$(differs '.epochs[0].carry_out="9"')"
+check "epoch reward_enabled_blocks"   "differs" "$(differs '.epochs[0].reward_enabled_blocks="359"')"
+check "entitlement amount"            "differs" "$(differs '.entitlements[0].entitlement_amount="1"')"
+check "released amount"               "differs" "$(differs '.entitlements[0].released_amount="0"')"
+check "payout address"                "differs" "$(differs '.entitlements[0].payout_address="twilight1zzz"')"
+check "total blocks active"           "differs" "$(differs '.entitlements[0].total_blocks_active="1"')"
+check "entitlement created height"    "differs" "$(differs '.entitlements[0].created_height="1"')"
+check "settlement finalized height"   "differs" "$(differs '.settlements[0].finalized_height="999"')"
+check "finalization reason"           "differs" "$(differs '.settlements[0].finalization_reason="DEADLINE"')"
+check "next chunk index"              "differs" "$(differs '.settlements[0].next_chunk_index="0"')"
+check "settlement finalized flag"     "differs" "$(differs '.settlements[0].finalized=false')"
+check "settlement mode"               "differs" "$(differs '.settlements[0].settlement_mode="OPERATOR_ONLY"')"
+check "coreslot status"               "differs" "$(differs '.slots[0].status="SUSPENDED"')"
+check "coreslot power"                "differs" "$(differs '.slots[0].consensus_power="7"')"
+check "outstanding liability"         "differs" "$(differs '.balances.liability="1"')"
+check "carry"                         "differs" "$(differs '.balances.carry="1"')"
+check "escrow"                        "differs" "$(differs '.balances.escrow="1"')"
+check "a missing entitlement"         "differs" "$(differs '.entitlements=[]')"
+check "an extra entitlement"          "differs" "$(differs '.entitlements += [.entitlements[0] * {slot_id:"2"}]')"
+check "a missing settlement"          "differs" "$(differs '.settlements=[]')"
+check "an extra settlement"           "differs" "$(differs '.settlements += [.settlements[0] * {slot_id:"2"}]')"
+check "a missing finalized epoch"     "differs" "$(differs '.epochs=[]')"
+# Ordering must not matter; two orderings of the same state are the same state.
+check "order-insensitive"             "same" \
+  "$([[ "$(econ_canon "$(jq -c '.entitlements = [(.entitlements[0] * {slot_id:"2"}), .entitlements[0]]' <<<"$GOOD")")" \
+     == "$(econ_canon "$(jq -c '.entitlements = [.entitlements[0], (.entitlements[0] * {slot_id:"2"})]' <<<"$GOOD")")" ]] && echo same || echo differs)"
+check "empty input is refused"        "1" "$(econ_canon "" >/dev/null 2>&1; echo $?)"
+check "malformed input is refused"    "1" "$(econ_canon '{oops' >/dev/null 2>&1; echo $?)"
+
+# ---------------------------------------------------------------------------
+group participation "preservation is answered from the artifact, not the restart"
+# B3: asking a restarted chain whether it has participation can only ever report
+# freshly accrued counters, which would conceal the very loss being tested for.
+check "non-zero in, no field out, is lost"  "lost"       "$(participation_preservation 4 absent)"
+check "non-zero in, field present"          "preserved"  "$(participation_preservation 4 present)"
+check "one slot is still non-zero"          "lost"       "$(participation_preservation 1 absent)"
+check "nothing to preserve"                 "n/a"        "$(participation_preservation 0 absent)"
+check "unreadable capture"                  "unreadable" "$(participation_preservation '' absent)"
+check "non-numeric capture"                 "unreadable" "$(participation_preservation many present)"
+# The full B3 case: participation lost from the artifact, restored chain later
+# generates fresh counters, and it is STILL a defect.
+check "lost + fresh counters is a defect"   "DEFECT" \
+  "$(classify_restore_outcome 4 4 0 9 agree match "$(participation_preservation 4 absent)")"
 
 # ---------------------------------------------------------------------------
 group ports "the restored agreement check queries the RESTORED network"
@@ -94,20 +163,77 @@ check "the base is not the ordinary one" "differs" \
 check "no restored port collides with the localnet series" "none" \
   "$(for i in 0 1 2 3; do for j in 0 1 2 3 4; do
        [[ "$(restore_rpc_port $i)" == "$((26657 + j * 100))" ]] && echo collision; done; done | head -1 | grep -c collision | sed 's/^0$/none/')"
-# With nothing listening on the restore ports, the helper must report the reason
-# rather than silently reading agreement from somewhere else.
-check "nothing listening is not agreement" "unreachable" "$(restore_agreement 4)"
-check "zero nodes is not agreement"        "unreachable" "$(restore_agreement 0)"
+# With nothing listening on the restore ports the helper must report the reason
+# rather than silently reading agreement from somewhere else. It ASSIGNS rather
+# than prints, so a caller using $( ) would lose everything it recorded.
+restore_agreement 4
+check "nothing listening is not agreement" "unreachable" "$RESTORE_AGREEMENT_RESULT"
+restore_agreement 0
+check "zero nodes is not agreement"        "unreachable" "$RESTORE_AGREEMENT_RESULT"
+
+# ---------------------------------------------------------------------------
+group agreement "restore_agreement, every branch, against the shipped helper"
+# B5: the healthy branch was dead code — a healthy node reports catching_up as a
+# BOOLEAN false, and jq's // treats false as the alternate case, so `// "true"`
+# turned every healthy node into "catching up". Nothing executed this branch, so
+# nothing caught it. These fixtures drive the real helper by injecting its fetch.
+FIX_MODE=""
+restore_rpc_get() {
+  local n="$1" path="$2"
+  case "$FIX_MODE" in
+    unreachable) return 0 ;;
+    malformed)   [[ "$path" == "/status" ]] && echo '{"result":{"sync_info":{"catching_up":"false","latest_block_height":"100"}}}'; return 0 ;;
+    missingfield)[[ "$path" == "/status" ]] && echo '{"result":{"sync_info":{"latest_block_height":"100"}}}'; return 0 ;;
+    catchingup)  [[ "$path" == "/status" ]] && printf '{"result":{"sync_info":{"catching_up":%s,"latest_block_height":"100"}}}\n' "$([[ "$n" == "1" ]] && echo true || echo false)"; return 0 ;;
+    zeroheight)  [[ "$path" == "/status" ]] && echo '{"result":{"sync_info":{"catching_up":false,"latest_block_height":"0"}}}'; return 0 ;;
+  esac
+  if [[ "$path" == "/status" ]]; then
+    echo '{"result":{"sync_info":{"catching_up":false,"latest_block_height":"100"}}}'; return 0
+  fi
+  case "$FIX_MODE" in
+    badblock) echo '{"result":{"block":{"header":{}}}}' ;;
+    disagree) local t=AA; [[ "$n" == "2" ]] && t=ZZ
+              printf '{"result":{"block":{"header":{"app_hash":"%s","validators_hash":"%s","next_validators_hash":"%s"}}}}\n' "$t" "$t" "$t" ;;
+    *)        echo '{"result":{"block":{"header":{"app_hash":"AA","validators_hash":"BB","next_validators_hash":"CC"}}}}' ;;
+  esac
+}
+ra() { FIX_MODE="$1"; restore_agreement 4; echo "$RESTORE_AGREEMENT_RESULT"; }
+
+check "a healthy network agrees"          "agree"            "$(ra healthy)"
+check "one node disagreeing"              "disagree"         "$(ra disagree)"
+check "one node still catching up"        "catching_up"      "$(ra catchingup)"
+check "catching_up as a string"           "unreadable"       "$(ra malformed)"
+check "catching_up absent"                "unreadable"       "$(ra missingfield)"
+check "nothing listening"                 "unreachable"      "$(ra unreachable)"
+check "no usable common height"           "no_common_height" "$(ra zeroheight)"
+check "unreadable block header"           "unreadable"       "$(ra badblock)"
+check "zero nodes"                        "unreachable"      "$(FIX_MODE=healthy; restore_agreement 0; echo "$RESTORE_AGREEMENT_RESULT")"
+
+# The evidence must survive the call. It did not when the helper was invoked in
+# command substitution: every global it set was discarded with the subshell.
+FIX_MODE=healthy; restore_agreement 4
+check "the common height survives the call" "100" "$RESTORE_AGREEMENT_HEIGHT"
+check "per-node rows survive the call"      "4"   "$(tr ';' '\n' <<<"$RESTORE_AGREEMENT_ROWS" | grep -c '^node')"
+check "rows name the common height"         "4"   "$(tr ';' '\n' <<<"$RESTORE_AGREEMENT_ROWS" | grep -c '@100=')"
+FIX_MODE=badblock; restore_agreement 4
+check "a failed run records no height"      "0"   "$RESTORE_AGREEMENT_HEIGHT"
+unset -f restore_rpc_get
 
 # ---------------------------------------------------------------------------
 group verdicts "component verdicts are complete sub-proofs, not proxies"
 # The specific future this prevents: a node reaches height 1, never synchronizes,
 # and the run still reports join=PASS.
-check "join needs empty + sync + agree" "PASS" "$(join_outcome true synced agree)"
-check "synced but disagreeing"          "FAIL" "$(join_outcome true synced disagree)"
-check "agreeing but never synced"       "FAIL" "$(join_outcome true stalled agree)"
-check "not started from empty state"    "FAIL" "$(join_outcome false synced agree)"
-check "nothing established"             "FAIL" "$(join_outcome false stalled disagree)"
+#          empty owns  ident synced   after agree
+check "the complete chain of custody"   "PASS" "$(join_outcome true  true  true  synced  true  agree)"
+check "synced but disagreeing"          "FAIL" "$(join_outcome true  true  true  synced  true  disagree)"
+check "agreeing but never synced"       "FAIL" "$(join_outcome true  true  true  stalled true  agree)"
+check "not started from empty state"    "FAIL" "$(join_outcome false true  true  synced  true  agree)"
+# B6: the process never started — a bind failure — while something already on the
+# join port answers with a healthy status and matching hashes.
+check "impersonator: no process of ours" "FAIL" "$(join_outcome true  false true  synced  false agree)"
+check "impersonator: foreign node id"    "FAIL" "$(join_outcome true  true  false synced  true  agree)"
+check "our process died during sync"     "FAIL" "$(join_outcome true  true  true  synced  false agree)"
+check "nothing established"              "FAIL" "$(join_outcome false false false stalled false disagree)"
 
 # An artifact that exists is not an artifact that carried the right state.
 check "export needs all three"          "PASS" "$(export_outcome true true true)"
@@ -142,8 +268,27 @@ for i in $(seq 0 $GROUP_IDX); do
 done
 printf '  %3d  TOTAL\n' "$TOTAL"
 
-EXPECTED_CHECKS=52
+# Derived from the test inventory below, per group, so a dropped case names the
+# group it went missing from rather than just changing a total.
+EXPECTED_REFUSAL=8
+EXPECTED_ECON=27
+EXPECTED_CLASSIFY=28
+EXPECTED_PARTICIPATION=7
+EXPECTED_PORTS=8
+EXPECTED_AGREEMENT=13
+EXPECTED_VERDICTS=13
+EXPECTED_ENDTOEND=4
+EXPECTED_CHECKS=$(( EXPECTED_REFUSAL + EXPECTED_ECON + EXPECTED_CLASSIFY + EXPECTED_PARTICIPATION \
+                  + EXPECTED_PORTS + EXPECTED_AGREEMENT + EXPECTED_VERDICTS + EXPECTED_ENDTOEND ))
 echo
+PER_GROUP_EXPECTED=("$EXPECTED_REFUSAL" "$EXPECTED_CLASSIFY" "$EXPECTED_ECON" "$EXPECTED_PARTICIPATION" \
+                    "$EXPECTED_PORTS" "$EXPECTED_AGREEMENT" "$EXPECTED_VERDICTS" "$EXPECTED_ENDTOEND")
+for i in $(seq 0 $GROUP_IDX); do
+  if (( GROUP_COUNTS[i] != PER_GROUP_EXPECTED[i] )); then
+    echo "export/restore negative tests: FAIL — group ${GROUP_KEYS[$i]} ran ${GROUP_COUNTS[$i]}, the contract is ${PER_GROUP_EXPECTED[$i]}" >&2
+    exit 1
+  fi
+done
 if (( TOTAL != EXPECTED_CHECKS )); then
   echo "export/restore negative tests: FAIL — $TOTAL checks ran, the contract is $EXPECTED_CHECKS" >&2
   echo "  (reconcile the contract deliberately; do not fit it to the run)" >&2

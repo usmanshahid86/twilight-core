@@ -85,6 +85,9 @@ localnet-join-and-settle:
 # settlements outstanding behind it, every settlement bound is pushed, and both
 # finalization arms are reached — including the deadline, which no other run gets
 # to. Long by nature: three epoch boundaries plus a 720-block window.
+localnet-settlement-matrix:
+	./scripts/localnet/settlement-lifecycle-matrix.sh
+
 # #108: characterizes export, restore and fresh-node join. The export is taken
 # deliberately mid-epoch, where per-slot participation for the open epoch is
 # non-zero, because a boundary export has nothing in progress to lose.
@@ -95,9 +98,6 @@ localnet-export-restore-drill:
 localnet-export-restore-faults:
 	./scripts/localnet/lib/drill-assert-selftest.sh
 	./scripts/localnet/export-restore-drill-faults.sh
-
-localnet-settlement-matrix:
-	./scripts/localnet/settlement-lifecycle-matrix.sh
 
 # The operational half of the x/upgrade proof: four validators, two binaries, a
 # real coordinated halt and a partial rollout. Deliberately NOT part of `drills`
