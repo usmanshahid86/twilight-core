@@ -89,23 +89,58 @@ check "progress negative"                 "DEFECT"             "$(classify_resto
 check "progress n/a on the refusal branch" "REFUSED_AS_DESIGNED" "$(classify_restore_outcome 4 0 4 n/a n/a n/a n/a)"
 
 # ---------------------------------------------------------------------------
-group econ "econ_canon — every field that must survive is compared"
-# B1: the previous export proof compared epoch NUMBERS, required entitlements to
-# be merely non-empty, and checked one released amount. Corrupting economics,
-# amounts, payout addresses, participation or settlement workflow fields left
-# every gate identical. Each mutation below must change the canonical form.
-GOOD='{"epochs":[{"epoch_number":"1","start_height":"1","end_height":"360","minted_emission":"149828400","carry_in":"0","distributable_fees":"0","treasury_amount":"0","reward_pool":"149828400","allocated_amount":"149828400","carry_out":"0","distribution_method":"UNIFORM","remainder_policy":"CARRY","cumulative_emitted_after_epoch":"149828400","reward_enabled_blocks":"360"}],
-       "entitlements":[{"slot_id":"1","epoch":"1","total_blocks_active":"360","entitlement_amount":"37457100","released_amount":"37457100","payout_address":"twilight1aaa","reward_config_version":"1","slot_status_at_epoch_close":"ACTIVE","activation_sequence_at_epoch_close":"1","created_height":"360"}],
-       "settlements":[{"slot_id":"1","epoch":"1","distribution_mode_version":"1","settlement_mode":"TRUSTED_AS","settlement_params_version":"1","next_chunk_index":"1","finalized":true,"finalized_height":"367","finalization_reason":"AUTHORIZED_EARLY"}],
-       "slots":[{"slot_id":"1","status":"ACTIVE","consensus_power":"1"}],
-       "balances":{"liability":"262199700","carry":"0","escrow":"262199700"}}'
+group econ "econ_canon — every persisted field is compared, including nested ones"
+# B1: the first export proof compared epoch NUMBERS and required entitlements to
+# merely exist. Its replacement enumerated top-level fields by hand and so still
+# omitted a finalized epoch's embedded reward attribution and its snapshotted
+# config — both persisted, both simply not named. Whole objects are compared now,
+# and these cases prove the nested ones are actually covered.
+#
+# The fixture carries a representative EligibleSlotReward and EpochConfigSnapshot;
+# without them the nested mutations below would prove nothing.
+GOOD='{"epochs":[{"epoch_number":"1","start_height":"1","end_height":"360","minted_emission":"149828400","carry_in":"0","distributable_fees":"0","treasury_amount":"0","reward_pool":"149828400","allocated_amount":"149828400","carry_out":"0","distribution_method":"DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS","remainder_policy":"REMAINDER_POLICY_CARRY_FORWARD","cumulative_emitted_after_epoch":"149828400","reward_enabled_blocks":"360",
+   "rewards":[{"slot_id":"1","operator_address":"twilight1op1","payout_address":"twilight1pay1","blocks_active":"360","reward_weight":"1","effective_weight":"1","amount":"37457100","claimed":false,"claimed_at_height":"0","epoch_number":"1"},
+              {"slot_id":"2","operator_address":"twilight1op2","payout_address":"twilight1pay2","blocks_active":"360","reward_weight":"1","effective_weight":"1","amount":"37457100","claimed":false,"claimed_at_height":"0","epoch_number":"1"}],
+   "config":{"snapshot_version":"1","epoch_length_blocks":"360","distribution_method":"DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS","remainder_policy":"REMAINDER_POLICY_CARRY_FORWARD","initial_block_subsidy":"416190","halving_mode":"HALVING_MODE_SUPPLY_THRESHOLD","weighted_rewards_enabled":false,"fee_collection_enabled":false,"fee_distribution_enabled":false,"fee_denom":"utwlt","fee_distribution_mode":"FEE_DISTRIBUTION_MODE_NONE","treasury_address":"","emission_treasury_share_bps":"0","fee_treasury_share_bps":"0"}}],
+ "entitlements":[{"slot_id":"1","epoch":"1","total_blocks_active":"360","entitlement_amount":"37457100","released_amount":"37457100","payout_address":"twilight1aaa","reward_config_version":"1","slot_status_at_epoch_close":"SLOT_STATUS_ACTIVE","activation_sequence_at_epoch_close":"1","created_height":"360"}],
+ "settlements":[{"slot_id":"1","epoch":"1","distribution_mode_version":"1","settlement_mode":"SETTLEMENT_MODE_TRUSTED_AS","settlement_params_version":"1","next_chunk_index":"1","finalized":true,"finalized_height":"367","finalization_reason":"SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY"}],
+ "slots":[{"slot_id":"1","status":"SLOT_STATUS_ACTIVE","consensus_power":"1"}],
+ "balances":{"liability":"262199700","carry":"0","escrow":"262199700"}}'
 BASE="$(econ_canon "$GOOD")"
-check "a well-formed state canonicalizes" "5" "$(grep -c . <<<"$BASE")"
+check "the fixture canonicalizes"        "1/1/1/1" "$(econ_counts "$BASE")"
+check "the fixture carries nested rewards" "2"     "$(jq -r '.epochs[0].rewards | length' <<<"$BASE")"
+check "the fixture carries a config"       "true"  "$(jq -r '(.epochs[0].config | type) == "object"' <<<"$BASE")"
 mutated() { econ_canon "$(jq -c "$1" <<<"$GOOD")"; }
 differs() { [[ "$(mutated "$1")" != "$BASE" ]] && echo differs || echo same; }
+
+# --- nested EpochReward.rewards[] : the residual B1 gap ---
+check "rewards[0].amount"             "differs" "$(differs '.epochs[0].rewards[0].amount="1"')"
+check "rewards[0].blocks_active"      "differs" "$(differs '.epochs[0].rewards[0].blocks_active="1"')"
+check "rewards[0].payout_address"     "differs" "$(differs '.epochs[0].rewards[0].payout_address="twilight1zzz"')"
+check "rewards[0].operator_address"   "differs" "$(differs '.epochs[0].rewards[0].operator_address="twilight1zzz"')"
+check "rewards[0].effective_weight"   "differs" "$(differs '.epochs[0].rewards[0].effective_weight="9"')"
+check "rewards[0].claimed"            "differs" "$(differs '.epochs[0].rewards[0].claimed=true')"
+check "a removed rewards[] entry"     "differs" "$(differs '.epochs[0].rewards = [.epochs[0].rewards[0]]')"
+check "an added rewards[] entry"      "differs" "$(differs '.epochs[0].rewards += [.epochs[0].rewards[0] * {slot_id:"3"}]')"
+check "an emptied rewards[]"          "differs" "$(differs '.epochs[0].rewards = []')"
+
+# --- nested EpochReward.config : the other residual ---
+check "config.initial_block_subsidy"  "differs" "$(differs '.epochs[0].config.initial_block_subsidy="1"')"
+check "config.treasury_address"       "differs" "$(differs '.epochs[0].config.treasury_address="twilight1treasury"')"
+check "config.distribution_method"    "differs" "$(differs '.epochs[0].config.distribution_method="DISTRIBUTION_METHOD_WEIGHTED"')"
+check "config.remainder_policy"       "differs" "$(differs '.epochs[0].config.remainder_policy="REMAINDER_POLICY_BURN"')"
+check "config.epoch_length_blocks"    "differs" "$(differs '.epochs[0].config.epoch_length_blocks="720"')"
+check "config.halving_mode"           "differs" "$(differs '.epochs[0].config.halving_mode="HALVING_MODE_FIXED_INTERVAL"')"
+check "config.emission_treasury_bps"  "differs" "$(differs '.epochs[0].config.emission_treasury_share_bps="500"')"
+check "a removed config"              "differs" "$(differs 'del(.epochs[0].config)')"
+
+# --- top-level epoch economics ---
 check "finalized-epoch economics"     "differs" "$(differs '.epochs[0].minted_emission="1"')"
 check "epoch carry_out"               "differs" "$(differs '.epochs[0].carry_out="9"')"
 check "epoch reward_enabled_blocks"   "differs" "$(differs '.epochs[0].reward_enabled_blocks="359"')"
+check "a missing finalized epoch"     "differs" "$(differs '.epochs=[]')"
+
+# --- entitlements, settlements, slots, balances ---
 check "entitlement amount"            "differs" "$(differs '.entitlements[0].entitlement_amount="1"')"
 check "released amount"               "differs" "$(differs '.entitlements[0].released_amount="0"')"
 check "payout address"                "differs" "$(differs '.entitlements[0].payout_address="twilight1zzz"')"
@@ -115,8 +150,8 @@ check "settlement finalized height"   "differs" "$(differs '.settlements[0].fina
 check "finalization reason"           "differs" "$(differs '.settlements[0].finalization_reason="DEADLINE"')"
 check "next chunk index"              "differs" "$(differs '.settlements[0].next_chunk_index="0"')"
 check "settlement finalized flag"     "differs" "$(differs '.settlements[0].finalized=false')"
-check "settlement mode"               "differs" "$(differs '.settlements[0].settlement_mode="OPERATOR_ONLY"')"
-check "coreslot status"               "differs" "$(differs '.slots[0].status="SUSPENDED"')"
+check "settlement mode"               "differs" "$(differs '.settlements[0].settlement_mode="SETTLEMENT_MODE_OPERATOR_ONLY"')"
+check "coreslot status"               "differs" "$(differs '.slots[0].status="SLOT_STATUS_SUSPENDED"')"
 check "coreslot power"                "differs" "$(differs '.slots[0].consensus_power="7"')"
 check "outstanding liability"         "differs" "$(differs '.balances.liability="1"')"
 check "carry"                         "differs" "$(differs '.balances.carry="1"')"
@@ -125,11 +160,16 @@ check "a missing entitlement"         "differs" "$(differs '.entitlements=[]')"
 check "an extra entitlement"          "differs" "$(differs '.entitlements += [.entitlements[0] * {slot_id:"2"}]')"
 check "a missing settlement"          "differs" "$(differs '.settlements=[]')"
 check "an extra settlement"           "differs" "$(differs '.settlements += [.settlements[0] * {slot_id:"2"}]')"
-check "a missing finalized epoch"     "differs" "$(differs '.epochs=[]')"
-# Ordering must not matter; two orderings of the same state are the same state.
-check "order-insensitive"             "same" \
+
+# --- ordering alone must never matter ---
+check "entitlement order"             "same" \
   "$([[ "$(econ_canon "$(jq -c '.entitlements = [(.entitlements[0] * {slot_id:"2"}), .entitlements[0]]' <<<"$GOOD")")" \
      == "$(econ_canon "$(jq -c '.entitlements = [.entitlements[0], (.entitlements[0] * {slot_id:"2"})]' <<<"$GOOD")")" ]] && echo same || echo differs)"
+check "settlement order"              "same" \
+  "$([[ "$(econ_canon "$(jq -c '.settlements = [(.settlements[0] * {epoch:"2"}), .settlements[0]]' <<<"$GOOD")")" \
+     == "$(econ_canon "$(jq -c '.settlements = [.settlements[0], (.settlements[0] * {epoch:"2"})]' <<<"$GOOD")")" ]] && echo same || echo differs)"
+check "object key order"              "same" \
+  "$([[ "$(econ_canon "$GOOD")" == "$(econ_canon "$(jq -c 'to_entries | reverse | from_entries' <<<"$GOOD")")" ]] && echo same || echo differs)"
 check "empty input is refused"        "1" "$(econ_canon "" >/dev/null 2>&1; echo $?)"
 check "malformed input is refused"    "1" "$(econ_canon '{oops' >/dev/null 2>&1; echo $?)"
 
@@ -271,7 +311,7 @@ printf '  %3d  TOTAL\n' "$TOTAL"
 # Derived from the test inventory below, per group, so a dropped case names the
 # group it went missing from rather than just changing a total.
 EXPECTED_REFUSAL=8
-EXPECTED_ECON=27
+EXPECTED_ECON=48
 EXPECTED_CLASSIFY=28
 EXPECTED_PARTICIPATION=7
 EXPECTED_PORTS=8

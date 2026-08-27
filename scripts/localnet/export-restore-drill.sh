@@ -240,28 +240,39 @@ restore_agreement() {
 # Only fields that MUST survive unchanged are projected. Anything that advances
 # naturally is excluded, so a mismatch always means something was lost rather
 # than something moved.
-econ_canon() { # <state-json>
+econ_canon() { # <state-json> -> canonical JSON, or non-zero
   local j="$1"
   [[ -n "$j" ]] || return 1
-  jq -er '
-    def s(x): (x // "") | tostring;
-    ( [ (.epochs // [])[]
-        | "epoch:\(s(.epoch_number)):\(s(.start_height)):\(s(.end_height)):\(s(.minted_emission))"
-        + ":\(s(.carry_in)):\(s(.distributable_fees)):\(s(.treasury_amount)):\(s(.reward_pool))"
-        + ":\(s(.allocated_amount)):\(s(.carry_out)):\(s(.distribution_method)):\(s(.remainder_policy))"
-        + ":\(s(.cumulative_emitted_after_epoch)):\(s(.reward_enabled_blocks))" ]
-    + [ (.entitlements // [])[]
-        | "ent:\(s(.slot_id))/\(s(.epoch)):\(s(.total_blocks_active)):\(s(.entitlement_amount))"
-        + ":\(s(.released_amount)):\(s(.payout_address)):\(s(.reward_config_version))"
-        + ":\(s(.slot_status_at_epoch_close)):\(s(.activation_sequence_at_epoch_close)):\(s(.created_height))" ]
-    + [ (.settlements // [])[]
-        | "set:\(s(.slot_id))/\(s(.epoch)):\(s(.distribution_mode_version)):\(s(.settlement_mode))"
-        + ":\(s(.settlement_params_version)):\(s(.next_chunk_index)):\(s(.finalized))"
-        + ":\(s(.finalized_height)):\(s(.finalization_reason))" ]
-    + [ (.slots // [])[] | "slot:\(s(.slot_id)):\(s(.status)):\(s(.consensus_power))" ]
-    + [ "bal:\(s(.balances.liability)):\(s(.balances.carry)):\(s(.balances.escrow))" ]
-    ) | sort | join("\n")
-  ' <<<"$j" 2>/dev/null || return 1
+  # Whole objects, not an enumerated field list. Enumerating fields is how a
+  # finalized epoch's embedded reward attribution and its snapshotted config
+  # escaped the comparison entirely: they were persisted, and simply not named.
+  # Adding a persisted subfield later must not be able to evade this proof, so
+  # the objects are compared as they are stored.
+  #
+  # jq -S orders object keys recursively, and each collection is sorted by its
+  # canonical identity first, so the comparison is semantic rather than textual.
+  # CoreSlot keeps its deliberate identity/status/power projection: the rest of a
+  # slot record carries heights that legitimately differ between a live query and
+  # an exported document.
+  jq -Sec '
+    def idx(x): ((x // "0") | tostring | tonumber);
+    {
+      epochs:       ((.epochs       // []) | sort_by(idx(.epoch_number))),
+      entitlements: ((.entitlements // []) | sort_by([idx(.epoch), idx(.slot_id)])),
+      settlements:  ((.settlements  // []) | sort_by([idx(.epoch), idx(.slot_id)])),
+      slots:        ((.slots // []) | map({slot_id, status, consensus_power})
+                                    | sort_by(idx(.slot_id))),
+      balances: { liability: ((.balances.liability // "") | tostring),
+                  carry:     ((.balances.carry     // "") | tostring),
+                  escrow:    ((.balances.escrow    // "") | tostring) }
+    }' <<<"$j" 2>/dev/null || return 1
+}
+
+# econ_counts <canonical-json> — object counts, so a failure names WHICH class of
+# object moved rather than only that the whole state differs.
+econ_counts() {
+  jq -er '"\(.epochs|length)/\(.entitlements|length)/\(.settlements|length)/\(.slots|length)"' \
+    <<<"$1" 2>/dev/null || return 1
 }
 
 # ---- open-epoch participation preservation ----------------------------------
@@ -670,9 +681,9 @@ if [[ -s "$EXPORT_DOC" && -s "$CAPTURE" ]]; then
   # for closed epochs, settlement workflow records, CoreSlot identity, liability,
   # carry and escrow. Any one field differing fails it.
   expect_export "export_state_matches_captured" "$CANON_CAPTURED" "$CANON_EXPORT"
-  # Line counts named separately so a failure says WHICH class of object moved.
+  # Counts named separately so a failure says WHICH class of object moved.
   expect_export "export_object_counts_match" \
-    "$(grep -c . <<<"$CANON_CAPTURED")" "$(grep -c . <<<"$CANON_EXPORT")"
+    "$(econ_counts "$CANON_CAPTURED")" "$(econ_counts "$CANON_EXPORT")"
 
   # The TW-011 probe. Named for the act of determining, not for an answer.
   AB_IN_EXPORT="$(jq -r 'if (.app_state.rewards | has("active_blocks")) or (.app_state.rewards | has("slot_active_blocks")) then "present" else "absent" end' "$EXPORT_DOC" 2>/dev/null)"
@@ -690,8 +701,8 @@ if [[ -s "$EXPORT_DOC" && -s "$CAPTURE" ]]; then
 
   jq -nc --arg canon "$CANON_EXPORT" --arg ab "$AB_IN_EXPORT" --arg orb "$ORB_IN_EXPORT" \
     --arg pres "$PARTICIPATION_PRESERVED" --arg zh "$ZH_RESULT" --argjson h "${H_EXPORT:-0}" \
-    --argjson lines "$(grep -c . <<<"$CANON_EXPORT")" \
-    '{export_height:$h, canonical_object_lines:$lines, canonical_state:$canon,
+    --arg counts "$(econ_counts "$CANON_EXPORT")" \
+    '{export_height:$h, canonical_object_counts:$counts, canonical_state:$canon,
       open_epoch_per_slot_active_blocks:$ab, open_reward_enabled_blocks:$orb,
       open_participation_preservation:$pres, for_zero_height:$zh}' >"$EXPORT_SUMMARY" 2>/dev/null
 else
