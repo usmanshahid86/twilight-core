@@ -194,6 +194,54 @@ check "a prefix is not a match"         "1:FAIL" "$(run_gated "$(mkg g14)" 'rest
 check "a superstring is not a match"    "1:FAIL" "$(run_gated "$(mkg g15)" 'restore=SUPPORTED' 'restore=SUPPORTEDX')"
 
 # ---------------------------------------------------------------------------
+group grammar "gate grammar — malformed configuration is fatal, never permissive"
+# The gate parser existed to make component outcomes able to fail a run, and was
+# itself fail-open on malformed input: an empty gate element was skipped, and a
+# leading or doubled separator produced an empty alternative that matched an
+# empty component value. Grammar is now validated in full before any matching:
+#
+#     nonempty-key "=" nonempty-value ( "|" nonempty-value )*
+#
+# Every malformed case is checked twice — the shipped predicate, and the
+# persisted overall= the finalizer leaves behind.
+pred() { # <gate-csv> <line-csv> -> 0|1
+  ( IFS=','; read -r -a DRILL_VERDICT_GATES <<<"$1"; read -r -a DRILL_VERDICT_LINES <<<"$2"
+    [[ -z "$1" ]] && DRILL_VERDICT_GATES=(); [[ -z "$2" ]] && DRILL_VERDICT_LINES=()
+    verdict_gates_ok >/dev/null 2>&1 ); echo $?
+}
+G2='restore=SUPPORTED|REFUSED_AS_DESIGNED'
+
+# --- malformed: leading, trailing, doubled, and a bare separator ---
+check "leading | — predicate"        "1"      "$(pred 'restore=|SUPPORTED' 'restore=')"
+check "leading | — finalizer"        "1:FAIL" "$(run_gated "$(mkg h1)" 'restore=|SUPPORTED' 'restore=')"
+check "trailing | — predicate"       "1"      "$(pred 'restore=SUPPORTED|' 'restore=SUPPORTED')"
+check "trailing | — finalizer"       "1:FAIL" "$(run_gated "$(mkg h2)" 'restore=SUPPORTED|' 'restore=SUPPORTED')"
+check "doubled || — predicate"       "1"      "$(pred 'restore=SUPPORTED||REFUSED_AS_DESIGNED' 'restore=')"
+check "doubled || — finalizer"       "1:FAIL" "$(run_gated "$(mkg h3)" 'restore=SUPPORTED||REFUSED_AS_DESIGNED' 'restore=')"
+check "a bare | as the value — pred" "1"      "$(pred 'restore=|' 'restore=')"
+check "a bare | as the value — fin"  "1:FAIL" "$(run_gated "$(mkg h4)" 'restore=|' 'restore=')"
+
+# --- malformed: empty gate elements ---
+check "a single empty gate — pred"   "1"      "$(pred ' ' 'restore=SUPPORTED')"
+check "a single empty gate — fin"    "1:FAIL" "$(run_gated "$(mkg h5)" ' ' 'restore=SUPPORTED')"
+check "an empty among valid — pred"  "1"      "$(pred "export=PASS, ,$G2" 'export=PASS,restore=SUPPORTED')"
+check "an empty among valid — fin"   "1:FAIL" "$(run_gated "$(mkg h6)" "export=PASS, ,$G2" 'export=PASS,restore=SUPPORTED')"
+
+# --- an empty component value cannot match a valid allowed list ---
+check "empty value, single — pred"   "1"      "$(pred 'restore=SUPPORTED' 'restore=')"
+check "empty value, single — fin"    "1:FAIL" "$(run_gated "$(mkg h7)" 'restore=SUPPORTED' 'restore=')"
+check "empty value, two-value — pred" "1"     "$(pred "$G2" 'restore=')"
+check "empty value, two-value — fin"  "1:FAIL" "$(run_gated "$(mkg h8)" "$G2" 'restore=')"
+
+# --- well-formed gates still accept what they should ---
+check "single value — predicate"     "0"      "$(pred 'restore=SUPPORTED' 'restore=SUPPORTED')"
+check "single value — finalizer"     "0:PASS" "$(run_gated "$(mkg h9)" 'restore=SUPPORTED' 'restore=SUPPORTED')"
+check "two-value, first — predicate" "0"      "$(pred "$G2" 'restore=SUPPORTED')"
+check "two-value, first — finalizer" "0:PASS" "$(run_gated "$(mkg h10)" "$G2" 'restore=SUPPORTED')"
+check "two-value, second — pred"     "0"      "$(pred "$G2" 'restore=REFUSED_AS_DESIGNED')"
+check "two-value, second — finalizer" "0:PASS" "$(run_gated "$(mkg h11)" "$G2" 'restore=REFUSED_AS_DESIGNED')"
+
+# ---------------------------------------------------------------------------
 group setu "failure-path variables under set -u"
 # A drill runs with `set -u`. A phase_end on a failure path that expands a variable
 # the failed read never set would abort the shell mid-run and lose the phase row
@@ -241,7 +289,7 @@ printf '  %3d  TOTAL\n' "$TOTAL"
 
 # Exact, for the same reason the library pins its multiset: an approximate target
 # lets a dropped case pass unnoticed.
-EXPECTED_CHECKS=54
+EXPECTED_CHECKS=76
 echo
 if (( TOTAL != EXPECTED_CHECKS )); then
   echo "drill-assert selftest: FAIL — $TOTAL checks ran, the contract is $EXPECTED_CHECKS" >&2

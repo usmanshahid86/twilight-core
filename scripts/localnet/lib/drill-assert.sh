@@ -137,10 +137,20 @@ assert_multiset_observed() {
 # exit zero carrying "join=FAIL overall=PASS", which is worse than not reporting
 # them at all: it looks like a checked claim.
 #
-# Gates are "component=allowed" or "component=allowedA|allowedB", compared as
-# exact literal strings. No eval and no pattern matching: a gate is data, and
-# treating it as code or as a regex would make a malformed gate silently
-# permissive rather than fatal.
+# A gate must satisfy this grammar, and the WHOLE grammar is checked before any
+# matching happens:
+#
+#     nonempty-key "=" nonempty-value ( "|" nonempty-value )*
+#
+# Validating the grammar rather than guarding the cases that happened to be
+# reported is the point. An earlier version skipped an empty gate element and
+# split the allowed list without requiring the alternatives to be non-empty, so
+# `restore=|SUPPORTED` produced an empty alternative that matched an empty
+# component value: a malformed gate made the parser permissive, which is the
+# opposite of what a gate is for.
+#
+# Allowed values are compared as exact literal strings. No eval, no regex, no
+# pattern interpretation: a gate is data.
 #
 # Undefined or empty gates preserve the previous behaviour, so a drill that does
 # not report components is unaffected.
@@ -162,14 +172,28 @@ verdict_gates_ok() {
   done
 
   for gate in "${DRILL_VERDICT_GATES[@]:-}"; do
-    [[ -n "$gate" ]] || continue
+    # --- grammar, checked in full before anything is matched ---
+    if [[ -z "$gate" ]]; then
+      echo "  FAIL: empty verdict gate element" >&2
+      return 1
+    fi
     if [[ "$gate" != *=* ]]; then
-      echo "  FAIL: malformed verdict gate '$gate' (expected component=allowed[|allowed])" >&2
+      echo "  FAIL: malformed verdict gate '$gate' (expected key=value[|value])" >&2
       return 1
     fi
     key="${gate%%=*}"; allowed="${gate#*=}"
-    if [[ -z "$key" || -z "$allowed" ]]; then
-      echo "  FAIL: malformed verdict gate '$gate'" >&2
+    if [[ -z "$key" ]]; then
+      echo "  FAIL: verdict gate '$gate' has an empty key" >&2
+      return 1
+    fi
+    if [[ -z "$allowed" ]]; then
+      echo "  FAIL: verdict gate '$key' has an empty allowed list" >&2
+      return 1
+    fi
+    # A leading, trailing or doubled separator each mean an empty alternative,
+    # and an empty alternative matches an empty component value.
+    if [[ "$allowed" == "|"* || "$allowed" == *"|" || "$allowed" == *"||"* ]]; then
+      echo "  FAIL: verdict gate '$key' has an empty alternative in '$allowed'" >&2
       return 1
     fi
     found=""; matched=0
