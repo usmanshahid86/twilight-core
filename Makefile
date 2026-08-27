@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -87,6 +87,13 @@ localnet-join-and-settle:
 # to. Long by nature: three epoch boundaries plus a 720-block window.
 localnet-settlement-matrix:
 	./scripts/localnet/settlement-lifecycle-matrix.sh
+
+# The operational half of the x/upgrade proof: four validators, two binaries, a
+# real coordinated halt and a partial rollout. Deliberately NOT part of `drills`
+# — it is minutes long by nature (a protocol epoch must close so a settlement
+# spans the boundary) and would make the routine drill set too slow to run often.
+localnet-upgrade-drill:
+	./scripts/localnet/upgrade-drill.sh
 
 # The whole validator-set behaviour study.
 validator-set-study: localnet-quorum-table localnet-validator-growth localnet-validator-departures
