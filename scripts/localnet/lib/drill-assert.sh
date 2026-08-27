@@ -152,13 +152,25 @@ assert_multiset_observed() {
 # Allowed values are compared as exact literal strings. No eval, no regex, no
 # pattern interpretation: a gate is data.
 #
-# Undefined or empty gates preserve the previous behaviour, so a drill that does
-# not report components is unaffected.
+# An undefined or empty gate array preserves the previous behaviour, so a drill
+# that reports no components is unaffected. Both are checked explicitly — the
+# undefined case under set -u, which is where it used to abort.
 #
 # Returns 0 only if every gate is satisfied; prints the reason otherwise.
 verdict_gates_ok() {
   local gate key allowed line lkey lval found matched seen=""
-  (( ${#DRILL_VERDICT_GATES[@]:-0} > 0 )) || return 0
+  # An undefined array must not abort the caller. `${#ARR[@]:-0}` raises
+  # "unbound variable" under set -u when the variable was never declared, and the
+  # finalizer then died before writing verdict.txt — leaving no overall= at all,
+  # which is worse than FAIL because a reader finds nothing.
+  #
+  # declare -p asks whether the variable exists, rather than inferring it from
+  # element 0: `${ARR+set}` is empty for a declared-but-EMPTY array, so it cannot
+  # tell "no gates configured" from "never declared".
+  if ! declare -p DRILL_VERDICT_GATES >/dev/null 2>&1; then
+    return 0
+  fi
+  (( ${#DRILL_VERDICT_GATES[@]} > 0 )) || return 0
 
   # A component reported twice is ambiguous, and picking either occurrence would
   # be a guess about which one the drill meant.

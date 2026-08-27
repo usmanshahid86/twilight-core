@@ -171,6 +171,36 @@ run_gated() { # <dir> <gates-csv> <lines-csv> -> "<rc>:<persisted overall>"
 GATES='export=PASS,join=PASS,restore=SUPPORTED|REFUSED_AS_DESIGNED'
 mkg() { mk_evidence "$TMP/$1" "$A1" "$A2"; echo "$TMP/$1"; }
 
+# `read -a` cannot produce a genuinely empty element — an empty field yields no
+# element at all — so the empty-element cases build the arrays literally and are
+# driven through these helpers, which inherit whatever the caller just set. An
+# earlier version passed a SPACE through the CSV helper: a non-empty string that
+# fails the missing-'=' guard and never reaches the empty-element branch it
+# claimed to cover.
+pred_direct() { ( verdict_gates_ok >/dev/null 2>&1 ); echo $?; }
+fin_direct() { # <dir> — uses the gate/line arrays already in scope
+  local d="$1" rc
+  ( DRILL_EVID_DIR="$d"; DRILL_ASSERT_LOG="$d/assertions.jsonl"; DRILL_SUMMARY="$d/summary.csv"
+    DRILL_MANDATORY_FILES=(mandatory-one.json mandatory-two.json)
+    DRILL_NAME="selftest"; FAILURES=0; SUMMARY_ROWS=1; ASSERT_ROWS=2
+    DRILL_EXPECTED_PHASES=1; DRILL_EXPECTED_ASSERTIONS=2; DRILL_EXPECTED_MULTISET="$MS_OK"
+    finalize_verdict >/dev/null 2>&1 ); rc=$?
+  printf '%s:%s' "$rc" "$(grep '^overall=' "$d/verdict.txt" 2>/dev/null | cut -d= -f2)"
+}
+fin_unset_gates() { # <dir> — gates never declared, under set -u
+  local d="$1" rc
+  ( set -u
+    unset DRILL_VERDICT_GATES
+    DRILL_VERDICT_LINES=("export=FAIL" "join=FAIL")
+    DRILL_EVID_DIR="$d"; DRILL_ASSERT_LOG="$d/assertions.jsonl"; DRILL_SUMMARY="$d/summary.csv"
+    DRILL_MANDATORY_FILES=(mandatory-one.json mandatory-two.json)
+    DRILL_NAME="selftest"; FAILURES=0; SUMMARY_ROWS=1; ASSERT_ROWS=2
+    DRILL_EXPECTED_PHASES=1; DRILL_EXPECTED_ASSERTIONS=2; DRILL_EXPECTED_MULTISET="$MS_OK"
+    finalize_verdict >/dev/null 2>&1 ); rc=$?
+  printf '%s:%s' "$rc" "$(grep '^overall=' "$d/verdict.txt" 2>/dev/null | cut -d= -f2)"
+}
+
+
 check "all components satisfied"        "0:PASS" "$(run_gated "$(mkg g1)"  "$GATES" 'export=PASS,restore=REFUSED_AS_DESIGNED,join=PASS')"
 check "the other allowed restore value" "0:PASS" "$(run_gated "$(mkg g2)"  "$GATES" 'export=PASS,restore=SUPPORTED,join=PASS')"
 # The exact reported defect.
@@ -188,7 +218,12 @@ check "a gate with an empty value"      "1:FAIL" "$(run_gated "$(mkg g11)" 'expo
 # A component reported twice is ambiguous.
 check "a duplicate component key"       "1:FAIL" "$(run_gated "$(mkg g12)" "$GATES" 'export=PASS,export=FAIL,restore=SUPPORTED,join=PASS')"
 # Backward compatibility: no gates preserves the previous behaviour.
-check "no gates, components ignored"    "0:PASS" "$(run_gated "$(mkg g13)" '' 'export=FAIL,join=FAIL')"
+check "declared-empty gates ignored"    "0:PASS" "$(run_gated "$(mkg g13)" '' 'export=FAIL,join=FAIL')"
+# The compatibility contract covers an array that was never declared, not only
+# one initialized empty. Reading `${#ARR[@]:-0}` on an undefined array raises
+# under set -u, and the finalizer died before writing verdict.txt — leaving no
+# overall= at all, which is worse than FAIL because a reader finds nothing.
+check "undefined gates under set -u"   "0:PASS" "$(fin_unset_gates "$(mkg g17)")"
 # A prefix of an allowed value is not that value.
 check "a prefix is not a match"         "1:FAIL" "$(run_gated "$(mkg g14)" 'restore=SUPPORTED' 'restore=SUPP')"
 check "a superstring is not a match"    "1:FAIL" "$(run_gated "$(mkg g15)" 'restore=SUPPORTED' 'restore=SUPPORTEDX')"
@@ -222,10 +257,14 @@ check "a bare | as the value — pred" "1"      "$(pred 'restore=|' 'restore=')"
 check "a bare | as the value — fin"  "1:FAIL" "$(run_gated "$(mkg h4)" 'restore=|' 'restore=')"
 
 # --- malformed: empty gate elements ---
-check "a single empty gate — pred"   "1"      "$(pred ' ' 'restore=SUPPORTED')"
-check "a single empty gate — fin"    "1:FAIL" "$(run_gated "$(mkg h5)" ' ' 'restore=SUPPORTED')"
-check "an empty among valid — pred"  "1"      "$(pred "export=PASS, ,$G2" 'export=PASS,restore=SUPPORTED')"
-check "an empty among valid — fin"   "1:FAIL" "$(run_gated "$(mkg h6)" "export=PASS, ,$G2" 'export=PASS,restore=SUPPORTED')"
+DRILL_VERDICT_GATES=(""); DRILL_VERDICT_LINES=("restore=SUPPORTED")
+check "a single empty gate — pred"   "1"      "$(pred_direct)"
+check "a single empty gate — fin"    "1:FAIL" "$(fin_direct "$(mkg h5)")"
+DRILL_VERDICT_GATES=("export=PASS" "" "restore=SUPPORTED|REFUSED_AS_DESIGNED")
+DRILL_VERDICT_LINES=("export=PASS" "restore=SUPPORTED")
+check "an empty among valid — pred"  "1"      "$(pred_direct)"
+check "an empty among valid — fin"   "1:FAIL" "$(fin_direct "$(mkg h6)")"
+DRILL_VERDICT_GATES=(); DRILL_VERDICT_LINES=()
 
 # --- an empty component value cannot match a valid allowed list ---
 check "empty value, single — pred"   "1"      "$(pred 'restore=SUPPORTED' 'restore=')"
@@ -289,7 +328,7 @@ printf '  %3d  TOTAL\n' "$TOTAL"
 
 # Exact, for the same reason the library pins its multiset: an approximate target
 # lets a dropped case pass unnoticed.
-EXPECTED_CHECKS=76
+EXPECTED_CHECKS=77
 echo
 if (( TOTAL != EXPECTED_CHECKS )); then
   echo "drill-assert selftest: FAIL — $TOTAL checks ran, the contract is $EXPECTED_CHECKS" >&2
