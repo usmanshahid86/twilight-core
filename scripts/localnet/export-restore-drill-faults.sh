@@ -104,7 +104,7 @@ GOOD='{"epochs":[{"epoch_number":"1","start_height":"1","end_height":"360","mint
    "config":{"snapshot_version":"1","epoch_length_blocks":"360","distribution_method":"DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS","remainder_policy":"REMAINDER_POLICY_CARRY_FORWARD","initial_block_subsidy":"416190","halving_mode":"HALVING_MODE_SUPPLY_THRESHOLD","weighted_rewards_enabled":false,"fee_collection_enabled":false,"fee_distribution_enabled":false,"fee_denom":"utwlt","fee_distribution_mode":"FEE_DISTRIBUTION_MODE_NONE","treasury_address":"","emission_treasury_share_bps":"0","fee_treasury_share_bps":"0"}}],
  "entitlements":[{"slot_id":"1","epoch":"1","total_blocks_active":"360","entitlement_amount":"37457100","released_amount":"37457100","payout_address":"twilight1aaa","reward_config_version":"1","slot_status_at_epoch_close":"SLOT_STATUS_ACTIVE","activation_sequence_at_epoch_close":"1","created_height":"360"}],
  "settlements":[{"slot_id":"1","epoch":"1","distribution_mode_version":"1","settlement_mode":"SETTLEMENT_MODE_TRUSTED_AS","settlement_params_version":"1","next_chunk_index":"1","finalized":true,"finalized_height":"367","finalization_reason":"SETTLEMENT_FINALIZATION_REASON_AUTHORIZED_EARLY"}],
- "slots":[{"slot_id":"1","status":"SLOT_STATUS_ACTIVE","consensus_power":"1"}],
+ "slots":[{"slot_id":"1","status":"SLOT_STATUS_ACTIVE","consensus_power":"1","operator_address":"twilight1op1","payout_address":"twilight1pay1","settlement_address":"twilight1set1","consensus_pubkey":"cGs=","activation_sequence":"1","activated_height":"1","activation_effective_height":"1","created_height":"1","updated_height":"1","suspended_height":"0","removed_height":"0","reward_weight":"1","current_selection_policy_version":"1","last_selection_policy_update_height":"0","metadata":{"moniker":"node0"}}],
  "balances":{"liability":"262199700","carry":"0","escrow":"262199700"}}'
 BASE="$(econ_canon "$GOOD")"
 check "the fixture canonicalizes"        "1/1/1/1" "$(econ_counts "$BASE")"
@@ -153,6 +153,23 @@ check "settlement finalized flag"     "differs" "$(differs '.settlements[0].fina
 check "settlement mode"               "differs" "$(differs '.settlements[0].settlement_mode="SETTLEMENT_MODE_OPERATOR_ONLY"')"
 check "coreslot status"               "differs" "$(differs '.slots[0].status="SLOT_STATUS_SUSPENDED"')"
 check "coreslot power"                "differs" "$(differs '.slots[0].consensus_power="7"')"
+# Fields an earlier identity/status/power projection excluded. Leaving the value
+# destinations out of an export-preservation proof was the same class of gap as
+# the omitted rewards[] and config.
+check "coreslot payout_address"       "differs" "$(differs '.slots[0].payout_address="twilight1zzz"')"
+check "coreslot settlement_address"   "differs" "$(differs '.slots[0].settlement_address="twilight1zzz"')"
+check "coreslot operator_address"     "differs" "$(differs '.slots[0].operator_address="twilight1zzz"')"
+check "coreslot consensus_pubkey"     "differs" "$(differs '.slots[0].consensus_pubkey="b3RoZXI="')"
+check "coreslot activation_sequence"  "differs" "$(differs '.slots[0].activation_sequence="9"')"
+check "coreslot reward_weight"        "differs" "$(differs '.slots[0].reward_weight="5"')"
+check "coreslot metadata.moniker"     "differs" "$(differs '.slots[0].metadata.moniker="renamed"')"
+check "coreslot activated_height"     "differs" "$(differs '.slots[0].activated_height="99"')"
+check "coreslot suspended_height"     "differs" "$(differs '.slots[0].suspended_height="99"')"
+check "a missing coreslot"            "differs" "$(differs '.slots=[]')"
+check "an extra coreslot"             "differs" "$(differs '.slots += [.slots[0] * {slot_id:"2"}]')"
+check "coreslot order"                "same" \
+  "$([[ "$(econ_canon "$(jq -c '.slots = [(.slots[0] * {slot_id:"2"}), .slots[0]]' <<<"$GOOD")")" \
+     == "$(econ_canon "$(jq -c '.slots = [.slots[0], (.slots[0] * {slot_id:"2"})]' <<<"$GOOD")")" ]] && echo same || echo differs)"
 check "outstanding liability"         "differs" "$(differs '.balances.liability="1"')"
 check "carry"                         "differs" "$(differs '.balances.carry="1"')"
 check "escrow"                        "differs" "$(differs '.balances.escrow="1"')"
@@ -311,7 +328,7 @@ printf '  %3d  TOTAL\n' "$TOTAL"
 # Derived from the test inventory below, per group, so a dropped case names the
 # group it went missing from rather than just changing a total.
 EXPECTED_REFUSAL=8
-EXPECTED_ECON=48
+EXPECTED_ECON=60
 EXPECTED_CLASSIFY=28
 EXPECTED_PARTICIPATION=7
 EXPECTED_PORTS=8

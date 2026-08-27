@@ -251,17 +251,22 @@ econ_canon() { # <state-json> -> canonical JSON, or non-zero
   #
   # jq -S orders object keys recursively, and each collection is sorted by its
   # canonical identity first, so the comparison is semantic rather than textual.
-  # CoreSlot keeps its deliberate identity/status/power projection: the rest of a
-  # slot record carries heights that legitimately differ between a live query and
-  # an exported document.
+  #
+  # CoreSlot is compared WHOLE as well. An earlier version projected only
+  # slot_id/status/consensus_power on the theory that the remaining fields carry
+  # heights which differ between a live query and an exported document. Checked
+  # against real evidence, they do not: all four slots are identical across all
+  # eighteen fields on both sides. The projection was therefore excluding fifteen
+  # persisted fields — payout_address, settlement_address, operator_address and
+  # consensus_pubkey among them — from a proof about whether the export preserves
+  # state. That is the same gap as the one this function was rewritten to close.
   jq -Sec '
     def idx(x): ((x // "0") | tostring | tonumber);
     {
       epochs:       ((.epochs       // []) | sort_by(idx(.epoch_number))),
       entitlements: ((.entitlements // []) | sort_by([idx(.epoch), idx(.slot_id)])),
       settlements:  ((.settlements  // []) | sort_by([idx(.epoch), idx(.slot_id)])),
-      slots:        ((.slots // []) | map({slot_id, status, consensus_power})
-                                    | sort_by(idx(.slot_id))),
+      slots:        ((.slots // []) | sort_by(idx(.slot_id))),
       balances: { liability: ((.balances.liability // "") | tostring),
                   carry:     ((.balances.carry     // "") | tostring),
                   escrow:    ((.balances.escrow    // "") | tostring) }
