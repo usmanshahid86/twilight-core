@@ -61,14 +61,43 @@ check "progresses, hashes disagree"      "DEFECT"              "$(classify_resto
 check "progresses, state mismatch"       "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree mismatch present)"
 check "alive but no progress"            "DEFECT"              "$(classify_restore_outcome 4 4 0 0 agree match present)"
 check "alive, progress below the floor"  "DEFECT"              "$(classify_restore_outcome 4 4 0 2 agree match present)"
-check "everything holds"                 "SUPPORTED"           "$(classify_restore_outcome 4 4 0 3 agree match present)"
-check "partially alive, all else good"   "SUPPORTED"           "$(classify_restore_outcome 4 2 2 5 agree match present)"
+check "4 of 4, everything holds"         "SUPPORTED"           "$(classify_restore_outcome 4 4 0 3 agree match present)"
+check "restored RPC disagreement"        "DEFECT"              "$(classify_restore_outcome 4 4 0 5 disagree match present)"
+check "restored nodes unreachable"       "DEFECT"              "$(classify_restore_outcome 4 4 0 5 unreachable match present)"
+check "restored nodes still catching up" "DEFECT"              "$(classify_restore_outcome 4 4 0 5 catching_up match present)"
+check "no common restored height"        "DEFECT"              "$(classify_restore_outcome 4 4 0 5 no_common_height match present)"
+# A mixed network is never supported: one validator accepting the document while
+# another rejects it is a determinism failure, not a degraded success.
+check "2 of 4 alive, all else good"      "DEFECT"              "$(classify_restore_outcome 4 2 2 5 agree match present)"
+check "3 of 4 alive, all else good"      "DEFECT"              "$(classify_restore_outcome 4 3 0 5 agree match present)"
+check "3 alive + 1 designed refusal"     "DEFECT"              "$(classify_restore_outcome 4 3 1 5 agree match present)"
+check "all alive but one also refused"   "DEFECT"              "$(classify_restore_outcome 4 4 1 5 agree match present)"
 # Unevaluated inputs must not be silently accepted as satisfied.
 check "n/a agreement is not agreement"   "DEFECT"              "$(classify_restore_outcome 4 4 0 5 n/a match present)"
 check "n/a state is not a match"         "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree n/a present)"
 check "n/a participation is not present" "DEFECT"              "$(classify_restore_outcome 4 4 0 5 agree match n/a)"
 check "non-numeric input is a defect"    "DEFECT"              "$(classify_restore_outcome 4 '' 0 5 agree match present)"
 check "zero nodes is a defect"           "DEFECT"              "$(classify_restore_outcome 0 0 0 0 n/a n/a n/a)"
+
+# ---------------------------------------------------------------------------
+group ports "the restored agreement check queries the RESTORED network"
+# The defect this closes: agree.sh derives endpoints as 26657 + i*100 from the
+# ordinary localnet home, so calling it here checked a network that is stopped by
+# the time the restore runs. A healthy restored continuation could never have
+# satisfied it.
+check "node 0 uses the restore base"   "27657" "$(restore_rpc_port 0)"
+check "node 1"                         "27757" "$(restore_rpc_port 1)"
+check "node 2"                         "27857" "$(restore_rpc_port 2)"
+check "node 3"                         "27957" "$(restore_rpc_port 3)"
+check "the base is not the ordinary one" "differs" \
+  "$([[ "$RESTORE_RPC_BASE" == "26657" ]] && echo same || echo differs)"
+check "no restored port collides with the localnet series" "none" \
+  "$(for i in 0 1 2 3; do for j in 0 1 2 3 4; do
+       [[ "$(restore_rpc_port $i)" == "$((26657 + j * 100))" ]] && echo collision; done; done | head -1 | grep -c collision | sed 's/^0$/none/')"
+# With nothing listening on the restore ports, the helper must report the reason
+# rather than silently reading agreement from somewhere else.
+check "nothing listening is not agreement" "unreachable" "$(restore_agreement 4)"
+check "zero nodes is not agreement"        "unreachable" "$(restore_agreement 0)"
 
 # ---------------------------------------------------------------------------
 group verdicts "component verdicts are complete sub-proofs, not proxies"
@@ -113,7 +142,7 @@ for i in $(seq 0 $GROUP_IDX); do
 done
 printf '  %3d  TOTAL\n' "$TOTAL"
 
-EXPECTED_CHECKS=37
+EXPECTED_CHECKS=52
 echo
 if (( TOTAL != EXPECTED_CHECKS )); then
   echo "export/restore negative tests: FAIL — $TOTAL checks ran, the contract is $EXPECTED_CHECKS" >&2
