@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -85,6 +85,12 @@ localnet-join-and-settle:
 # settlements outstanding behind it, every settlement bound is pushed, and both
 # finalization arms are reached — including the deadline, which no other run gets
 # to. Long by nature: three epoch boundaries plus a 720-block window.
+# #108: characterizes export, restore and fresh-node join. The export is taken
+# deliberately mid-epoch, where per-slot participation for the open epoch is
+# non-zero, because a boundary export has nothing in progress to lose.
+localnet-export-restore-drill:
+	./scripts/localnet/export-restore-drill.sh
+
 localnet-settlement-matrix:
 	./scripts/localnet/settlement-lifecycle-matrix.sh
 
