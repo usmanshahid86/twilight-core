@@ -1,4 +1,4 @@
-.PHONY: build build-release check-release-stamping test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
+.PHONY: build build-release check-release-stamping check-cli-surface test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 # Version and commit are stamped at link time; the chain and binary names are
@@ -72,6 +72,13 @@ build-release:
 # a clean tree because it deliberately dirties a tracked file and restores it.
 check-release-stamping:
 	./scripts/check-release-stamping.sh
+
+# Proves the CoreSlot transaction surface against a real binary: both accepted
+# consensus-key forms produce the expected Any, and the retired AutoCLI names
+# fail loudly rather than printing help and exiting zero. Runs in CI's build &
+# test job, so local and CI results cannot diverge.
+check-cli-surface:
+	./scripts/check-cli-surface.sh
 
 test:
 	go test ./...

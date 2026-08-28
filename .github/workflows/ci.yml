@@ -31,6 +31,13 @@ jobs:
         run: go build ./...
       - name: Test
         run: go test -count=1 ./...
+      - name: CLI surface
+        # Same script as `make check-cli-surface`. The Go test asserts the
+        # assembled cobra tree, which proves a command exists, not that it runs:
+        # the defect this guards lived entirely in flag parsing, on a command the
+        # tree said was present. So this builds the binary and drives the real
+        # `--generate-only` path an operator drives.
+        run: ./scripts/check-cli-surface.sh
 
   consensus-vectors:
     name: consensus vectors

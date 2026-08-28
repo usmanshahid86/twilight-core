@@ -17,7 +17,23 @@ import (
 )
 
 func GetTxCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "coreslot", Short: "Core-slot lifecycle transactions", DisableFlagParsing: true, SuggestionsMinimumDistance: 2}
+	// RunE is client.ValidateCmd for the same reason the `tx` and `query` parents
+	// use it: cobra only reports an unknown subcommand for the ROOT command. A
+	// non-root parent that carries subcommands but is not itself runnable falls
+	// through to printing help and EXITING ZERO.
+	//
+	// That matters here because this tree replaced an AutoCLI-generated one whose
+	// names it does not share. Without this, `tx coreslot register-core-slot …` —
+	// the name an existing script would carry — would print help, exit 0, and
+	// register nobody. A script guarded by `&& echo ok` would report success. The
+	// generated names used to fail loudly; they must keep failing loudly.
+	cmd := &cobra.Command{
+		Use:                        "coreslot",
+		Short:                      "Core-slot lifecycle transactions",
+		DisableFlagParsing:         true,
+		SuggestionsMinimumDistance: 2,
+		RunE:                       client.ValidateCmd,
+	}
 	cmd.AddCommand(
 		registerCmd(), activateCmd(), inactivateCmd(), suspendCmd(), removeCmd(), rotateCmd(),
 		updatePayoutCmd(), updateMetadataCmd(), updateSettlementCmd(), updateSelectionPolicyCmd(), updateParamsCmd(),
@@ -54,7 +70,7 @@ func registerCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		pk, err := pubKeyAny(args[3])
+		pk, err := txPubKeyAny(args[3])
 		if err != nil {
 			return err
 		}
@@ -185,7 +201,7 @@ func rotateCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		pk, err := pubKeyAny(args[1])
+		pk, err := txPubKeyAny(args[1])
 		if err != nil {
 			return err
 		}

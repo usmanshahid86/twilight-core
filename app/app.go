@@ -133,6 +133,23 @@ func (a *App) AutoCliOpts() autocli.AppOptions {
 	if opts, ok := moduleOptions[upgradetypes.ModuleName]; ok && opts != nil {
 		opts.Tx = nil
 	}
+	// x/coreslot is the mirror image of the case above, and the asymmetry is
+	// deliberate: it stays in `modules` precisely BECAUSE its custom command is
+	// the one we want. AppModuleBasic.GetTxCmd supplies the hand-written tree,
+	// which autocli mounts at `tx coreslot` in place of generating one.
+	//
+	// Dropping the generated tx options as well is redundant while that holds, and
+	// that is the point. autocli only skips generating a module's tree when it
+	// finds a custom command for it, so the correct surface currently depends on
+	// an upstream precedence rule. Nilling the options means a change to that rule
+	// resurrects nothing: there is no generated CoreSlot tx tree left to mount.
+	//
+	// Queries are untouched. They carry no Any, the generated ones work, and the
+	// module supplies no custom query command — so `query coreslot ...` is
+	// unaffected by any of this.
+	if opts, ok := moduleOptions[coreslottypes.ModuleName]; ok && opts != nil {
+		opts.Tx = nil
+	}
 	return autocli.AppOptions{
 		Modules:               modules,
 		ModuleOptions:         moduleOptions,
