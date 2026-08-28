@@ -25,8 +25,9 @@ check() { # <name> <expected> <actual>
 PROBE="cmd/twilightd/main.go"
 UNTRACKED_GO="cmd/twilightd/zz_provenance_probe.go"
 UNTRACKED_ASM="cmd/twilightd/zz_provenance_probe.s"
+GOWORK_PROBE="go.work"
 BIN="build/twilightd"
-cleanup() { git checkout -- "$PROBE" 2>/dev/null || true; rm -f "$UNTRACKED_GO" "$UNTRACKED_ASM"; }
+cleanup() { git checkout -- "$PROBE" 2>/dev/null || true; rm -f "$UNTRACKED_GO" "$UNTRACKED_ASM" "$GOWORK_PROBE"; }
 trap cleanup EXIT
 
 # Refuse to run against a tree that is already modified: the cases below dirty a
@@ -43,6 +44,9 @@ if ! git diff-index --quiet HEAD -- 2>/dev/null; then
   git --no-pager diff --stat HEAD -- >&2
   exit 2
 fi
+for w in go.work go.work.sum; do
+  [[ -e "$w" ]] && { echo "refusing to run: $w is present" >&2; exit 2; }
+done
 LEFTOVER="$(git ls-files --others --exclude-standard -- . ':(exclude)docs/specs' 2>/dev/null)"
 if [[ -n "$LEFTOVER" ]]; then
   echo "refusing to run: untracked files present (a previous run may have been interrupted)" >&2
@@ -131,6 +135,33 @@ check "untracked .s stamps -dirty"        "v9.9.9-dirty" "$(stamped version)"
 make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
 check "untracked .s refuses a release"    "nonzero" "$([[ $rc -ne 0 ]] && echo nonzero || echo zero)"
 rm -f "$UNTRACKED_ASM"
+
+echo
+echo "=== an ignored file that changes the build is still a modification ==="
+# .gitignore lists go.work, and --exclude-standard skips ignored files, so the
+# default-deny rule above is structurally blind to the one file that can redirect
+# the whole module. It has to be checked by name.
+printf 'go %s\n\nuse .\n' "$(go env GOVERSION | sed 's/^go//')" >"$GOWORK_PROBE"
+check "go.work is invisible to default-deny" "0" \
+  "$(git ls-files --others --exclude-standard -- . ':(exclude)docs/specs' | grep -c 'go.work')"
+make build VERSION=v9.9.9 >/dev/null 2>&1
+check "go.work stamps -dirty anyway"        "v9.9.9-dirty" "$(stamped version)"
+make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
+check "go.work refuses a release"           "nonzero" "$([[ $rc -ne 0 ]] && echo nonzero || echo zero)"
+rm -f "$GOWORK_PROBE"
+
+echo
+echo "=== ambient GOFLAGS cannot alter a release ==="
+# GOFLAGS=-tags=upgradedrill compiles the drill upgrade handler in while BuildTags
+# is stamped from our own variable and reports nothing.
+rm -rf build/release
+GOFLAGS=-tags=upgradedrill make build-release VERSION=v9.9.9 >/dev/null 2>&1
+leaked=0
+for a in build/release/twilightd-v9.9.9-*; do
+  grep -aqF 'drill-v2' "$a" && leaked=$((leaked + 1))
+done
+check "no drill handler leaks into artifacts" "0" "$leaked"
+rm -rf build/release
 
 echo
 echo "=== a refusal preserves artifacts that were already there ==="

@@ -29,9 +29,14 @@
 # untracked by convention and the compiler cannot reach it. Everything gitignored
 # — build/ included — is already excluded by --exclude-standard.
 override ALLOWED_UNTRACKED := ':(exclude)docs/specs'
+#
+# go.work/go.work.sum are checked BY NAME because .gitignore lists them, and
+# --exclude-standard skips ignored files — so the default-deny rule above is
+# structurally blind to exactly the file that can redirect the whole module.
 override DIRTY := $(shell \
   { git diff-index --quiet HEAD -- 2>/dev/null \
-    && test -z "$$(git ls-files --others --exclude-standard -- . $(ALLOWED_UNTRACKED) 2>/dev/null)"; } \
+    && test -z "$$(git ls-files --others --exclude-standard -- . $(ALLOWED_UNTRACKED) 2>/dev/null)" \
+    && test ! -e go.work && test ! -e go.work.sum; } \
   || echo -dirty)
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo unknown)
 COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)

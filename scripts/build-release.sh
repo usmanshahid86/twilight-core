@@ -54,6 +54,18 @@ if [[ -n "$UNTRACKED" ]]; then
   refuse "untracked files present; a release is built only from a clean tree" "$UNTRACKED"
 fi
 
+# .gitignore lists go.work/go.work.sum, and --exclude-standard skips ignored
+# files, so the rule above cannot see the one file that can redirect the module.
+for w in go.work go.work.sum; do
+  [[ -e "$w" ]] && refuse "$w is present and would change module resolution"
+done
+
+# Ambient GOFLAGS can inject build tags: `GOFLAGS=-tags=upgradedrill` compiles the
+# drill upgrade handler into the binary while BuildTags is stamped from our own
+# variable and reports nothing. A release must not depend on the environment it
+# happened to be cut from.
+export GOFLAGS=
+
 COMMIT="$(git rev-parse HEAD)"
 VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo unknown)}"
 BUILD_TAGS="${BUILD_TAGS:-}"
