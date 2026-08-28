@@ -1,0 +1,14 @@
+package types
+
+import errorsmod "cosmossdk.io/errors"
+
+const ModuleName = "probe"
+
+var ErrOne = errorsmod.Register(ModuleName, 2, "one")
+
+// The shape that defeated the original line-based extraction.
+var ErrWrapped = errorsmod.Register(
+	ModuleName,
+	3,
+	"wrapped across lines",
+)

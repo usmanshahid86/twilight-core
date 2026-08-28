@@ -1,0 +1,15 @@
+package types
+
+import errorsmod "cosmossdk.io/errors"
+
+const ModuleName = "probe"
+
+func identity(e *errorsmod.Error) *errorsmod.Error { return e }
+
+var ErrOne = errorsmod.Register(ModuleName, 2, "one")
+
+// Registers for real, but the immediate callee is identity. The first parser
+// skipped this silently.
+var ErrNested = identity(
+	errorsmod.Register(ModuleName, 3, "nested"),
+)

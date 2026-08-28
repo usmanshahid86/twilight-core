@@ -1,0 +1,8 @@
+package types
+
+import errorsmod "cosmossdk.io/errors"
+
+const ModuleName = "probe"
+
+// Imported but nothing registered against ModuleName.
+var ErrOther = errorsmod.Register("other-codespace", 2, "not this module")

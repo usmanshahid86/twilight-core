@@ -1,0 +1,12 @@
+package types
+
+import errorsmod "cosmossdk.io/errors"
+
+const ModuleName = "probe"
+
+const someCode = 3
+
+var (
+	ErrOne     = errorsmod.Register(ModuleName, 2, "one")
+	ErrComputed = errorsmod.Register(ModuleName, someCode, "non-literal code")
+)

@@ -60,9 +60,10 @@ drill_assert_init "$DRILL_EVID_DIR" || { echo "could not initialise evidence" >&
 CODE_UNAUTHORIZED=2
 # ErrInvalidParams, raised by the UpdateParams authority lockout.
 CODE_INVALID_PARAMS=10
-# ErrNoPendingNomination, raised when accepting a nomination that was cancelled,
-# replaced or never made. Distinct from unauthorized on purpose: "there is
-# nothing to accept" and "you are not the nominee" are different failures.
+# ErrNoPendingNomination, raised when accepting a nomination that was canceled or
+# never made. Distinct from unauthorized on purpose: "there is nothing to accept"
+# and "you are not the nominee" are different failures — a REPLACED nominee gets
+# the latter, because the replacement leaves a nomination pending.
 CODE_NO_PENDING=22
 
 # Basenames, not paths: the gate joins each entry onto DRILL_EVID_DIR itself.
