@@ -85,6 +85,12 @@ unstamped build reports an empty version, which is honest, because it was not re
 make build-release VERSION=v0.1.0
 ```
 
+It refuses a tree with uncommitted changes to tracked files, before anything is built: an
+artifact named for a version but built from uncommitted work would report a commit its source
+does not match, and the checksum would hash it faithfully without disclosing that. `make build`
+stays usable on a dirty tree and appends `-dirty` to whatever version it is given.
+`make check-release-stamping` covers both.
+
 Binaries target the platforms validators actually run:
 
 | target | why |
