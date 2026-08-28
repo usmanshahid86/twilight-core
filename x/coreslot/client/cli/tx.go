@@ -248,11 +248,11 @@ func updateParamsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		var params types.Params
-		if err := json.Unmarshal(bz, &params); err != nil {
+		params, err := decodeParams(cmd, bz)
+		if err != nil {
 			return err
 		}
-		return broadcast(cmd, &types.MsgUpdateParams{Authority: from, Params: &params})
+		return broadcast(cmd, &types.MsgUpdateParams{Authority: from, Params: params})
 	})
 }
 
@@ -360,4 +360,45 @@ func cancelAuthorityNominationCmd() *cobra.Command {
 			}
 			return broadcast(cmd, &types.MsgCancelAuthorityNomination{Authority: from, Role: role})
 		})
+}
+
+// decodeParams reads a Params document in either JSON dialect the chain hands an
+// operator.
+//
+// The two disagree, and neither side is wrong on its own. `coreslot-query params`
+// renders through PROTO3 JSON, which encodes 64-bit integers as strings:
+//
+//	{"slot_voting_power":"1","max_active_slots":"100"}
+//
+// while the gogoproto-generated struct carries plain int64/uint64 with no
+// `,string` tag, so encoding/json requires unquoted numbers. Reading with
+// encoding/json alone meant the obvious workflow — query the parameters, change
+// one field, submit — failed with "cannot unmarshal string into Go struct field
+// Params.slot_voting_power of type int64". The document the chain produced was
+// not a document the chain accepted.
+//
+// Both are accepted rather than one being chosen, because a runbook or script
+// holding a hand-written file with bare numbers is as legitimate as query output,
+// and update-params writes the WHOLE struct — so an operator changing one field
+// has to reproduce every other field exactly. Narrowing the accepted form would
+// break the working path to fix the broken one.
+//
+// The codec is tried first because it is the chain's own dialect, and its error
+// is the one reported when neither succeeds.
+func decodeParams(cmd *cobra.Command, bz []byte) (*types.Params, error) {
+	ctx, err := client.GetClientTxContext(cmd)
+	if err != nil {
+		return nil, err
+	}
+	var params types.Params
+	protoErr := ctx.Codec.UnmarshalJSON(bz, &params)
+	if protoErr == nil {
+		return &params, nil
+	}
+	// The legacy bare-number form.
+	params = types.Params{}
+	if jsonErr := json.Unmarshal(bz, &params); jsonErr == nil {
+		return &params, nil
+	}
+	return nil, fmt.Errorf("decode params: %w", protoErr)
 }
