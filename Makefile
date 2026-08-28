@@ -1,4 +1,4 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-rewards-soak localnet-agree \
+.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 build:
@@ -87,6 +87,17 @@ localnet-join-and-settle:
 # to. Long by nature: three epoch boundaries plus a 720-block window.
 localnet-settlement-matrix:
 	./scripts/localnet/settlement-lifecycle-matrix.sh
+
+# #108: characterizes export, restore and fresh-node join. The export is taken
+# deliberately mid-epoch, where per-slot participation for the open epoch is
+# non-zero, because a boundary export has nothing in progress to lose.
+localnet-export-restore-drill:
+	./scripts/localnet/export-restore-drill.sh
+
+# Fast, chain-free negative tests for the outcome classifiers the drill uses.
+localnet-export-restore-faults:
+	./scripts/localnet/lib/drill-assert-selftest.sh
+	./scripts/localnet/export-restore-drill-faults.sh
 
 # The operational half of the x/upgrade proof: four validators, two binaries, a
 # real coordinated halt and a partial rollout. Deliberately NOT part of `drills`
