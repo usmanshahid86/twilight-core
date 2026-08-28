@@ -1,0 +1,12 @@
+package types
+
+import errorsmod "cosmossdk.io/errors"
+
+const ModuleName = "probe"
+
+var ErrOne = errorsmod.Register(ModuleName, 2, "one")
+
+// Consumes a code but reaches no sentinel, so nothing can pin it.
+func init() {
+	_ = errorsmod.Register(ModuleName, 3, "unattributed")
+}

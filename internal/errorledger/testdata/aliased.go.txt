@@ -1,0 +1,13 @@
+package types
+
+import errorsmod "cosmossdk.io/errors"
+
+const ModuleName = "probe"
+
+var ErrOne = errorsmod.Register(ModuleName, 2, "one")
+
+// The registration function escapes into a value; every call through it is
+// invisible to a parser that looks for the selector.
+var registerError = errorsmod.Register
+
+var ErrAliased = registerError(ModuleName, 3, "aliased")

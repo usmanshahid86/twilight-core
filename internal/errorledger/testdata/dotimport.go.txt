@@ -1,0 +1,7 @@
+package types
+
+import . "cosmossdk.io/errors"
+
+const ModuleName = "probe"
+
+var ErrOne = Register(ModuleName, 2, "one")

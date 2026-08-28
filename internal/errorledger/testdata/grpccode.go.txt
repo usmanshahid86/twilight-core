@@ -1,0 +1,13 @@
+package types
+
+import (
+	errorsmod "cosmossdk.io/errors"
+	grpccodes "google.golang.org/grpc/codes"
+)
+
+const ModuleName = "probe"
+
+var (
+	ErrOne  = errorsmod.Register(ModuleName, 2, "one")
+	ErrGRPC = errorsmod.RegisterWithGRPCCode(ModuleName, 3, grpccodes.NotFound, "with grpc code")
+)
