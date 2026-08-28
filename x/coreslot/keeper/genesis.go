@@ -40,6 +40,9 @@ func (k Keeper) InitGenesis(ctx context.Context, genesis *types.GenesisState) ([
 	if err := k.Params.Set(ctx, *genesis.Params); err != nil {
 		return nil, err
 	}
+	if err := k.initPendingAuthorityTransfers(ctx, genesis); err != nil {
+		return nil, err
+	}
 	for _, slot := range genesis.Slots {
 		key, _, err := consensusKey(slot.ConsensusPubkey)
 		if err != nil {
@@ -206,9 +209,24 @@ func (k Keeper) assertGenesisValidatorConsistency(ctx context.Context, updates [
 // The settlement address is required for PENDING slots as well as ACTIVE ones:
 // §24 makes it mandatory from normal registration onward, not from activation.
 //
-// Params.Authority and Params.EmergencyAuthority are deliberately absent: they
-// are control-plane identities and are module accounts by design, so the
-// economic rule would reject the chain's own governance.
+// Params.Authority and Params.EmergencyAuthority are deliberately absent, but
+// NOT because they are module accounts by design — that conflates two different
+// things, and reading it as a general rule leads to the wrong conclusion.
+//
+// AuthorityModuleName (app/app.go) is a module address with no private key,
+// supplied to x/upgrade, bank and consensus; x/upgrade is reached through the
+// CoreSlot proxy precisely because nobody can sign for it. Params.Authority and
+// Params.EmergencyAuthority are something else: chain-state operational roles
+// that MUST be signable, or the chain cannot be governed at all.
+//
+// They are excluded here because DefaultGenesis seeds them with those module
+// addresses as placeholders, so applying the economic rule at genesis would make
+// the shipped default fail its own validation. That is a fact about the default
+// document, not a property of the fields.
+//
+// A module account IS an inadmissible rotation destination, and is refused as
+// one — at nomination, at acceptance, and for pending transfers carried in
+// genesis. See keeper/authority.go.
 func (k Keeper) validateGenesisEconomicAddresses(genesis *types.GenesisState) error {
 	for _, slot := range genesis.Slots {
 		if slot == nil {
@@ -234,6 +252,20 @@ func (k Keeper) ExportGenesis(ctx context.Context) (*types.GenesisState, error) 
 	}
 	genesis := &types.GenesisState{Params: &params}
 	genesis.NextSlotId, _ = k.NextSlotID.Get(ctx)
+	// Exported so a captured state is complete. A dropped nomination would strand
+	// a rotation mid-flight: the incumbent would believe a handover was pending
+	// and the nominee would find nothing to accept.
+	//
+	// Int32Key iterates in ascending key order, so the exported order is the role
+	// order and is deterministic.
+	if err := k.PendingAuthority.Walk(ctx, nil, func(key int32, value types.PendingAuthorityTransfer) (bool, error) {
+		valueCopy := value
+		genesis.PendingAuthorityTransfers = append(genesis.PendingAuthorityTransfers,
+			&types.PendingAuthorityTransferEntry{Role: types.AuthorityRole(key), Transfer: &valueCopy})
+		return false, nil
+	}); err != nil {
+		return nil, err
+	}
 	if err := k.Slots.Walk(ctx, nil, func(_ uint64, value types.CoreSlot) (bool, error) {
 		valueCopy := value
 		genesis.Slots = append(genesis.Slots, &valueCopy)
@@ -290,4 +322,44 @@ func fmtHex(value []byte) string {
 		out[i*2], out[i*2+1] = digits[b>>4], digits[b&0x0f]
 	}
 	return string(out)
+}
+
+// initPendingAuthorityTransfers validates and commits imported nominations.
+//
+// The admissibility check lives HERE rather than in GenesisState.Validate
+// because it needs the app-derived module-account and bank-blocked sets, which
+// a pure types-level validator has no access to. Validating only the syntax
+// there and the full rule here means an imported document cannot install a
+// destination that a live nomination would have been refused.
+func (k Keeper) initPendingAuthorityTransfers(ctx context.Context, genesis *types.GenesisState) error {
+	seen := make(map[types.AuthorityRole]struct{}, len(genesis.PendingAuthorityTransfers))
+	for _, entry := range genesis.PendingAuthorityTransfers {
+		if entry == nil || entry.Transfer == nil {
+			return types.ErrInvalidGenesis.Wrap("pending authority transfer is empty")
+		}
+		key, err := authorityRoleKey(entry.Role)
+		if err != nil {
+			return types.ErrInvalidGenesis.Wrapf("pending authority transfer: %v", err)
+		}
+		// At most one nomination per role. Two entries for the same role would
+		// leave which one survives dependent on iteration order, and only one of
+		// them could be the intended successor.
+		if _, duplicate := seen[entry.Role]; duplicate {
+			return types.ErrInvalidGenesis.Wrapf("duplicate pending authority transfer for role %s", entry.Role)
+		}
+		seen[entry.Role] = struct{}{}
+
+		if _, err := k.economicAddresses.Validate(entry.Transfer.Nominee); err != nil {
+			return types.ErrInvalidGenesis.Wrapf("pending authority transfer nominee for role %s: %v", entry.Role, err)
+		}
+		if entry.Transfer.NominatedHeight < 0 {
+			return types.ErrInvalidGenesis.Wrapf(
+				"pending authority transfer for role %s has negative nominated height %d",
+				entry.Role, entry.Transfer.NominatedHeight)
+		}
+		if err := k.PendingAuthority.Set(ctx, key, *entry.Transfer); err != nil {
+			return err
+		}
+	}
+	return nil
 }

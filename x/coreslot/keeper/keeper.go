@@ -47,6 +47,10 @@ type Keeper struct {
 	LastApplied   collections.Map[string, types.LastAppliedValidator]
 	RewardWeights collections.Map[uint64, types.OperatorRewardWeight]
 	NextSlotID    collections.Item[uint64]
+	// PendingAuthority holds at most one nomination per role, keyed by
+	// AuthorityRole. The key IS the role, which is why the stored value does not
+	// repeat it: two copies could disagree, and only one of them could be right.
+	PendingAuthority collections.Map[int32, types.PendingAuthorityTransfer]
 
 	// SelectionPolicies is the immutable per-slot policy history keyed by
 	// (slot_id, policy_version). Registration and fresh genesis create version 1;
@@ -99,6 +103,8 @@ func NewKeeper(
 		LastApplied:       collections.NewMap(sb, collections.NewPrefix(types.LastPrefix), "last_applied", collections.StringKey, codec.CollValue[types.LastAppliedValidator](cdc)),
 		RewardWeights:     collections.NewMap(sb, collections.NewPrefix(types.RewardsPrefix), "reward_weights", collections.Uint64Key, codec.CollValue[types.OperatorRewardWeight](cdc)),
 		NextSlotID:        collections.NewItem(sb, collections.NewPrefix(types.NextSlotIDKey), "next_slot_id", collections.Uint64Value),
+		PendingAuthority: collections.NewMap(sb, collections.NewPrefix(types.PendingAuthorityPrefix), "pending_authority",
+			collections.Int32Key, codec.CollValue[types.PendingAuthorityTransfer](cdc)),
 		SelectionPolicies: collections.NewMap(sb, collections.NewPrefix(types.SelectionPoliciesPrefix), "selection_policies",
 			collections.PairKeyCodec(collections.Uint64Key, collections.Uint64Key), codec.CollValue[types.SelectionPolicyVersion](cdc)),
 		ActiveSlots: collections.NewKeySet(sb, collections.NewPrefix(types.ActiveSlotsPrefix), "active_slots", collections.Uint64Key),

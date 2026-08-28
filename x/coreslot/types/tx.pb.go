@@ -1112,6 +1112,287 @@ func (m *MsgUpdateSelectionPolicyResponse) GetPolicyVersion() uint64 {
 	return 0
 }
 
+// MsgNominateAuthority records a successor for one role. It does NOT change the
+// effective authority: the incumbent keeps every capability until the nominee
+// accepts. Signed by the CURRENT holder of the named role.
+type MsgNominateAuthority struct {
+	Authority string        `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Role      AuthorityRole `protobuf:"varint,2,opt,name=role,proto3,enum=twilight.coreslot.v1.AuthorityRole" json:"role,omitempty"`
+	Nominee   string        `protobuf:"bytes,3,opt,name=nominee,proto3" json:"nominee,omitempty"`
+}
+
+func (m *MsgNominateAuthority) Reset()         { *m = MsgNominateAuthority{} }
+func (m *MsgNominateAuthority) String() string { return proto.CompactTextString(m) }
+func (*MsgNominateAuthority) ProtoMessage()    {}
+func (*MsgNominateAuthority) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a24511e1f30e99cd, []int{21}
+}
+func (m *MsgNominateAuthority) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgNominateAuthority) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgNominateAuthority.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgNominateAuthority) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgNominateAuthority.Merge(m, src)
+}
+func (m *MsgNominateAuthority) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgNominateAuthority) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgNominateAuthority.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgNominateAuthority proto.InternalMessageInfo
+
+func (m *MsgNominateAuthority) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgNominateAuthority) GetRole() AuthorityRole {
+	if m != nil {
+		return m.Role
+	}
+	return AuthorityRole_AUTHORITY_ROLE_UNSPECIFIED
+}
+
+func (m *MsgNominateAuthority) GetNominee() string {
+	if m != nil {
+		return m.Nominee
+	}
+	return ""
+}
+
+type MsgNominateAuthorityResponse struct {
+}
+
+func (m *MsgNominateAuthorityResponse) Reset()         { *m = MsgNominateAuthorityResponse{} }
+func (m *MsgNominateAuthorityResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgNominateAuthorityResponse) ProtoMessage()    {}
+func (*MsgNominateAuthorityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a24511e1f30e99cd, []int{22}
+}
+func (m *MsgNominateAuthorityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgNominateAuthorityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgNominateAuthorityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgNominateAuthorityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgNominateAuthorityResponse.Merge(m, src)
+}
+func (m *MsgNominateAuthorityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgNominateAuthorityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgNominateAuthorityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgNominateAuthorityResponse proto.InternalMessageInfo
+
+// MsgAcceptAuthority completes a handover. Signed by the NOMINEE, which is what
+// proves the destination key exists and is controlled — the property that makes
+// a wrong-but-valid address harmless rather than terminal.
+type MsgAcceptAuthority struct {
+	Nominee string        `protobuf:"bytes,1,opt,name=nominee,proto3" json:"nominee,omitempty"`
+	Role    AuthorityRole `protobuf:"varint,2,opt,name=role,proto3,enum=twilight.coreslot.v1.AuthorityRole" json:"role,omitempty"`
+}
+
+func (m *MsgAcceptAuthority) Reset()         { *m = MsgAcceptAuthority{} }
+func (m *MsgAcceptAuthority) String() string { return proto.CompactTextString(m) }
+func (*MsgAcceptAuthority) ProtoMessage()    {}
+func (*MsgAcceptAuthority) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a24511e1f30e99cd, []int{23}
+}
+func (m *MsgAcceptAuthority) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgAcceptAuthority) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgAcceptAuthority.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgAcceptAuthority) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgAcceptAuthority.Merge(m, src)
+}
+func (m *MsgAcceptAuthority) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgAcceptAuthority) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgAcceptAuthority.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgAcceptAuthority proto.InternalMessageInfo
+
+func (m *MsgAcceptAuthority) GetNominee() string {
+	if m != nil {
+		return m.Nominee
+	}
+	return ""
+}
+
+func (m *MsgAcceptAuthority) GetRole() AuthorityRole {
+	if m != nil {
+		return m.Role
+	}
+	return AuthorityRole_AUTHORITY_ROLE_UNSPECIFIED
+}
+
+type MsgAcceptAuthorityResponse struct {
+}
+
+func (m *MsgAcceptAuthorityResponse) Reset()         { *m = MsgAcceptAuthorityResponse{} }
+func (m *MsgAcceptAuthorityResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgAcceptAuthorityResponse) ProtoMessage()    {}
+func (*MsgAcceptAuthorityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a24511e1f30e99cd, []int{24}
+}
+func (m *MsgAcceptAuthorityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgAcceptAuthorityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgAcceptAuthorityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgAcceptAuthorityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgAcceptAuthorityResponse.Merge(m, src)
+}
+func (m *MsgAcceptAuthorityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgAcceptAuthorityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgAcceptAuthorityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgAcceptAuthorityResponse proto.InternalMessageInfo
+
+// MsgCancelAuthorityNomination withdraws a pending nomination. Signed by the
+// current holder of the role, which is what makes a mistaken nomination
+// correctable while it is still pending.
+type MsgCancelAuthorityNomination struct {
+	Authority string        `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Role      AuthorityRole `protobuf:"varint,2,opt,name=role,proto3,enum=twilight.coreslot.v1.AuthorityRole" json:"role,omitempty"`
+}
+
+func (m *MsgCancelAuthorityNomination) Reset()         { *m = MsgCancelAuthorityNomination{} }
+func (m *MsgCancelAuthorityNomination) String() string { return proto.CompactTextString(m) }
+func (*MsgCancelAuthorityNomination) ProtoMessage()    {}
+func (*MsgCancelAuthorityNomination) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a24511e1f30e99cd, []int{25}
+}
+func (m *MsgCancelAuthorityNomination) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgCancelAuthorityNomination) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgCancelAuthorityNomination.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgCancelAuthorityNomination) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgCancelAuthorityNomination.Merge(m, src)
+}
+func (m *MsgCancelAuthorityNomination) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgCancelAuthorityNomination) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgCancelAuthorityNomination.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgCancelAuthorityNomination proto.InternalMessageInfo
+
+func (m *MsgCancelAuthorityNomination) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgCancelAuthorityNomination) GetRole() AuthorityRole {
+	if m != nil {
+		return m.Role
+	}
+	return AuthorityRole_AUTHORITY_ROLE_UNSPECIFIED
+}
+
+type MsgCancelAuthorityNominationResponse struct {
+}
+
+func (m *MsgCancelAuthorityNominationResponse) Reset()         { *m = MsgCancelAuthorityNominationResponse{} }
+func (m *MsgCancelAuthorityNominationResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgCancelAuthorityNominationResponse) ProtoMessage()    {}
+func (*MsgCancelAuthorityNominationResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a24511e1f30e99cd, []int{26}
+}
+func (m *MsgCancelAuthorityNominationResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgCancelAuthorityNominationResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgCancelAuthorityNominationResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgCancelAuthorityNominationResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgCancelAuthorityNominationResponse.Merge(m, src)
+}
+func (m *MsgCancelAuthorityNominationResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgCancelAuthorityNominationResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgCancelAuthorityNominationResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgCancelAuthorityNominationResponse proto.InternalMessageInfo
+
 type MsgUpdateParams struct {
 	Authority string  `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
 	Params    *Params `protobuf:"bytes,2,opt,name=params,proto3" json:"params,omitempty"`
@@ -1121,7 +1402,7 @@ func (m *MsgUpdateParams) Reset()         { *m = MsgUpdateParams{} }
 func (m *MsgUpdateParams) String() string { return proto.CompactTextString(m) }
 func (*MsgUpdateParams) ProtoMessage()    {}
 func (*MsgUpdateParams) Descriptor() ([]byte, []int) {
-	return fileDescriptor_a24511e1f30e99cd, []int{21}
+	return fileDescriptor_a24511e1f30e99cd, []int{27}
 }
 func (m *MsgUpdateParams) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -1171,7 +1452,7 @@ func (m *MsgUpdateParamsResponse) Reset()         { *m = MsgUpdateParamsResponse
 func (m *MsgUpdateParamsResponse) String() string { return proto.CompactTextString(m) }
 func (*MsgUpdateParamsResponse) ProtoMessage()    {}
 func (*MsgUpdateParamsResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_a24511e1f30e99cd, []int{22}
+	return fileDescriptor_a24511e1f30e99cd, []int{28}
 }
 func (m *MsgUpdateParamsResponse) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -1225,7 +1506,7 @@ func (m *MsgScheduleUpgrade) Reset()         { *m = MsgScheduleUpgrade{} }
 func (m *MsgScheduleUpgrade) String() string { return proto.CompactTextString(m) }
 func (*MsgScheduleUpgrade) ProtoMessage()    {}
 func (*MsgScheduleUpgrade) Descriptor() ([]byte, []int) {
-	return fileDescriptor_a24511e1f30e99cd, []int{23}
+	return fileDescriptor_a24511e1f30e99cd, []int{29}
 }
 func (m *MsgScheduleUpgrade) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -1289,7 +1570,7 @@ func (m *MsgScheduleUpgradeResponse) Reset()         { *m = MsgScheduleUpgradeRe
 func (m *MsgScheduleUpgradeResponse) String() string { return proto.CompactTextString(m) }
 func (*MsgScheduleUpgradeResponse) ProtoMessage()    {}
 func (*MsgScheduleUpgradeResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_a24511e1f30e99cd, []int{24}
+	return fileDescriptor_a24511e1f30e99cd, []int{30}
 }
 func (m *MsgScheduleUpgradeResponse) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -1327,7 +1608,7 @@ func (m *MsgCancelUpgrade) Reset()         { *m = MsgCancelUpgrade{} }
 func (m *MsgCancelUpgrade) String() string { return proto.CompactTextString(m) }
 func (*MsgCancelUpgrade) ProtoMessage()    {}
 func (*MsgCancelUpgrade) Descriptor() ([]byte, []int) {
-	return fileDescriptor_a24511e1f30e99cd, []int{25}
+	return fileDescriptor_a24511e1f30e99cd, []int{31}
 }
 func (m *MsgCancelUpgrade) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -1370,7 +1651,7 @@ func (m *MsgCancelUpgradeResponse) Reset()         { *m = MsgCancelUpgradeRespon
 func (m *MsgCancelUpgradeResponse) String() string { return proto.CompactTextString(m) }
 func (*MsgCancelUpgradeResponse) ProtoMessage()    {}
 func (*MsgCancelUpgradeResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_a24511e1f30e99cd, []int{26}
+	return fileDescriptor_a24511e1f30e99cd, []int{32}
 }
 func (m *MsgCancelUpgradeResponse) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
@@ -1421,6 +1702,12 @@ func init() {
 	proto.RegisterType((*MsgUpdateSettlementAddressResponse)(nil), "twilight.coreslot.v1.MsgUpdateSettlementAddressResponse")
 	proto.RegisterType((*MsgUpdateSelectionPolicy)(nil), "twilight.coreslot.v1.MsgUpdateSelectionPolicy")
 	proto.RegisterType((*MsgUpdateSelectionPolicyResponse)(nil), "twilight.coreslot.v1.MsgUpdateSelectionPolicyResponse")
+	proto.RegisterType((*MsgNominateAuthority)(nil), "twilight.coreslot.v1.MsgNominateAuthority")
+	proto.RegisterType((*MsgNominateAuthorityResponse)(nil), "twilight.coreslot.v1.MsgNominateAuthorityResponse")
+	proto.RegisterType((*MsgAcceptAuthority)(nil), "twilight.coreslot.v1.MsgAcceptAuthority")
+	proto.RegisterType((*MsgAcceptAuthorityResponse)(nil), "twilight.coreslot.v1.MsgAcceptAuthorityResponse")
+	proto.RegisterType((*MsgCancelAuthorityNomination)(nil), "twilight.coreslot.v1.MsgCancelAuthorityNomination")
+	proto.RegisterType((*MsgCancelAuthorityNominationResponse)(nil), "twilight.coreslot.v1.MsgCancelAuthorityNominationResponse")
 	proto.RegisterType((*MsgUpdateParams)(nil), "twilight.coreslot.v1.MsgUpdateParams")
 	proto.RegisterType((*MsgUpdateParamsResponse)(nil), "twilight.coreslot.v1.MsgUpdateParamsResponse")
 	proto.RegisterType((*MsgScheduleUpgrade)(nil), "twilight.coreslot.v1.MsgScheduleUpgrade")
@@ -1432,87 +1719,99 @@ func init() {
 func init() { proto.RegisterFile("twilight/coreslot/v1/tx.proto", fileDescriptor_a24511e1f30e99cd) }
 
 var fileDescriptor_a24511e1f30e99cd = []byte{
-	// 1277 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xb4, 0x57, 0xcf, 0x53, 0xdb, 0xc6,
-	0x17, 0x8f, 0x62, 0x42, 0xc2, 0x26, 0x04, 0xa3, 0xf0, 0xc3, 0x28, 0xe0, 0x2f, 0x5f, 0x25, 0xa4,
-	0x84, 0x82, 0x14, 0x48, 0x9a, 0x64, 0x7c, 0x03, 0x4e, 0x4c, 0xc6, 0x13, 0x46, 0x34, 0x9d, 0x69,
-	0xa7, 0x33, 0xea, 0x5a, 0x5a, 0x84, 0x52, 0x4b, 0xab, 0xd1, 0xae, 0x0d, 0x3e, 0xb5, 0xc3, 0x4c,
-	0x2f, 0xb9, 0xb4, 0xc7, 0x9e, 0xdb, 0x63, 0x2f, 0x1c, 0xfa, 0x07, 0xf4, 0x98, 0xe9, 0x29, 0xc7,
-	0x1e, 0x3b, 0x70, 0xe0, 0x2f, 0xe8, 0xbd, 0xa3, 0x95, 0xb4, 0xb6, 0x7e, 0xd9, 0xc6, 0x6d, 0x2f,
-	0x8c, 0xf7, 0xbd, 0xcf, 0xbe, 0xf7, 0x79, 0xfb, 0x9e, 0xde, 0x7b, 0x80, 0x25, 0x7a, 0x6c, 0x37,
-	0x6d, 0xeb, 0x88, 0xaa, 0x06, 0xf6, 0x11, 0x69, 0x62, 0xaa, 0xb6, 0x37, 0x55, 0x7a, 0xa2, 0x78,
-	0x3e, 0xa6, 0x58, 0x9c, 0x89, 0xd5, 0x4a, 0xac, 0x56, 0xda, 0x9b, 0xd2, 0x34, 0x74, 0x6c, 0x17,
-	0xab, 0xec, 0x6f, 0x08, 0x94, 0xe6, 0x0d, 0x4c, 0x1c, 0x4c, 0x54, 0x87, 0x58, 0x81, 0x01, 0x87,
-	0x58, 0x91, 0x62, 0xc1, 0xc2, 0xd8, 0x6a, 0x22, 0x95, 0x9d, 0x1a, 0xad, 0x43, 0x15, 0xba, 0x9d,
-	0x58, 0x15, 0xde, 0xd1, 0xd9, 0x49, 0x0d, 0x0f, 0x91, 0xea, 0x41, 0x2e, 0x2d, 0xce, 0x81, 0x81,
-	0xe4, 0x53, 0x01, 0xcc, 0xed, 0xb9, 0x36, 0xb5, 0x61, 0xf3, 0x00, 0x35, 0x91, 0x41, 0x6d, 0xec,
-	0xee, 0xe3, 0xa6, 0x6d, 0x74, 0xc4, 0x75, 0x20, 0x92, 0x58, 0xa4, 0xfb, 0x90, 0x22, 0xbd, 0xe1,
-	0x91, 0x8a, 0xb0, 0x2c, 0xac, 0x8e, 0x69, 0x65, 0xae, 0xd1, 0x20, 0x45, 0x3b, 0x1e, 0x11, 0x6b,
-	0x60, 0xc1, 0x81, 0x27, 0x7a, 0x28, 0x47, 0xa6, 0xee, 0x41, 0x9f, 0xda, 0x86, 0xed, 0x41, 0x97,
-	0x92, 0xca, 0x75, 0x76, 0x69, 0xde, 0x81, 0x27, 0x07, 0x91, 0x7e, 0xbf, 0x47, 0x2d, 0xff, 0x55,
-	0x02, 0xf7, 0xea, 0xc4, 0xd2, 0x90, 0x65, 0x13, 0x8a, 0xfc, 0x5d, 0xec, 0xa3, 0x83, 0x26, 0xa6,
-	0xe2, 0x22, 0x98, 0x80, 0x2d, 0x7a, 0x84, 0x7d, 0x9b, 0x76, 0x98, 0xe3, 0x09, 0xad, 0x2b, 0x10,
-	0x1f, 0x83, 0x32, 0xf6, 0x90, 0x0f, 0x29, 0xf6, 0x75, 0x68, 0x9a, 0x3e, 0x22, 0xa1, 0xa3, 0x09,
-	0x6d, 0x2a, 0x96, 0x6f, 0x87, 0x62, 0xf1, 0x73, 0x50, 0x36, 0xb0, 0x4b, 0x90, 0x4b, 0x5a, 0x44,
-	0xf7, 0x5a, 0x8d, 0xaf, 0x51, 0xa7, 0x52, 0x5a, 0x16, 0x56, 0x6f, 0x6f, 0xcd, 0x28, 0xe1, 0xdb,
-	0x2a, 0xf1, 0xdb, 0x2a, 0xdb, 0x6e, 0x67, 0xa7, 0xf2, 0xfb, 0xaf, 0x1b, 0x33, 0xd1, 0x63, 0x1a,
-	0x7e, 0xc7, 0xa3, 0x58, 0xd9, 0x6f, 0x35, 0x5e, 0xa1, 0x8e, 0x36, 0xc5, 0xed, 0xec, 0x33, 0x33,
-	0xe2, 0x0a, 0xb8, 0xeb, 0xc1, 0x0e, 0x6e, 0x51, 0xce, 0x61, 0x8c, 0x71, 0x98, 0x0c, 0xa5, 0x31,
-	0x83, 0x1d, 0x70, 0xcb, 0x41, 0x14, 0x9a, 0x90, 0xc2, 0xca, 0x0d, 0xe6, 0xf9, 0x91, 0x92, 0x57,
-	0x17, 0xca, 0xeb, 0x88, 0x7a, 0x3d, 0x42, 0x6b, 0xfc, 0x9e, 0xb8, 0x11, 0x24, 0x84, 0xd2, 0x26,
-	0x72, 0x90, 0xdb, 0x75, 0x37, 0xce, 0xdc, 0x4d, 0x77, 0x35, 0xb1, 0xcb, 0x43, 0x50, 0xb1, 0xc3,
-	0xcc, 0xea, 0xdd, 0x3c, 0x7a, 0x2c, 0xb7, 0x95, 0x9b, 0x8c, 0xc2, 0x7a, 0x3e, 0x85, 0xfc, 0x7a,
-	0xd0, 0xe6, 0xec, 0x5c, 0x79, 0xed, 0xe5, 0xe9, 0xe5, 0xd9, 0x5a, 0x37, 0x2f, 0xef, 0x2e, 0xcf,
-	0xd6, 0x56, 0xb2, 0xa5, 0x97, 0x93, 0x5f, 0xf9, 0x39, 0xb8, 0x9f, 0x23, 0xd6, 0x10, 0xf1, 0x82,
-	0x47, 0x16, 0xe7, 0xc1, 0xcd, 0xe0, 0xaa, 0x6e, 0x9b, 0x51, 0xd5, 0x8d, 0x07, 0xc7, 0x3d, 0x53,
-	0xfe, 0x92, 0x95, 0xcb, 0xb6, 0x41, 0xed, 0x36, 0xa4, 0x68, 0xc8, 0x72, 0xe9, 0xb1, 0x76, 0xbd,
-	0xd7, 0x5a, 0xed, 0x6e, 0x92, 0xbf, 0xbc, 0xc4, 0x58, 0xa5, 0xad, 0xc7, 0xac, 0xe4, 0x1f, 0x05,
-	0x30, 0x5b, 0x27, 0xd6, 0x9e, 0x0b, 0xd3, 0xfe, 0xb7, 0xc0, 0x2c, 0xb7, 0xa2, 0x63, 0x5f, 0x8f,
-	0xab, 0x30, 0xe2, 0x72, 0x8f, 0x2b, 0x5f, 0xfb, 0x71, 0x96, 0x0b, 0x59, 0x89, 0x73, 0x60, 0xdc,
-	0x47, 0x90, 0x60, 0x97, 0x15, 0xea, 0x84, 0x16, 0x9d, 0x6a, 0x52, 0xc0, 0x36, 0xdf, 0x8f, 0xfc,
-	0x3f, 0xb0, 0x94, 0xcb, 0x8c, 0x73, 0xff, 0x49, 0x00, 0x62, 0x9d, 0x58, 0x07, 0x2d, 0xe2, 0x21,
-	0xd7, 0xfc, 0x87, 0x0f, 0x57, 0x44, 0x31, 0xa8, 0x53, 0xd4, 0xb6, 0x4d, 0xe4, 0x1a, 0x48, 0xf7,
-	0xd1, 0x21, 0xf2, 0x83, 0x5f, 0xd1, 0x67, 0x31, 0x1d, 0x6b, 0xb4, 0x58, 0x91, 0x79, 0xff, 0x45,
-	0x20, 0x65, 0x39, 0xf2, 0x10, 0x7c, 0x30, 0xcd, 0x6a, 0xc6, 0xc1, 0x6d, 0xf4, 0x1f, 0x05, 0x90,
-	0x61, 0x74, 0x1f, 0x2c, 0x64, 0x7c, 0x72, 0x42, 0xbf, 0x85, 0xf5, 0xa0, 0x61, 0xca, 0x5e, 0x3c,
-	0xea, 0x0e, 0xaf, 0x50, 0x67, 0x54, 0x56, 0x5f, 0x81, 0x19, 0x17, 0x1d, 0xeb, 0xff, 0x52, 0xc3,
-	0x12, 0x5d, 0x74, 0xbc, 0x9b, 0xec, 0x59, 0x99, 0xf8, 0xc2, 0xba, 0xc9, 0x46, 0xc0, 0x63, 0x7c,
-	0x27, 0x80, 0xb9, 0x3a, 0xb1, 0xde, 0x78, 0x26, 0xa4, 0x68, 0x3f, 0xd1, 0xd8, 0x24, 0x70, 0x2b,
-	0x55, 0xe7, 0xfc, 0x5c, 0x1c, 0xe2, 0x3a, 0x08, 0x68, 0xe9, 0xa9, 0xc6, 0x19, 0x26, 0xa1, 0xec,
-	0xa2, 0xe3, 0x84, 0x8b, 0xda, 0x64, 0x40, 0x97, 0x5b, 0x95, 0x97, 0x41, 0x35, 0x9f, 0x0b, 0xa7,
-	0xfb, 0xb3, 0xc0, 0x12, 0x16, 0x42, 0xd2, 0x0d, 0x75, 0x34, 0xc6, 0xbd, 0xfd, 0xbb, 0x34, 0x5a,
-	0xff, 0x4e, 0xc7, 0xf1, 0x00, 0xfc, 0xbf, 0x90, 0x24, 0x0f, 0xe5, 0x7b, 0x81, 0x7d, 0x0d, 0x21,
-	0xea, 0x20, 0xd3, 0xe3, 0x47, 0x8a, 0x25, 0x7f, 0x8e, 0x94, 0x0a, 0xe6, 0x48, 0x9a, 0xf6, 0x43,
-	0x20, 0x17, 0x13, 0xe2, 0xbc, 0xdf, 0x0b, 0xa0, 0xd2, 0x03, 0x4b, 0x6e, 0x16, 0xa3, 0xd6, 0x4c,
-	0xce, 0x3a, 0x52, 0x1a, 0x65, 0x1d, 0x19, 0xeb, 0xbb, 0x8e, 0xa4, 0x03, 0xde, 0x03, 0xcb, 0x45,
-	0x91, 0xf0, 0x51, 0x15, 0x6c, 0x01, 0x4c, 0xa2, 0xb7, 0x91, 0x4f, 0x6c, 0xec, 0x46, 0x13, 0x6b,
-	0x32, 0x94, 0x7e, 0x16, 0x0a, 0xe5, 0x16, 0x98, 0xea, 0x29, 0x5d, 0x1f, 0x3a, 0x64, 0x40, 0x93,
-	0x78, 0x06, 0xc6, 0x3d, 0x86, 0x63, 0x8f, 0x71, 0x7b, 0x6b, 0x31, 0xbf, 0xe8, 0x42, 0x5b, 0x5a,
-	0x84, 0xcd, 0x7c, 0xdf, 0x0b, 0x60, 0x3e, 0xe5, 0x96, 0xe7, 0xe9, 0x97, 0x68, 0x22, 0x18, 0x47,
-	0xc8, 0x6c, 0x35, 0xd1, 0x1b, 0xcf, 0xf2, 0xa1, 0x89, 0x06, 0xb0, 0x12, 0xc1, 0x98, 0x0b, 0x1d,
-	0x14, 0x6d, 0x5b, 0xec, 0x77, 0xd0, 0x4b, 0x8f, 0x50, 0x40, 0x8c, 0xa5, 0xa4, 0xa4, 0x45, 0xa7,
-	0x00, 0x6b, 0xbb, 0x87, 0x38, 0x6a, 0xff, 0xec, 0x77, 0xed, 0x45, 0x76, 0x63, 0x78, 0x98, 0xbb,
-	0x31, 0xa4, 0x68, 0xc5, 0xa3, 0x21, 0x29, 0xe5, 0xb1, 0x58, 0xa0, 0x5c, 0x27, 0xd6, 0x2e, 0x74,
-	0x0d, 0xd4, 0x1c, 0x2a, 0x90, 0xda, 0x27, 0x59, 0x22, 0x72, 0x2e, 0x91, 0x84, 0x51, 0x59, 0x62,
-	0xb5, 0x9d, 0x90, 0xc5, 0x24, 0xb6, 0x4e, 0xef, 0x80, 0x52, 0x9d, 0x58, 0xa2, 0x07, 0xca, 0x99,
-	0x7d, 0xf6, 0x71, 0x7e, 0xf6, 0x72, 0x76, 0x20, 0x69, 0x73, 0x68, 0x28, 0xaf, 0x41, 0x0f, 0x94,
-	0x33, 0x2b, 0x51, 0xb1, 0xc7, 0x34, 0xb4, 0x8f, 0xc7, 0xa2, 0x55, 0x48, 0x6c, 0x03, 0x31, 0x67,
-	0x0d, 0xfa, 0xb8, 0xd0, 0x50, 0x16, 0x2c, 0x3d, 0xbd, 0x02, 0x98, 0xfb, 0x75, 0xc0, 0x54, 0x7a,
-	0x85, 0x59, 0x2d, 0xb4, 0x93, 0x42, 0x4a, 0x4f, 0x86, 0x45, 0x72, 0x77, 0x6f, 0xc1, 0xdd, 0xd4,
-	0xbe, 0xf1, 0x51, 0x9f, 0xec, 0xf4, 0x02, 0x25, 0x75, 0x48, 0x60, 0xef, 0x93, 0xe6, 0x6c, 0x12,
-	0xc5, 0x4f, 0x9a, 0x05, 0xf7, 0x79, 0xd2, 0xe2, 0x09, 0x2f, 0x76, 0xc0, 0xbd, 0xbc, 0xe9, 0xbe,
-	0x5e, 0x68, 0x2b, 0x07, 0x2d, 0x3d, 0xbb, 0x0a, 0x9a, 0xbb, 0x0e, 0xfe, 0x05, 0x2d, 0x18, 0xd5,
-	0xea, 0x00, 0x83, 0xe9, 0x0b, 0xd2, 0x8b, 0x2b, 0x5e, 0xe0, 0x24, 0xbe, 0x13, 0xc0, 0x7c, 0xd1,
-	0x90, 0x7d, 0x32, 0xc0, 0x68, 0xe6, 0x86, 0xf4, 0xf2, 0xaa, 0x37, 0x38, 0x8f, 0x6f, 0xc0, 0x6c,
-	0xfe, 0xcc, 0x54, 0x06, 0x9a, 0x4c, 0xe0, 0xa5, 0xe7, 0x57, 0xc3, 0x73, 0x02, 0x26, 0xb8, 0x93,
-	0x98, 0x4f, 0x2b, 0x03, 0x73, 0x1a, 0xc0, 0xa4, 0x8d, 0xa1, 0x60, 0x89, 0x2f, 0x38, 0x35, 0x72,
-	0xfa, 0x7c, 0xc1, 0x49, 0x64, 0xbf, 0x2f, 0x38, 0x7f, 0x32, 0x88, 0x16, 0x98, 0x4c, 0x8e, 0x85,
-	0x47, 0x85, 0x26, 0x12, 0x38, 0x49, 0x19, 0x0e, 0x17, 0x3b, 0x92, 0x6e, 0x7c, 0x7b, 0x79, 0xb6,
-	0x26, 0xec, 0x7c, 0xfa, 0xfe, 0xbc, 0x2a, 0x7c, 0x38, 0xaf, 0x0a, 0x7f, 0x9e, 0x57, 0x85, 0x1f,
-	0x2e, 0xaa, 0xd7, 0x3e, 0x5c, 0x54, 0xaf, 0xfd, 0x71, 0x51, 0xbd, 0xf6, 0x45, 0xcd, 0xb2, 0xe9,
-	0x51, 0xab, 0xa1, 0x18, 0xd8, 0x51, 0x63, 0xd3, 0x1b, 0x9e, 0x8f, 0xdf, 0x22, 0x83, 0x76, 0x05,
-	0x81, 0x2f, 0xf5, 0xa4, 0x3b, 0x81, 0x68, 0xc7, 0x43, 0xa4, 0x31, 0xce, 0x56, 0xfe, 0xa7, 0x7f,
-	0x07, 0x00, 0x00, 0xff, 0xff, 0x5f, 0xf5, 0x2e, 0x9a, 0x70, 0x12, 0x00, 0x00,
+	// 1458 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xb4, 0x57, 0x31, 0x73, 0xdc, 0x54,
+	0x10, 0x8e, 0x62, 0xc7, 0x89, 0x37, 0xd8, 0x3e, 0x2b, 0x8e, 0x7d, 0x56, 0x9c, 0xc3, 0x28, 0x89,
+	0x71, 0x8c, 0xad, 0x4b, 0x9c, 0x90, 0x84, 0xeb, 0xec, 0x54, 0x9e, 0xcc, 0x11, 0x8f, 0x4c, 0x98,
+	0x81, 0x61, 0x46, 0xc8, 0xba, 0x67, 0x59, 0xe1, 0xa4, 0xa7, 0xd1, 0x7b, 0x77, 0xf6, 0x55, 0x30,
+	0x99, 0xa1, 0x09, 0x05, 0x94, 0x54, 0x14, 0x50, 0xd2, 0xa4, 0xa0, 0xa0, 0x64, 0xa8, 0x32, 0x54,
+	0x29, 0x29, 0x99, 0xa4, 0xc8, 0x1f, 0x80, 0x9e, 0xd1, 0x93, 0xf4, 0xee, 0x24, 0x3d, 0xdd, 0x9d,
+	0x0f, 0xd2, 0x78, 0xf4, 0x76, 0xbf, 0xb7, 0xfb, 0xed, 0xdb, 0xf5, 0xee, 0x1e, 0x5c, 0xa6, 0x47,
+	0x4e, 0xd3, 0xb1, 0x0f, 0x69, 0xd5, 0xc2, 0x01, 0x22, 0x4d, 0x4c, 0xab, 0xed, 0x9b, 0x55, 0x7a,
+	0xac, 0xf9, 0x01, 0xa6, 0x58, 0x9e, 0x4b, 0xd4, 0x5a, 0xa2, 0xd6, 0xda, 0x37, 0x95, 0x59, 0xd3,
+	0x75, 0x3c, 0x5c, 0x65, 0x7f, 0x23, 0xa0, 0xb2, 0x60, 0x61, 0xe2, 0x62, 0x52, 0x75, 0x89, 0x1d,
+	0x1a, 0x70, 0x89, 0x1d, 0x2b, 0x16, 0x6d, 0x8c, 0xed, 0x26, 0xaa, 0xb2, 0xd3, 0x7e, 0xeb, 0xa0,
+	0x6a, 0x7a, 0x9d, 0x44, 0x15, 0xdd, 0x31, 0xd8, 0xa9, 0x1a, 0x1d, 0x62, 0xd5, 0x15, 0x21, 0x2d,
+	0xce, 0x81, 0x81, 0xd4, 0x27, 0x12, 0xcc, 0xef, 0x78, 0x0e, 0x75, 0xcc, 0xe6, 0x1e, 0x6a, 0x22,
+	0x8b, 0x3a, 0xd8, 0xdb, 0xc5, 0x4d, 0xc7, 0xea, 0xc8, 0xeb, 0x20, 0x93, 0x44, 0x64, 0x04, 0x26,
+	0x45, 0xc6, 0xbe, 0x4f, 0xca, 0xd2, 0xb2, 0xb4, 0x3a, 0xae, 0x97, 0xb8, 0x46, 0x37, 0x29, 0xda,
+	0xf6, 0x89, 0x5c, 0x83, 0x45, 0xd7, 0x3c, 0x36, 0x22, 0x39, 0x6a, 0x18, 0xbe, 0x19, 0x50, 0xc7,
+	0x72, 0x7c, 0xd3, 0xa3, 0xa4, 0x7c, 0x9a, 0x5d, 0x5a, 0x70, 0xcd, 0xe3, 0xbd, 0x58, 0xbf, 0xdb,
+	0xa3, 0x56, 0xff, 0x19, 0x83, 0x0b, 0x75, 0x62, 0xeb, 0xc8, 0x76, 0x08, 0x45, 0xc1, 0x7d, 0x1c,
+	0xa0, 0xbd, 0x26, 0xa6, 0xf2, 0x12, 0x4c, 0x9a, 0x2d, 0x7a, 0x88, 0x03, 0x87, 0x76, 0x98, 0xe3,
+	0x49, 0xbd, 0x2b, 0x90, 0xaf, 0x43, 0x09, 0xfb, 0x28, 0x30, 0x29, 0x0e, 0x0c, 0xb3, 0xd1, 0x08,
+	0x10, 0x89, 0x1c, 0x4d, 0xea, 0x33, 0x89, 0x7c, 0x2b, 0x12, 0xcb, 0x9f, 0x40, 0xc9, 0xc2, 0x1e,
+	0x41, 0x1e, 0x69, 0x11, 0xc3, 0x6f, 0xed, 0x7f, 0x81, 0x3a, 0xe5, 0xb1, 0x65, 0x69, 0xf5, 0xfc,
+	0xe6, 0x9c, 0x16, 0xbd, 0xad, 0x96, 0xbc, 0xad, 0xb6, 0xe5, 0x75, 0xb6, 0xcb, 0x7f, 0xfc, 0xb2,
+	0x31, 0x17, 0x3f, 0xa6, 0x15, 0x74, 0x7c, 0x8a, 0xb5, 0xdd, 0xd6, 0xfe, 0x03, 0xd4, 0xd1, 0x67,
+	0xb8, 0x9d, 0x5d, 0x66, 0x46, 0xbe, 0x06, 0xd3, 0xbe, 0xd9, 0xc1, 0x2d, 0xca, 0x39, 0x8c, 0x33,
+	0x0e, 0x53, 0x91, 0x34, 0x61, 0xb0, 0x0d, 0xe7, 0x5c, 0x44, 0xcd, 0x86, 0x49, 0xcd, 0xf2, 0x19,
+	0xe6, 0x79, 0x45, 0x13, 0xd5, 0x85, 0xf6, 0x30, 0xa6, 0x5e, 0x8f, 0xd1, 0x3a, 0xbf, 0x27, 0x6f,
+	0x84, 0x09, 0xa1, 0xb4, 0x89, 0x5c, 0xe4, 0x75, 0xdd, 0x4d, 0x30, 0x77, 0xb3, 0x5d, 0x4d, 0xe2,
+	0xf2, 0x00, 0xca, 0x4e, 0x94, 0x59, 0xa3, 0x9b, 0x47, 0x9f, 0xe5, 0xb6, 0x7c, 0x96, 0x51, 0x58,
+	0x17, 0x53, 0x10, 0xd7, 0x83, 0x3e, 0xef, 0x08, 0xe5, 0xb5, 0x7b, 0x4f, 0x5e, 0x3f, 0x5b, 0xeb,
+	0xe6, 0xe5, 0xe9, 0xeb, 0x67, 0x6b, 0xd7, 0xf2, 0xa5, 0x27, 0xc8, 0xaf, 0x7a, 0x07, 0x2e, 0x09,
+	0xc4, 0x3a, 0x22, 0x7e, 0xf8, 0xc8, 0xf2, 0x02, 0x9c, 0x0d, 0xaf, 0x1a, 0x4e, 0x23, 0xae, 0xba,
+	0x89, 0xf0, 0xb8, 0xd3, 0x50, 0x3f, 0x63, 0xe5, 0xb2, 0x65, 0x51, 0xa7, 0x6d, 0x52, 0x34, 0x64,
+	0xb9, 0xf4, 0x58, 0x3b, 0xdd, 0x6b, 0xad, 0x36, 0x9d, 0xe6, 0xaf, 0x5e, 0x66, 0xac, 0xb2, 0xd6,
+	0x13, 0x56, 0xea, 0xf7, 0x12, 0x5c, 0xac, 0x13, 0x7b, 0xc7, 0x33, 0xb3, 0xfe, 0x37, 0xe1, 0x22,
+	0xb7, 0x62, 0xe0, 0xc0, 0x48, 0xaa, 0x30, 0xe6, 0x72, 0x81, 0x2b, 0x1f, 0x06, 0x49, 0x96, 0x0b,
+	0x59, 0xc9, 0xf3, 0x30, 0x11, 0x20, 0x93, 0x60, 0x8f, 0x15, 0xea, 0xa4, 0x1e, 0x9f, 0x6a, 0x4a,
+	0xc8, 0x56, 0xec, 0x47, 0x7d, 0x1b, 0x2e, 0x0b, 0x99, 0x71, 0xee, 0x3f, 0x4a, 0x20, 0xd7, 0x89,
+	0xbd, 0xd7, 0x22, 0x3e, 0xf2, 0x1a, 0xff, 0xf1, 0xe1, 0x8a, 0x28, 0x86, 0x75, 0x8a, 0xda, 0x4e,
+	0x03, 0x79, 0x16, 0x32, 0x02, 0x74, 0x80, 0x82, 0xf0, 0x2b, 0xfe, 0xb7, 0x98, 0x4d, 0x34, 0x7a,
+	0xa2, 0xc8, 0xbd, 0xff, 0x12, 0x28, 0x79, 0x8e, 0x3c, 0x84, 0x00, 0x66, 0x59, 0xcd, 0xb8, 0xb8,
+	0x8d, 0xde, 0x50, 0x00, 0x39, 0x46, 0x97, 0x60, 0x31, 0xe7, 0x93, 0x13, 0xfa, 0x2d, 0xaa, 0x07,
+	0x1d, 0x53, 0xf6, 0xe2, 0x71, 0x77, 0x78, 0x80, 0x3a, 0xa3, 0xb2, 0xfa, 0x1c, 0xe6, 0x3c, 0x74,
+	0x64, 0xfc, 0x4f, 0x0d, 0x4b, 0xf6, 0xd0, 0xd1, 0xfd, 0x74, 0xcf, 0xca, 0xc5, 0x17, 0xd5, 0x4d,
+	0x3e, 0x02, 0x1e, 0xe3, 0x53, 0x09, 0xe6, 0xeb, 0xc4, 0x7e, 0xe4, 0x37, 0x4c, 0x8a, 0x76, 0x53,
+	0x8d, 0x4d, 0x81, 0x73, 0x99, 0x3a, 0xe7, 0xe7, 0xe2, 0x10, 0xd7, 0x21, 0xa4, 0x65, 0x64, 0x1a,
+	0x67, 0x94, 0x84, 0x92, 0x87, 0x8e, 0x52, 0x2e, 0x6a, 0x53, 0x21, 0x5d, 0x6e, 0x55, 0x5d, 0x86,
+	0x8a, 0x98, 0x0b, 0xa7, 0xfb, 0x93, 0xc4, 0x12, 0x16, 0x41, 0xb2, 0x0d, 0x75, 0x34, 0xc6, 0xbd,
+	0xfd, 0x7b, 0x6c, 0xb4, 0xfe, 0x9d, 0x8d, 0xe3, 0x0a, 0xbc, 0x53, 0x48, 0x92, 0x87, 0xf2, 0xad,
+	0xc4, 0xfe, 0x1b, 0x22, 0xd4, 0x5e, 0xae, 0xc7, 0x8f, 0x14, 0x8b, 0x78, 0x8e, 0x8c, 0x15, 0xcc,
+	0x91, 0x2c, 0xed, 0xab, 0xa0, 0x16, 0x13, 0xe2, 0xbc, 0x9f, 0x4b, 0x50, 0xee, 0x81, 0xa5, 0x37,
+	0x8b, 0x51, 0x6b, 0x46, 0xb0, 0x8e, 0x8c, 0x8d, 0xb2, 0x8e, 0x8c, 0xf7, 0x5d, 0x47, 0xb2, 0x01,
+	0xef, 0xc0, 0x72, 0x51, 0x24, 0x7c, 0x54, 0x85, 0x5b, 0x00, 0x93, 0x18, 0x6d, 0x14, 0x10, 0x07,
+	0x7b, 0xf1, 0xc4, 0x9a, 0x8a, 0xa4, 0x1f, 0x47, 0x42, 0xf5, 0x77, 0x09, 0xe6, 0xea, 0xc4, 0xfe,
+	0x10, 0xbb, 0x8e, 0x67, 0x52, 0xb4, 0xc5, 0x9b, 0x41, 0xff, 0x56, 0x71, 0x17, 0xc6, 0x03, 0xdc,
+	0x44, 0xec, 0x41, 0xa6, 0x37, 0xaf, 0x88, 0x0b, 0x8f, 0x1b, 0xd3, 0x71, 0x13, 0xe9, 0xec, 0x82,
+	0x5c, 0x86, 0xb3, 0x5e, 0xe8, 0x0b, 0xa1, 0x38, 0xbd, 0xc9, 0xb1, 0xf6, 0x41, 0x7e, 0x68, 0xaf,
+	0x08, 0x87, 0x76, 0x8e, 0xab, 0x5a, 0x81, 0x25, 0x91, 0x9c, 0xa7, 0xfe, 0x87, 0x68, 0xc8, 0x6c,
+	0x59, 0x16, 0xf2, 0x69, 0x37, 0xc4, 0x1e, 0x2e, 0x52, 0x8a, 0xcb, 0xc8, 0xe1, 0xd5, 0xde, 0x0f,
+	0x83, 0x48, 0xcc, 0x84, 0x21, 0x5c, 0x15, 0x86, 0x90, 0x61, 0x12, 0x0f, 0x98, 0x8c, 0x94, 0xd3,
+	0xff, 0x55, 0x62, 0xf1, 0xdd, 0x37, 0x3d, 0x0b, 0x35, 0xb9, 0x3a, 0x0e, 0xd7, 0xc1, 0xde, 0x1b,
+	0xca, 0x55, 0x6d, 0x2b, 0x9f, 0x11, 0x4d, 0x18, 0x4e, 0x21, 0x33, 0x75, 0x05, 0xae, 0xf6, 0xd3,
+	0xf3, 0x10, 0x5b, 0x30, 0xd3, 0xd3, 0x41, 0x03, 0xd3, 0x25, 0x03, 0x82, 0xba, 0x0d, 0x13, 0x3e,
+	0xc3, 0xb1, 0xb0, 0xce, 0x6f, 0x2e, 0x89, 0xc3, 0x8a, 0x6c, 0xe9, 0x31, 0x36, 0x37, 0x66, 0x16,
+	0x61, 0x21, 0xe3, 0x96, 0x33, 0xfa, 0x39, 0x5e, 0x4c, 0xac, 0x43, 0xd4, 0x68, 0x35, 0xd1, 0x23,
+	0xdf, 0x0e, 0xcc, 0x06, 0x1a, 0xc0, 0x4a, 0x86, 0x71, 0xcf, 0x74, 0x51, 0xbc, 0xf4, 0xb3, 0xef,
+	0x70, 0xa4, 0x1f, 0xa2, 0x90, 0x18, 0x2b, 0xf8, 0x31, 0x3d, 0x3e, 0x85, 0x58, 0xc7, 0x3b, 0xc0,
+	0xf1, 0x16, 0xc2, 0xbe, 0x6b, 0x77, 0xf3, 0x2f, 0x2e, 0x2e, 0xa0, 0x0c, 0xad, 0x64, 0x43, 0x49,
+	0x4b, 0x79, 0x2c, 0x36, 0x94, 0x78, 0x16, 0x86, 0x0a, 0x24, 0xaa, 0xe3, 0x34, 0x11, 0xb5, 0x4f,
+	0xea, 0x13, 0x1a, 0x0a, 0x6b, 0xb1, 0x29, 0x59, 0x42, 0x62, 0xf3, 0xef, 0x69, 0x18, 0xab, 0x13,
+	0x5b, 0xf6, 0xa1, 0x94, 0xfb, 0x59, 0x75, 0x5d, 0x9c, 0x3d, 0xc1, 0x2a, 0xae, 0xdc, 0x1c, 0x1a,
+	0xca, 0x5b, 0xa1, 0x0f, 0xa5, 0xdc, 0x66, 0x5e, 0xec, 0x31, 0x0b, 0xed, 0xe3, 0xb1, 0x68, 0x23,
+	0x97, 0xdb, 0x20, 0x0b, 0xb6, 0xf1, 0xf7, 0x0a, 0x0d, 0xe5, 0xc1, 0xca, 0xad, 0x13, 0x80, 0xb9,
+	0x5f, 0x17, 0x66, 0xb2, 0x9b, 0xf4, 0x6a, 0xa1, 0x9d, 0x0c, 0x52, 0xb9, 0x31, 0x2c, 0x92, 0xbb,
+	0x7b, 0x0c, 0xd3, 0x99, 0xb5, 0xf7, 0xdd, 0x3e, 0xd9, 0xe9, 0x05, 0x2a, 0xd5, 0x21, 0x81, 0xbd,
+	0x4f, 0x2a, 0x58, 0x68, 0x8b, 0x9f, 0x34, 0x0f, 0xee, 0xf3, 0xa4, 0xc5, 0x8b, 0xa6, 0xdc, 0x81,
+	0x0b, 0xa2, 0x25, 0x73, 0xbd, 0xd0, 0x96, 0x00, 0xad, 0xdc, 0x3e, 0x09, 0x9a, 0xbb, 0x7e, 0x22,
+	0xc1, 0x7c, 0xc1, 0xc6, 0x58, 0x1d, 0x60, 0x30, 0x7b, 0x41, 0xb9, 0x7b, 0xc2, 0x0b, 0x9c, 0xc4,
+	0xd7, 0x12, 0x2c, 0x14, 0xed, 0x7a, 0x37, 0x06, 0x18, 0xcd, 0xdd, 0x50, 0xee, 0x9d, 0xf4, 0x06,
+	0xe7, 0xf1, 0x25, 0x5c, 0x14, 0xaf, 0x6e, 0xda, 0x40, 0x93, 0x29, 0xbc, 0x72, 0xe7, 0x64, 0x78,
+	0x4e, 0xa0, 0x01, 0x6f, 0xa5, 0xe6, 0xd3, 0xb5, 0x81, 0x39, 0x0d, 0x61, 0xca, 0xc6, 0x50, 0x30,
+	0xee, 0x85, 0xc0, 0x6c, 0x7e, 0x17, 0x5b, 0x2b, 0xb4, 0x91, 0xc3, 0x2a, 0x9b, 0xc3, 0x63, 0x7b,
+	0xdb, 0x46, 0x76, 0x37, 0x5a, 0xed, 0xd3, 0xf4, 0x52, 0xc8, 0x3e, 0x6d, 0xa3, 0x60, 0x9f, 0x91,
+	0xbf, 0x91, 0x60, 0xb1, 0x78, 0x99, 0x29, 0x0e, 0xa0, 0xf0, 0x8e, 0x52, 0x3b, 0xf9, 0x9d, 0x54,
+	0xcf, 0xcc, 0x0c, 0xf9, 0x3e, 0x3d, 0x33, 0x8d, 0xec, 0xd7, 0x33, 0xc5, 0xb3, 0x58, 0xb6, 0x61,
+	0x2a, 0x3d, 0x88, 0x57, 0x06, 0x70, 0x4f, 0x5c, 0x69, 0xc3, 0xe1, 0x12, 0x47, 0xca, 0x99, 0xaf,
+	0x5e, 0x3f, 0x5b, 0x93, 0xb6, 0x3f, 0x7a, 0xfe, 0xb2, 0x22, 0xbd, 0x78, 0x59, 0x91, 0xfe, 0x7a,
+	0x59, 0x91, 0xbe, 0x7b, 0x55, 0x39, 0xf5, 0xe2, 0x55, 0xe5, 0xd4, 0x9f, 0xaf, 0x2a, 0xa7, 0x3e,
+	0xad, 0xd9, 0x0e, 0x3d, 0x6c, 0xed, 0x6b, 0x16, 0x76, 0xab, 0x89, 0xe9, 0x0d, 0x3f, 0xc0, 0x8f,
+	0x91, 0x45, 0xbb, 0x82, 0xd0, 0x57, 0xf5, 0xb8, 0x3b, 0xf3, 0x69, 0xc7, 0x47, 0x64, 0x7f, 0x82,
+	0xfd, 0xd6, 0xbf, 0xf5, 0x6f, 0x00, 0x00, 0x00, 0xff, 0xff, 0xc8, 0xa9, 0xfd, 0x2f, 0x69, 0x16,
+	0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -1538,6 +1837,12 @@ type MsgClient interface {
 	UpdateSettlementAddress(ctx context.Context, in *MsgUpdateSettlementAddress, opts ...grpc.CallOption) (*MsgUpdateSettlementAddressResponse, error)
 	UpdateSelectionPolicy(ctx context.Context, in *MsgUpdateSelectionPolicy, opts ...grpc.CallOption) (*MsgUpdateSelectionPolicyResponse, error)
 	UpdateParams(ctx context.Context, in *MsgUpdateParams, opts ...grpc.CallOption) (*MsgUpdateParamsResponse, error)
+	// Authority rotation is a two-step handover, deliberately separate from
+	// UpdateParams: a routine parameter edit must not be able to end governance,
+	// and a destination must prove it holds the key before it becomes authority.
+	NominateAuthority(ctx context.Context, in *MsgNominateAuthority, opts ...grpc.CallOption) (*MsgNominateAuthorityResponse, error)
+	AcceptAuthority(ctx context.Context, in *MsgAcceptAuthority, opts ...grpc.CallOption) (*MsgAcceptAuthorityResponse, error)
+	CancelAuthorityNomination(ctx context.Context, in *MsgCancelAuthorityNomination, opts ...grpc.CallOption) (*MsgCancelAuthorityNominationResponse, error)
 	// ScheduleUpgrade and CancelUpgrade are the ONLY path to this chain's
 	// x/upgrade module.
 	//
@@ -1663,6 +1968,33 @@ func (c *msgClient) UpdateParams(ctx context.Context, in *MsgUpdateParams, opts 
 	return out, nil
 }
 
+func (c *msgClient) NominateAuthority(ctx context.Context, in *MsgNominateAuthority, opts ...grpc.CallOption) (*MsgNominateAuthorityResponse, error) {
+	out := new(MsgNominateAuthorityResponse)
+	err := c.cc.Invoke(ctx, "/twilight.coreslot.v1.Msg/NominateAuthority", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) AcceptAuthority(ctx context.Context, in *MsgAcceptAuthority, opts ...grpc.CallOption) (*MsgAcceptAuthorityResponse, error) {
+	out := new(MsgAcceptAuthorityResponse)
+	err := c.cc.Invoke(ctx, "/twilight.coreslot.v1.Msg/AcceptAuthority", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) CancelAuthorityNomination(ctx context.Context, in *MsgCancelAuthorityNomination, opts ...grpc.CallOption) (*MsgCancelAuthorityNominationResponse, error) {
+	out := new(MsgCancelAuthorityNominationResponse)
+	err := c.cc.Invoke(ctx, "/twilight.coreslot.v1.Msg/CancelAuthorityNomination", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *msgClient) ScheduleUpgrade(ctx context.Context, in *MsgScheduleUpgrade, opts ...grpc.CallOption) (*MsgScheduleUpgradeResponse, error) {
 	out := new(MsgScheduleUpgradeResponse)
 	err := c.cc.Invoke(ctx, "/twilight.coreslot.v1.Msg/ScheduleUpgrade", in, out, opts...)
@@ -1694,6 +2026,12 @@ type MsgServer interface {
 	UpdateSettlementAddress(context.Context, *MsgUpdateSettlementAddress) (*MsgUpdateSettlementAddressResponse, error)
 	UpdateSelectionPolicy(context.Context, *MsgUpdateSelectionPolicy) (*MsgUpdateSelectionPolicyResponse, error)
 	UpdateParams(context.Context, *MsgUpdateParams) (*MsgUpdateParamsResponse, error)
+	// Authority rotation is a two-step handover, deliberately separate from
+	// UpdateParams: a routine parameter edit must not be able to end governance,
+	// and a destination must prove it holds the key before it becomes authority.
+	NominateAuthority(context.Context, *MsgNominateAuthority) (*MsgNominateAuthorityResponse, error)
+	AcceptAuthority(context.Context, *MsgAcceptAuthority) (*MsgAcceptAuthorityResponse, error)
+	CancelAuthorityNomination(context.Context, *MsgCancelAuthorityNomination) (*MsgCancelAuthorityNominationResponse, error)
 	// ScheduleUpgrade and CancelUpgrade are the ONLY path to this chain's
 	// x/upgrade module.
 	//
@@ -1748,6 +2086,15 @@ func (*UnimplementedMsgServer) UpdateSelectionPolicy(ctx context.Context, req *M
 }
 func (*UnimplementedMsgServer) UpdateParams(ctx context.Context, req *MsgUpdateParams) (*MsgUpdateParamsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateParams not implemented")
+}
+func (*UnimplementedMsgServer) NominateAuthority(ctx context.Context, req *MsgNominateAuthority) (*MsgNominateAuthorityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NominateAuthority not implemented")
+}
+func (*UnimplementedMsgServer) AcceptAuthority(ctx context.Context, req *MsgAcceptAuthority) (*MsgAcceptAuthorityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AcceptAuthority not implemented")
+}
+func (*UnimplementedMsgServer) CancelAuthorityNomination(ctx context.Context, req *MsgCancelAuthorityNomination) (*MsgCancelAuthorityNominationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelAuthorityNomination not implemented")
 }
 func (*UnimplementedMsgServer) ScheduleUpgrade(ctx context.Context, req *MsgScheduleUpgrade) (*MsgScheduleUpgradeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ScheduleUpgrade not implemented")
@@ -1958,6 +2305,60 @@ func _Msg_UpdateParams_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Msg_NominateAuthority_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgNominateAuthority)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).NominateAuthority(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/twilight.coreslot.v1.Msg/NominateAuthority",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).NominateAuthority(ctx, req.(*MsgNominateAuthority))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_AcceptAuthority_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgAcceptAuthority)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).AcceptAuthority(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/twilight.coreslot.v1.Msg/AcceptAuthority",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).AcceptAuthority(ctx, req.(*MsgAcceptAuthority))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_CancelAuthorityNomination_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgCancelAuthorityNomination)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).CancelAuthorityNomination(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/twilight.coreslot.v1.Msg/CancelAuthorityNomination",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).CancelAuthorityNomination(ctx, req.(*MsgCancelAuthorityNomination))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Msg_ScheduleUpgrade_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MsgScheduleUpgrade)
 	if err := dec(in); err != nil {
@@ -2041,6 +2442,18 @@ var _Msg_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateParams",
 			Handler:    _Msg_UpdateParams_Handler,
+		},
+		{
+			MethodName: "NominateAuthority",
+			Handler:    _Msg_NominateAuthority_Handler,
+		},
+		{
+			MethodName: "AcceptAuthority",
+			Handler:    _Msg_AcceptAuthority_Handler,
+		},
+		{
+			MethodName: "CancelAuthorityNomination",
+			Handler:    _Msg_CancelAuthorityNomination_Handler,
 		},
 		{
 			MethodName: "ScheduleUpgrade",
@@ -2806,6 +3219,187 @@ func (m *MsgUpdateSelectionPolicyResponse) MarshalToSizedBuffer(dAtA []byte) (in
 	return len(dAtA) - i, nil
 }
 
+func (m *MsgNominateAuthority) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgNominateAuthority) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgNominateAuthority) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Nominee) > 0 {
+		i -= len(m.Nominee)
+		copy(dAtA[i:], m.Nominee)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Nominee)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if m.Role != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.Role))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgNominateAuthorityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgNominateAuthorityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgNominateAuthorityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgAcceptAuthority) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgAcceptAuthority) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgAcceptAuthority) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Role != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.Role))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Nominee) > 0 {
+		i -= len(m.Nominee)
+		copy(dAtA[i:], m.Nominee)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Nominee)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgAcceptAuthorityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgAcceptAuthorityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgAcceptAuthorityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgCancelAuthorityNomination) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgCancelAuthorityNomination) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgCancelAuthorityNomination) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Role != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.Role))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgCancelAuthorityNominationResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgCancelAuthorityNominationResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgCancelAuthorityNominationResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
 func (m *MsgUpdateParams) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -3334,6 +3928,85 @@ func (m *MsgUpdateSelectionPolicyResponse) Size() (n int) {
 	if m.PolicyVersion != 0 {
 		n += 1 + sovTx(uint64(m.PolicyVersion))
 	}
+	return n
+}
+
+func (m *MsgNominateAuthority) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.Role != 0 {
+		n += 1 + sovTx(uint64(m.Role))
+	}
+	l = len(m.Nominee)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgNominateAuthorityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgAcceptAuthority) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Nominee)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.Role != 0 {
+		n += 1 + sovTx(uint64(m.Role))
+	}
+	return n
+}
+
+func (m *MsgAcceptAuthorityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgCancelAuthorityNomination) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.Role != 0 {
+		n += 1 + sovTx(uint64(m.Role))
+	}
+	return n
+}
+
+func (m *MsgCancelAuthorityNominationResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
 	return n
 }
 
@@ -5526,6 +6199,491 @@ func (m *MsgUpdateSelectionPolicyResponse) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgNominateAuthority) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgNominateAuthority: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgNominateAuthority: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Role", wireType)
+			}
+			m.Role = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Role |= AuthorityRole(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Nominee", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Nominee = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgNominateAuthorityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgNominateAuthorityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgNominateAuthorityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgAcceptAuthority) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgAcceptAuthority: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgAcceptAuthority: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Nominee", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Nominee = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Role", wireType)
+			}
+			m.Role = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Role |= AuthorityRole(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgAcceptAuthorityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgAcceptAuthorityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgAcceptAuthorityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgCancelAuthorityNomination) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgCancelAuthorityNomination: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgCancelAuthorityNomination: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Role", wireType)
+			}
+			m.Role = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Role |= AuthorityRole(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgCancelAuthorityNominationResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgCancelAuthorityNominationResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgCancelAuthorityNominationResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])

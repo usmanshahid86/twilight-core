@@ -182,3 +182,31 @@ func emitUpgradeCanceled(ctx context.Context, authority, name string) {
 		sdk.NewAttribute(types.AttributeKeyUpgradeName, name),
 	)
 }
+
+// The nomination event is the audit record of who nominated whom. The pending
+// state deliberately does not store the nominating address — the incumbent is
+// still in Params until acceptance, so persisting it would create a second copy
+// of a value the chain already holds.
+func emitAuthorityNominated(ctx context.Context, role types.AuthorityRole, authority, nominee string) {
+	emit(ctx, types.EventTypeAuthorityNominated,
+		sdk.NewAttribute(types.AttributeKeyAuthorityRole, role.String()),
+		sdk.NewAttribute(types.AttributeKeyAuthority, authority),
+		sdk.NewAttribute(types.AttributeKeyNominee, nominee),
+	)
+}
+
+func emitAuthorityAccepted(ctx context.Context, role types.AuthorityRole, previous, nominee string) {
+	emit(ctx, types.EventTypeAuthorityAccepted,
+		sdk.NewAttribute(types.AttributeKeyAuthorityRole, role.String()),
+		sdk.NewAttribute(types.AttributeKeyPreviousAuthority, previous),
+		sdk.NewAttribute(types.AttributeKeyAuthority, nominee),
+	)
+}
+
+func emitAuthorityNominationCancelled(ctx context.Context, role types.AuthorityRole, authority, nominee string) {
+	emit(ctx, types.EventTypeAuthorityNominationCancelled,
+		sdk.NewAttribute(types.AttributeKeyAuthorityRole, role.String()),
+		sdk.NewAttribute(types.AttributeKeyAuthority, authority),
+		sdk.NewAttribute(types.AttributeKeyNominee, nominee),
+	)
+}

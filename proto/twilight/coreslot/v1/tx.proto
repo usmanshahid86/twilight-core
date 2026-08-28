@@ -22,6 +22,12 @@ service Msg {
   rpc UpdateSettlementAddress(MsgUpdateSettlementAddress) returns (MsgUpdateSettlementAddressResponse);
   rpc UpdateSelectionPolicy(MsgUpdateSelectionPolicy) returns (MsgUpdateSelectionPolicyResponse);
   rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+  // Authority rotation is a two-step handover, deliberately separate from
+  // UpdateParams: a routine parameter edit must not be able to end governance,
+  // and a destination must prove it holds the key before it becomes authority.
+  rpc NominateAuthority(MsgNominateAuthority) returns (MsgNominateAuthorityResponse);
+  rpc AcceptAuthority(MsgAcceptAuthority) returns (MsgAcceptAuthorityResponse);
+  rpc CancelAuthorityNomination(MsgCancelAuthorityNomination) returns (MsgCancelAuthorityNominationResponse);
 
   // ScheduleUpgrade and CancelUpgrade are the ONLY path to this chain's
   // x/upgrade module.
@@ -146,6 +152,40 @@ message MsgUpdateSelectionPolicy {
 message MsgUpdateSelectionPolicyResponse {
   uint64 policy_version = 1;
 }
+
+// MsgNominateAuthority records a successor for one role. It does NOT change the
+// effective authority: the incumbent keeps every capability until the nominee
+// accepts. Signed by the CURRENT holder of the named role.
+message MsgNominateAuthority {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "twilight/coreslot/MsgNominateAuthority";
+  string authority = 1;
+  AuthorityRole role = 2;
+  string nominee = 3;
+}
+message MsgNominateAuthorityResponse {}
+
+// MsgAcceptAuthority completes a handover. Signed by the NOMINEE, which is what
+// proves the destination key exists and is controlled — the property that makes
+// a wrong-but-valid address harmless rather than terminal.
+message MsgAcceptAuthority {
+  option (cosmos.msg.v1.signer) = "nominee";
+  option (amino.name) = "twilight/coreslot/MsgAcceptAuthority";
+  string nominee = 1;
+  AuthorityRole role = 2;
+}
+message MsgAcceptAuthorityResponse {}
+
+// MsgCancelAuthorityNomination withdraws a pending nomination. Signed by the
+// current holder of the role, which is what makes a mistaken nomination
+// correctable while it is still pending.
+message MsgCancelAuthorityNomination {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "twilight/coreslot/MsgCancelAuthorityNomination";
+  string authority = 1;
+  AuthorityRole role = 2;
+}
+message MsgCancelAuthorityNominationResponse {}
 
 message MsgUpdateParams {
   option (cosmos.msg.v1.signer) = "authority";

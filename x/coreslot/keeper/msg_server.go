@@ -639,6 +639,24 @@ func (m msgServer) UpdateParams(ctx context.Context, msg *types.MsgUpdateParams)
 	if msg.Authority != current.Authority {
 		return nil, types.ErrUnauthorized
 	}
+	// UpdateParams is no longer a rotation path. It writes the WHOLE Params
+	// struct, so editing max_active_slots meant re-supplying both authority
+	// fields correctly, and a wrong-but-valid address reaching either one ended
+	// governance irreversibly. Rotation now goes through nominate/accept, where
+	// the destination must prove it holds the key.
+	//
+	// A mismatch is REFUSED rather than silently overwritten with the current
+	// value. A caller submitting a stale parameter document would otherwise
+	// believe the document it sent was applied, and the field it got wrong is the
+	// one where being wrong is unrecoverable.
+	if msg.Params.Authority != current.Authority {
+		return nil, types.ErrInvalidParams.Wrap(
+			"authority cannot be changed through UpdateParams; use NominateAuthority and AcceptAuthority")
+	}
+	if msg.Params.EmergencyAuthority != current.EmergencyAuthority {
+		return nil, types.ErrInvalidParams.Wrap(
+			"emergency_authority cannot be changed through UpdateParams; use NominateAuthority and AcceptAuthority")
+	}
 	if err := msg.Params.Validate(); err != nil {
 		return nil, err
 	}

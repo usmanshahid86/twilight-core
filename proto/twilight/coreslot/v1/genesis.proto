@@ -18,4 +18,8 @@ message GenesisState {
   // are operator configuration and are not derivable, so they cannot be
   // synthesized by InitGenesis.
   repeated SelectionPolicyVersion selection_policies = 8;
+  // pending_authority_transfers carries nominations awaiting acceptance. A fresh
+  // genesis has none; they are exported so a captured state is complete, since a
+  // dropped nomination would silently strand a rotation mid-flight.
+  repeated PendingAuthorityTransferEntry pending_authority_transfers = 9;
 }

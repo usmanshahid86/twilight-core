@@ -124,6 +124,7 @@ func TestWireLedgersArePinned(t *testing.T) {
 			6: "last_applied_validators:repeated .twilight.coreslot.v1.LastAppliedValidator",
 			7: "next_slot_id:TYPE_UINT64",
 			8: "selection_policies:repeated .twilight.coreslot.v1.SelectionPolicyVersion",
+			9: "pending_authority_transfers:repeated .twilight.coreslot.v1.PendingAuthorityTransferEntry",
 		}},
 		{"MsgRegisterCoreSlot", &types.MsgRegisterCoreSlot{}, fieldLedger{
 			1: "authority:TYPE_STRING",

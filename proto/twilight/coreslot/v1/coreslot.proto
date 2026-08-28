@@ -15,6 +15,37 @@ enum SlotStatus {
   SLOT_STATUS_REMOVED = 5;
 }
 
+// AuthorityRole names the two operational authority roles carried in Params.
+//
+// Both are ordinary signable account addresses, NOT the module accounts supplied
+// to x/upgrade, bank and consensus. A module account in either field is
+// unspendable, so installing one permanently removes the capability that field
+// gates.
+enum AuthorityRole {
+  AUTHORITY_ROLE_UNSPECIFIED = 0;
+  AUTHORITY_ROLE_PRIMARY = 1;
+  AUTHORITY_ROLE_EMERGENCY = 2;
+}
+
+// PendingAuthorityTransfer is a nomination awaiting acceptance by its nominee.
+//
+// It deliberately carries neither the role nor the nominating address. The role
+// is the collection key, so storing it here too would create two places that
+// could disagree; the incumbent remains in Params until acceptance, so recording
+// it here would duplicate a value the chain already holds. Auditability of who
+// nominated whom comes from the event emitted at nomination.
+message PendingAuthorityTransfer {
+  string nominee = 1;
+  int64 nominated_height = 2;
+}
+
+// PendingAuthorityTransferEntry pairs a transfer with its role for genesis,
+// where there is no collection key to carry it.
+message PendingAuthorityTransferEntry {
+  AuthorityRole role = 1;
+  PendingAuthorityTransfer transfer = 2;
+}
+
 message OperatorMetadata {
   string moniker = 1;
   string identity = 2;
