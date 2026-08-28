@@ -653,7 +653,10 @@ func TestGenesisValidateRejectsMalformedPendingTransfers(t *testing.T) {
 			[]*types.PendingAuthorityTransferEntry{entry(types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, addr(0x21), 0)},
 			"non-positive nominated height",
 		},
-		// The omitted-field path spelled out: an entry whose height was never set.
+		// The omitted-field path, as a hand-built zero. The JSON decode that
+		// produces it is exercised separately below, because the two are different
+		// claims: this one is about the validator, that one about how the value
+		// gets there.
 		"height field absent": {
 			[]*types.PendingAuthorityTransferEntry{{
 				Role:     types.AuthorityRole_AUTHORITY_ROLE_PRIMARY,
@@ -709,4 +712,42 @@ func TestGenesisPreflightRejectsInadmissiblePendingNominee(t *testing.T) {
 	// refused, which is what proves the check ran before the first write.
 	_, paramsErr := fresh.Params.Get(freshCtx)
 	require.Error(t, paramsErr, "a refused genesis must leave no params behind")
+}
+
+// The omitted-field path, decoded rather than constructed.
+//
+// The table above builds the zero value directly, which proves the validator
+// rejects it but not that an operator can actually produce one. This closes that
+// gap: proto3 JSON omits zero values, so a genesis document written by hand with
+// no nominated_height field decodes to 0 — and must be refused.
+//
+// Asserted through the real codec, because the claim is specifically about what
+// UnmarshalJSON does with an absent scalar.
+func TestOmittedNominatedHeightDecodesToZeroAndIsRejected(t *testing.T) {
+	cdc := authorityTestCodec()
+	nominee := addr(0x21)
+
+	// Exactly what a hand-written entry looks like when the author simply did not
+	// think about the height: role and nominee present, height absent.
+	raw := `{"role":"AUTHORITY_ROLE_PRIMARY","transfer":{"nominee":"` + nominee + `"}}`
+
+	var entry types.PendingAuthorityTransferEntry
+	require.NoError(t, cdc.UnmarshalJSON([]byte(raw), &entry),
+		"the document is well-formed; it is the VALUE that must be refused, not the syntax")
+
+	require.Equal(t, types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, entry.Role)
+	require.NotNil(t, entry.Transfer)
+	require.Equal(t, nominee, entry.Transfer.Nominee)
+	require.Zero(t, entry.Transfer.NominatedHeight,
+		"an omitted proto3 scalar decodes to zero, which is how this reaches genesis at all")
+
+	// And the whole document carrying it is refused.
+	_, k, ctx, _, _ := genesisAuthoritySetup(t)
+	genesis, err := k.ExportGenesis(ctx)
+	require.NoError(t, err)
+	genesis.PendingAuthorityTransfers = []*types.PendingAuthorityTransferEntry{&entry}
+
+	err = genesis.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-positive nominated height")
 }
