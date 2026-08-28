@@ -70,7 +70,7 @@ func registerCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		pk, err := pubKeyAny(args[3])
+		pk, err := txPubKeyAny(args[3])
 		if err != nil {
 			return err
 		}
@@ -201,7 +201,7 @@ func rotateCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		pk, err := pubKeyAny(args[1])
+		pk, err := txPubKeyAny(args[1])
 		if err != nil {
 			return err
 		}

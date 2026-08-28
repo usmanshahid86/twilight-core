@@ -407,3 +407,80 @@ func TestGenesisCLIToleratesAnAbsentValidatorsKey(t *testing.T) {
 		})
 	}
 }
+
+// TestGenesisCLIRejectsNonBareConsensusKeys pins the genesis authoring contract
+// to a bare base64 key, and proves a refusal leaves the document untouched.
+//
+// This is a regression, not a new rule. The transaction commands were widened to
+// accept the object `tendermint show-validator` prints, and to tolerate
+// surrounding whitespace, through a helper genesis authoring shared. Genesis
+// then decoded the widened input into the CoreSlot record while writing the
+// caller's ORIGINAL argument verbatim into the CometBFT validator entry — so for
+// any input the two steps did not agree on, `coreslot-genesis add` exited 0 and
+// produced a document whose two halves described different keys, caught only
+// later by `coreslot-genesis validate`.
+//
+// The transaction paths carry only the decoded key, so they have no second
+// representation to disagree with; genesis does. It therefore keeps the strict
+// helper, and this test fails if the two are ever merged again.
+func TestGenesisCLIRejectsNonBareConsensusKeys(t *testing.T) {
+	bare := testConsensusKeyB64()
+
+	for _, tc := range []struct{ name, key string }{
+		{
+			// Exactly what `twilightd tendermint show-validator` prints.
+			"show-validator JSON",
+			`{"@type":"/cosmos.crypto.ed25519.PubKey","key":"` + bare + `"}`,
+		},
+		{
+			// A valid key that only becomes acceptable if the input is trimmed.
+			// Genesis would write the padded string into the validator entry.
+			"bare key with surrounding whitespace",
+			"  " + bare + "\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			configDir := filepath.Join(home, "config")
+			require.NoError(t, os.MkdirAll(configDir, 0o755))
+
+			cdc := testCodec(t)
+			authority, emergency, operator, payout, settlement := testAddresses()
+			writeTestGenesis(t, configDir, cdc, types.DefaultGenesis(authority, emergency), `"1"`)
+
+			path := filepath.Join(configDir, "genesis.json")
+			before, err := os.ReadFile(path)
+			require.NoError(t, err)
+
+			require.Error(t,
+				runCLI(t, addGenesisSlotCmd(), home, cdc, operator, payout, settlement, tc.key, testMoniker),
+				"genesis add must refuse a key form it cannot write back verbatim")
+
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, before, after,
+				"a refused add must leave the genesis bytes byte-for-byte unchanged")
+		})
+	}
+}
+
+// TestGenesisCLIStillAcceptsABareConsensusKey is the other half of the test
+// above: the contract was narrowed back, not broken. The documented genesis
+// input — a bare base64 key, as scripts/localnet/gen-consensus-key.sh emits —
+// must still be admitted and must still produce a document that validates.
+func TestGenesisCLIStillAcceptsABareConsensusKey(t *testing.T) {
+	home := t.TempDir()
+	configDir := filepath.Join(home, "config")
+	require.NoError(t, os.MkdirAll(configDir, 0o755))
+
+	cdc := testCodec(t)
+	authority, emergency, operator, payout, settlement := testAddresses()
+	writeTestGenesis(t, configDir, cdc, types.DefaultGenesis(authority, emergency), `"1"`)
+
+	require.NoError(t, runCLI(t, addGenesisSlotCmd(), home, cdc,
+		operator, payout, settlement, testConsensusKeyB64(), testMoniker))
+
+	// The written document must be internally consistent, which is precisely what
+	// the divergent-representation bug produced but failed.
+	require.NoError(t, runCLI(t, validateGenesisCmd(), home, cdc))
+}
