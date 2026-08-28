@@ -203,8 +203,8 @@ func emitAuthorityAccepted(ctx context.Context, role types.AuthorityRole, previo
 	)
 }
 
-func emitAuthorityNominationCancelled(ctx context.Context, role types.AuthorityRole, authority, nominee string) {
-	emit(ctx, types.EventTypeAuthorityNominationCancelled,
+func emitAuthorityNominationCanceled(ctx context.Context, role types.AuthorityRole, authority, nominee string) {
+	emit(ctx, types.EventTypeAuthorityNominationCanceled,
 		sdk.NewAttribute(types.AttributeKeyAuthorityRole, role.String()),
 		sdk.NewAttribute(types.AttributeKeyAuthority, authority),
 		sdk.NewAttribute(types.AttributeKeyNominee, nominee),

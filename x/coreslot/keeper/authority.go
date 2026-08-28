@@ -28,7 +28,7 @@ import (
 //   - refusal of module-account, bank-blocked and all-zero destinations
 //   - separation of routine parameter editing from authority rotation, so an
 //     unrelated max_active_slots edit cannot end governance
-//   - a window in which a mistaken nomination can be cancelled or replaced
+//   - a window in which a mistaken nomination can be canceled or replaced
 //
 // What it does NOT provide, and must not be described as providing: protection
 // against an attacker who already holds the incumbent key. There is no timelock,
@@ -134,7 +134,7 @@ func (m msgServer) AcceptAuthority(
 	}
 	pending, err := m.PendingAuthority.Get(ctx, key)
 	if err != nil {
-		// Covers accepted, cancelled and never-nominated alike. Distinguishing
+		// Covers accepted, canceled and never-nominated alike. Distinguishing
 		// them would tell an unauthorized caller which rotations are in flight.
 		return nil, types.ErrNoPendingNomination.Wrapf("%s", msg.Role)
 	}
@@ -188,6 +188,6 @@ func (m msgServer) CancelAuthorityNomination(
 	if err := m.PendingAuthority.Remove(ctx, key); err != nil {
 		return nil, err
 	}
-	emitAuthorityNominationCancelled(ctx, msg.Role, msg.Authority, pending.Nominee)
+	emitAuthorityNominationCanceled(ctx, msg.Role, msg.Authority, pending.Nominee)
 	return &types.MsgCancelAuthorityNominationResponse{}, nil
 }

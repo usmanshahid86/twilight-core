@@ -61,7 +61,7 @@ var (
 	ErrInvalidAuthorityRole = errorsmod.Register(ModuleName, 21, "invalid authority role")
 
 	// ErrNoPendingNomination reports an accept or cancel for a role that has no
-	// nomination outstanding — including one already accepted, cancelled or
+	// nomination outstanding — including one already accepted, canceled or
 	// replaced.
 	ErrNoPendingNomination = errorsmod.Register(ModuleName, 22, "no pending authority nomination for this role")
 )

@@ -310,7 +310,7 @@ func TestCancellationClearsThePendingNomination(t *testing.T) {
 		require.Equal(t, incumbent, holder(t, k, ctx, role))
 	})
 
-	t.Run("cancelling nothing is refused", func(t *testing.T) {
+	t.Run("canceling nothing is refused", func(t *testing.T) {
 		ms, _, ctx, primary, _ := authoritySetup(t)
 		_, err := ms.CancelAuthorityNomination(ctx, &types.MsgCancelAuthorityNomination{
 			Authority: primary, Role: types.AuthorityRole_AUTHORITY_ROLE_PRIMARY,
