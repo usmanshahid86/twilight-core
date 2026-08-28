@@ -85,11 +85,18 @@ unstamped build reports an empty version, which is honest, because it was not re
 make build-release VERSION=v0.1.0
 ```
 
-It refuses a tree with uncommitted changes to tracked files, before anything is built: an
-artifact named for a version but built from uncommitted work would report a commit its source
-does not match, and the checksum would hash it faithfully without disclosing that. `make build`
-stays usable on a dirty tree and appends `-dirty` to whatever version it is given.
-`make check-release-stamping` covers both.
+Artifacts are built from **`git archive HEAD`**, not the working directory, so a release is the
+commit it names by construction: no build variable reaches inside, and untracked files are
+absent from the archive rather than merely undetected. It additionally refuses, before writing
+anything, a tree with uncommitted changes to tracked files or with untracked `.go`/module files
+the build would consume — untracked material that cannot reach the compiler, such as
+`docs/specs/`, is not an obstacle.
+
+An artifact named for a version but built from uncommitted work would report a commit its
+source does not match, and the checksum would hash it faithfully without disclosing that.
+`make build` stays usable on a dirty tree and appends `-dirty` to whatever version it is given;
+that marker cannot be switched off from the command line. `make check-release-stamping` covers
+all of it.
 
 Binaries target the platforms validators actually run:
 
