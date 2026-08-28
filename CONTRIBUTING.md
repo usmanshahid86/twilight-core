@@ -23,7 +23,7 @@ and `app/` is high.
 Requires **Go 1.25.x** (see `go.mod`).
 
 ```bash
-make build     # go build ./cmd/twilightd
+make build     # stamped binary at build/twilightd
 make test      # go test ./...
 make fmt       # gofmt
 make lint      # golangci-lint (matches CI)
@@ -80,6 +80,30 @@ renamed or edited, because a syncing node must replay the same handler at the sa
 Each release publishes **SHA-256 checksums** for its binaries. Operators run cosmovisor with
 `DAEMON_ALLOW_DOWNLOAD_BINARIES=false` and verify pre-staged binaries by hash, so the
 checksum is the artifact that matters, not the download.
+
+`make build` stamps the version and commit at link time and writes to
+`build/twilightd`; `twilightd version --long` reports them. The chain and binary names are
+compiled in, so even an unstamped `go build ./cmd/twilightd` identifies itself — an
+unstamped build reports an empty version, which is honest, because it was not released.
+
+`make build-release` produces the release artifacts and their checksums:
+
+```bash
+make build-release VERSION=v0.1.0
+```
+
+Artifacts are built from **`git archive HEAD`**, not the working directory, so a release is the
+commit it names by construction: no build variable reaches inside, and untracked files are
+absent from the archive rather than merely undetected. It additionally refuses, before writing
+anything, a tree with uncommitted changes to tracked files or with untracked `.go`/module files
+the build would consume — untracked material that cannot reach the compiler, such as
+`docs/specs/`, is not an obstacle.
+
+An artifact named for a version but built from uncommitted work would report a commit its
+source does not match, and the checksum would hash it faithfully without disclosing that.
+`make build` stays usable on a dirty tree and appends `-dirty` to whatever version it is given;
+that marker cannot be switched off from the command line. `make check-release-stamping` covers
+all of it.
 
 Binaries target the platforms validators actually run:
 

@@ -1,8 +1,77 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
+.PHONY: build build-release check-release-stamping test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
+# Version and commit are stamped at link time; the chain and binary names are
+# compiled in (see cmd/twilightd/main.go) so even an unstamped build identifies
+# itself.
+#
+# Dirtiness is derived separately from VERSION and is NOT overridable. Carrying
+# it inside VERSION meant an explicit `VERSION=v0.1.0` replaced the whole
+# `git describe --dirty` expression and silently dropped the marker: the binary
+# then claimed to be exactly COMMIT while the source differed from it, and the
+# checksum hashed that artifact faithfully without being able to disclose the
+# mismatch. So `--dirty` comes off git describe, and the marker is appended to
+# whatever VERSION says — default and explicit builds behave identically.
+#
+# `override` because a GNU Make command-line assignment beats any assignment in
+# the makefile: `make build DIRTY=` blanked the marker and stamped a modified
+# tree as clean. Provenance must not be something the caller can switch off.
+#
+# Dirty means tracked modifications, or ANY untracked file outside the allowlist.
+#
+# Enumerating build-relevant extensions does not close: the Go toolchain also
+# consumes .s, .c, .h and .syso, and //go:embed can pull in a file of any
+# extension at all. An untracked .s under cmd/twilightd changed the binary while
+# a .go-only check reported clean. So the rule is default-deny, and the allowlist
+# names what is known to be safe rather than guessing what is dangerous.
+#
+# docs/specs/ is the one entry: it is user-owned material this project keeps
+# untracked by convention and the compiler cannot reach it. Everything gitignored
+# — build/ included — is already excluded by --exclude-standard.
+override ALLOWED_UNTRACKED := ':(exclude)docs/specs'
+#
+# go.work/go.work.sum are checked BY NAME because .gitignore lists them, and
+# --exclude-standard skips ignored files — so the default-deny rule above is
+# structurally blind to exactly the file that can redirect the whole module.
+override DIRTY := $(shell \
+  { git diff-index --quiet HEAD -- 2>/dev/null \
+    && test -z "$$(git ls-files --others --exclude-standard -- . $(ALLOWED_UNTRACKED) 2>/dev/null)" \
+    && test ! -e go.work && test ! -e go.work.sum; } \
+  || echo -dirty)
+VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo unknown)
+COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+BUILD_TAGS ?=
+# The effective stamp. Always carries the dirty marker when the tree is dirty.
+STAMP = $(VERSION)$(DIRTY)
+LDFLAGS = -X github.com/cosmos/cosmos-sdk/version.Version=$(STAMP) \
+          -X github.com/cosmos/cosmos-sdk/version.Commit=$(COMMIT) \
+          -X github.com/cosmos/cosmos-sdk/version.BuildTags=$(BUILD_TAGS)
+
 build:
-	go build ./cmd/twilightd
+	go build -ldflags '$(LDFLAGS)' -o build/twilightd ./cmd/twilightd
+
+# Release artifacts for the platforms validators run, plus one developer target.
+# CGO_ENABLED=0 keeps them static on the default goleveldb backend; RocksDB is an
+# indirect dependency and is not compiled in without its build tag.
+#
+# The checksum file is the artifact operators actually verify: cosmovisor runs
+# with DAEMON_ALLOW_DOWNLOAD_BINARIES=false, so a pre-staged binary is trusted
+# because its hash matches, not because of where it came from.
+RELEASE_DIR ?= build/release
+RELEASE_TARGETS = linux/amd64 linux/arm64 darwin/arm64
+
+# Delegated to a script so the guards run in shell rather than as Make variables,
+# which a command-line assignment can override. The script also builds from
+# `git archive HEAD` rather than the worktree, so an artifact is the commit it
+# claims by construction and untracked files cannot reach the compiler.
+build-release:
+	@RELEASE_DIR=$(RELEASE_DIR) RELEASE_TARGETS="$(RELEASE_TARGETS)" \
+	  VERSION=$(VERSION) BUILD_TAGS=$(BUILD_TAGS) ./scripts/build-release.sh
+
+# Provenance checks for the stamping and release targets above. Fast, and needs
+# a clean tree because it deliberately dirties a tracked file and restores it.
+check-release-stamping:
+	./scripts/check-release-stamping.sh
 
 test:
 	go test ./...
