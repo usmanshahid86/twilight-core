@@ -53,19 +53,26 @@ make drills                   # lifecycle + restart-rotation + quorum drills
 
 ## Releases
 
-Versions follow the two-class rule in
-[ADR-0003](docs/architecture/adr/0003-upgrade-path.md):
+Version classes follow the two procedures in
+[ADR-0003 §3](docs/architecture/adr/0003-upgrade-path.md) — the ADR defines the procedures,
+the numbering below is this project's convention for them:
 
 - **minor** (`v0.2.0`, `v0.3.0`, …) — a state-machine change. Ships a registered upgrade
   handler **named after the version it upgrades to**, and needs a coordinated halt.
 - **patch** (`v0.1.1`, `v0.2.1`, …) — node-local only: pruning, RPC, indexer, p2p. No
   upgrade handler; operators roll one at a time.
 
-`v0.1.0` is the **public genesis build** — the first version carrying `x/upgrade`, with the
-upgrade proven end to end and export/restore characterized. Nothing upgrades *to* it, so it
-registers no handler. Earlier commits carry descriptive tags rather than version numbers,
-because a chain launched from a build without `x/upgrade` can never be upgraded and numbering
-it would imply a migration path that does not exist.
+`v0.1.0` is the **first proven upgrade-capable operational baseline** — the first version
+carrying `x/upgrade`, with the upgrade proven end to end across four validators and
+export/restore/join characterized. It is **not** a public-testnet or genesis release: the
+pre-public gates remain open, notably authority-rotation hardening (#130) and the
+block-gas/anti-spam cluster. Nothing upgrades *to* it, so it registers no handler.
+
+Earlier commits carry descriptive tags rather than version numbers, because a chain launched
+from a build without `x/upgrade` can never be upgraded, and numbering such a build would imply
+a migration path that does not exist. That is an argument about *numbering*, not about
+readiness: being the first build a public network could legitimately be launched *from* is not
+the same as being ready to launch one.
 
 The handler registry in `app/upgrades.go` is **append-only**: a released name can never be
 renamed or edited, because a syncing node must replay the same handler at the same height.
