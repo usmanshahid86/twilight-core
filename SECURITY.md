@@ -78,8 +78,8 @@ If uncertain, report privately rather than opening a public issue.
 ## Supported versions
 
 Twilight Core is pre-1.0 and under active development. Security fixes target the latest
-`main` and `develop` branches unless otherwise stated. A formal supported-version matrix
-will accompany the first tagged release line.
+`main`, which is the trunk; there is no long-lived integration branch. A formal
+supported-version matrix will accompany the first tagged release line.
 
 ## Audits and bounty
 

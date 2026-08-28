@@ -40,13 +40,50 @@ make drills                   # lifecycle + restart-rotation + quorum drills
 
 ## Branching & commits
 
-- Work on a feature branch off **`develop`**; `develop` merges to **`main`** for releases.
+- Work on a feature branch off **`main`**, and open a PR back into `main`. There is no
+  long-lived integration branch: `main` is the trunk, and every merge is a merge commit
+  (never a squash or rebase) so a reviewed head stays identifiable in the history.
+- A release is a **tag on `main`**, not a branch promotion.
 - Use **[Conventional Commits](https://www.conventionalcommits.org/)** — e.g.
   `feat(rewards): ...`, `fix(coreslot): ...`, `docs: ...`, `chore(ci): ...`.
 - Keep PRs focused and reviewable; describe the *why*, not just the *what*.
 - If you changed `proto/`, regenerate with `make proto` and commit the result.
 - If you changed behavior, add/adjust tests; consensus/economic changes should also be
   covered by a drill or simulation where practical.
+
+## Releases
+
+Versions follow the two-class rule in
+[ADR-0003](docs/architecture/adr/0003-upgrade-path.md):
+
+- **minor** (`v0.2.0`, `v0.3.0`, …) — a state-machine change. Ships a registered upgrade
+  handler **named after the version it upgrades to**, and needs a coordinated halt.
+- **patch** (`v0.1.1`, `v0.2.1`, …) — node-local only: pruning, RPC, indexer, p2p. No
+  upgrade handler; operators roll one at a time.
+
+`v0.1.0` is the **public genesis build** — the first version carrying `x/upgrade`, with the
+upgrade proven end to end and export/restore characterized. Nothing upgrades *to* it, so it
+registers no handler. Earlier commits carry descriptive tags rather than version numbers,
+because a chain launched from a build without `x/upgrade` can never be upgraded and numbering
+it would imply a migration path that does not exist.
+
+The handler registry in `app/upgrades.go` is **append-only**: a released name can never be
+renamed or edited, because a syncing node must replay the same handler at the same height.
+
+Each release publishes **SHA-256 checksums** for its binaries. Operators run cosmovisor with
+`DAEMON_ALLOW_DOWNLOAD_BINARIES=false` and verify pre-staged binaries by hash, so the
+checksum is the artifact that matters, not the download.
+
+Binaries target the platforms validators actually run:
+
+| target | why |
+|---|---|
+| `linux/amd64` | the dominant validator platform |
+| `linux/arm64` | Graviton/Ampere validators |
+| `darwin/arm64` | developer convenience; not for validators |
+
+They build `CGO_ENABLED=0`, so the artifacts are static and the default `goleveldb` backend
+is used. RocksDB is an indirect dependency and is not compiled in without its build tag.
 
 ## Review & quality gates
 
