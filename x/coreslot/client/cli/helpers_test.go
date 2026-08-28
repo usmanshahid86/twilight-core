@@ -2,11 +2,16 @@ package cli
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/cosmos/cosmos-sdk/codec"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdked25519 "github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
+
+	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
 // A real 32-byte Ed25519 public key, in the base64 form `tendermint
@@ -143,12 +148,15 @@ func TestTxPubKeyAnyRejectsBadInput(t *testing.T) {
 // This is the unit-level counterpart to the byte-preservation tests in
 // genesis_test.go: those prove the document is untouched, this proves why.
 func TestPubKeyAnyStaysBareBase64Only(t *testing.T) {
-	// Newline-padded input is deliberately absent. Go's base64 decoder ignores \r
-	// and \n (but not spaces), so a trailing newline was accepted here long before
-	// the transaction forms were widened. It is pre-existing behavior, not part
-	// of this contract, and asserting a rejection would simply be false.
+	// Newline-padded input is refused now. Go's base64 decoder ignores \r and \n
+	// (though not spaces), so these decode to the right bytes and would have been
+	// written back non-canonically — the divergence this helper exists to prevent.
 	for name, input := range map[string]string{
 		"show-validator JSON":  showValidatorJSON(testPubKeyB64),
+		"trailing newline":     testPubKeyB64 + "\n",
+		"leading newline":      "\n" + testPubKeyB64,
+		"embedded newline":     testPubKeyB64[:10] + "\n" + testPubKeyB64[10:],
+		"carriage return":      testPubKeyB64 + "\r\n",
 		"leading space":        " " + testPubKeyB64,
 		"surrounding spaces":   "  " + testPubKeyB64 + "  ",
 		"invalid base64":       "not!valid!base64",
@@ -173,4 +181,44 @@ func TestBothHelpersAgreeOnABareKey(t *testing.T) {
 
 	require.Equal(t, strict.TypeUrl, expanded.TypeUrl)
 	require.Equal(t, strict.Value, expanded.Value)
+}
+
+// Both JSON dialects an operator can hold must decode to the same Params.
+//
+// `coreslot-query params` renders through proto3 JSON, which quotes 64-bit
+// integers; the gogoproto struct's tags carry no `,string`, so encoding/json
+// requires them unquoted. Reading only the second meant the chain's own query
+// output could not be fed back into update-params, breaking the obvious
+// workflow: query the parameters, change one field, submit.
+//
+// Asserted as EQUALITY of the decoded values, not merely that both parse — the
+// point is that an operator gets the same transaction either way.
+func TestParamsDecodeAcceptsBothJSONDialects(t *testing.T) {
+	const addr = "twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqx9k9g5"
+	quoted := `{"authority":"` + addr + `","emergency_authority":"` + addr + `",` +
+		`"slot_voting_power":"1","min_active_slots":"1","max_active_slots":"100",` +
+		`"key_rotation_delay_blocks":"1","consensus_key_reuse_lockout":"100000",` +
+		`"allow_self_registration":false,"selection_policy_update_cooldown_blocks":"720"}`
+	bare := `{"authority":"` + addr + `","emergency_authority":"` + addr + `",` +
+		`"slot_voting_power":1,"min_active_slots":1,"max_active_slots":100,` +
+		`"key_rotation_delay_blocks":1,"consensus_key_reuse_lockout":100000,` +
+		`"allow_self_registration":false,"selection_policy_update_cooldown_blocks":720}`
+
+	registry := codectypes.NewInterfaceRegistry()
+	types.RegisterInterfaces(registry)
+	cdc := codec.NewProtoCodec(registry)
+
+	// The query dialect, through the chain's own codec — what an operator starts
+	// from when they read the current parameters.
+	var fromQuoted types.Params
+	require.NoError(t, cdc.UnmarshalJSON([]byte(quoted), &fromQuoted),
+		"query output must be readable; it is the document the chain itself produced")
+
+	// The legacy hand-written dialect.
+	var fromBare types.Params
+	require.NoError(t, json.Unmarshal([]byte(bare), &fromBare))
+
+	require.Equal(t, fromBare, fromQuoted, "both dialects must produce identical Params")
+	require.EqualValues(t, 100, fromQuoted.MaxActiveSlots)
+	require.EqualValues(t, 1, fromQuoted.SlotVotingPower)
 }
