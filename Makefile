@@ -17,14 +17,21 @@
 # the makefile: `make build DIRTY=` blanked the marker and stamped a modified
 # tree as clean. Provenance must not be something the caller can switch off.
 #
-# Dirty means either tracked modifications, or untracked files the Go build would
-# consume. The second half matters: diff-index sees tracked files only, so an
-# untracked .go file under cmd/twilightd compiles into the binary while the tree
-# still reports clean. The pathspec is deliberately narrow — untracked material
-# that cannot reach the compiler, such as docs/specs/, is not a modification.
+# Dirty means tracked modifications, or ANY untracked file outside the allowlist.
+#
+# Enumerating build-relevant extensions does not close: the Go toolchain also
+# consumes .s, .c, .h and .syso, and //go:embed can pull in a file of any
+# extension at all. An untracked .s under cmd/twilightd changed the binary while
+# a .go-only check reported clean. So the rule is default-deny, and the allowlist
+# names what is known to be safe rather than guessing what is dangerous.
+#
+# docs/specs/ is the one entry: it is user-owned material this project keeps
+# untracked by convention and the compiler cannot reach it. Everything gitignored
+# — build/ included — is already excluded by --exclude-standard.
+override ALLOWED_UNTRACKED := ':(exclude)docs/specs'
 override DIRTY := $(shell \
   { git diff-index --quiet HEAD -- 2>/dev/null \
-    && test -z "$$(git ls-files --others --exclude-standard -- '*.go' go.mod go.sum 2>/dev/null)"; } \
+    && test -z "$$(git ls-files --others --exclude-standard -- . $(ALLOWED_UNTRACKED) 2>/dev/null)"; } \
   || echo -dirty)
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo unknown)
 COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)

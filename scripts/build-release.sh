@@ -12,9 +12,10 @@
 #   - dirtiness was a Make variable, and GNU Make lets a command-line assignment
 #     override any assignment in the makefile. `make build-release DIRTY=` blanked
 #     the guard and produced officially named artifacts from a modified tree.
-#   - the guard consulted `git diff-index`, which sees tracked files only. An
-#     untracked .go file under cmd/twilightd is compiled into the binary while the
-#     tree still reports clean.
+#   - the guard consulted `git diff-index`, which sees tracked files only, and a
+#     follow-up that enumerated .go/go.mod/go.sum still missed .s — the toolchain
+#     also consumes .s, .c, .h and .syso, and //go:embed reaches any extension.
+#     Untracked build inputs compiled into the binary while the tree reported clean.
 #
 # Both existed because the release was built from the mutable worktree. This
 # builds from `git archive HEAD` instead, so the artifact is the commit it claims
@@ -40,12 +41,17 @@ if ! git diff-index --quiet HEAD -- 2>/dev/null; then
   refuse "uncommitted changes to tracked files" "$(git --no-pager diff --stat HEAD --)"
 fi
 
-# Untracked files the Go build would consume. Deliberately narrow: docs/specs/ and
-# other untracked material that cannot reach the compiler is not an obstacle to
-# cutting a release, but an untracked .go file or module file is.
-UNTRACKED="$(git ls-files --others --exclude-standard -- '*.go' go.mod go.sum 2>/dev/null)"
+# Any untracked file outside the allowlist. Enumerating build-relevant extensions
+# does not close: the toolchain also consumes .s, .c, .h and .syso, and //go:embed
+# can pull in a file of any extension. So this is default-deny, and the allowlist
+# names what is known safe rather than guessing what is dangerous.
+#
+# docs/specs/ is the one entry — user-owned material this project keeps untracked
+# by convention, which the compiler cannot reach. Everything gitignored, build/
+# included, is already excluded by --exclude-standard.
+UNTRACKED="$(git ls-files --others --exclude-standard -- . ':(exclude)docs/specs' 2>/dev/null)"
 if [[ -n "$UNTRACKED" ]]; then
-  refuse "untracked files the build would consume" "$UNTRACKED"
+  refuse "untracked files present; a release is built only from a clean tree" "$UNTRACKED"
 fi
 
 COMMIT="$(git rev-parse HEAD)"

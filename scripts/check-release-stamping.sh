@@ -24,16 +24,29 @@ check() { # <name> <expected> <actual>
 
 PROBE="cmd/twilightd/main.go"
 UNTRACKED_GO="cmd/twilightd/zz_provenance_probe.go"
+UNTRACKED_ASM="cmd/twilightd/zz_provenance_probe.s"
 BIN="build/twilightd"
-cleanup() { git checkout -- "$PROBE" 2>/dev/null || true; rm -f "$UNTRACKED_GO"; }
+cleanup() { git checkout -- "$PROBE" 2>/dev/null || true; rm -f "$UNTRACKED_GO" "$UNTRACKED_ASM"; }
 trap cleanup EXIT
 
 # Refuse to run against a tree that is already modified: the cases below dirty a
 # file deliberately and restore it, and doing that on top of real work would
 # discard it.
+#
+# The guard uses the SAME default-deny rule it is testing. An earlier version
+# checked tracked modifications only, so a probe file left behind by an
+# interrupted run was still present when the next run started, and the two
+# "clean tree" cases failed against a tree that was not clean. A test that can
+# run against contaminated state reports on something other than what it claims.
 if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-  echo "refusing to run: the working tree already has uncommitted changes" >&2
+  echo "refusing to run: uncommitted changes to tracked files" >&2
   git --no-pager diff --stat HEAD -- >&2
+  exit 2
+fi
+LEFTOVER="$(git ls-files --others --exclude-standard -- . ':(exclude)docs/specs' 2>/dev/null)"
+if [[ -n "$LEFTOVER" ]]; then
+  echo "refusing to run: untracked files present (a previous run may have been interrupted)" >&2
+  printf '%s\n' "$LEFTOVER" >&2
   exit 2
 fi
 
@@ -90,9 +103,10 @@ cleanup
 
 echo
 echo "=== untracked build inputs are not clean ==="
-# diff-index sees tracked files only, so an untracked .go file compiles into the
-# binary while the tree reports clean. The release must see it; docs/specs/ and
-# other untracked material that cannot reach the compiler must not count.
+# diff-index sees tracked files only, so untracked sources compile into the binary
+# while the tree reports clean. Enumerating extensions does not close this: the
+# toolchain also consumes .s, .c, .h and .syso, and //go:embed reaches any
+# extension at all. The rule is default-deny with docs/specs/ allowlisted.
 printf 'package main\n' >"$UNTRACKED_GO"
 check "untracked .go marks the tree dirty" "dirty" \
   "$(git diff-index --quiet HEAD -- 2>/dev/null \
@@ -103,6 +117,20 @@ check "untracked .go stamps -dirty"     "v9.9.9-dirty" "$(stamped version)"
 make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
 check "untracked .go refuses a release" "nonzero" "$([[ $rc -ne 0 ]] && echo nonzero || echo zero)"
 rm -f "$UNTRACKED_GO"
+
+# Assembly is a compiler input a .go-only check missed; `go list` reports it under
+# SFiles and it changes the binary.
+printf '// provenance probe\n' >"$UNTRACKED_ASM"
+check "untracked .s is a compiler input"  "1" "$(go list -f '{{len .SFiles}}' ./cmd/twilightd 2>/dev/null)"
+check "untracked .s marks the tree dirty" "dirty" \
+  "$(git diff-index --quiet HEAD -- 2>/dev/null \
+      && test -z "$(git ls-files --others --exclude-standard -- . ':(exclude)docs/specs')" \
+      && echo clean || echo dirty)"
+make build VERSION=v9.9.9 >/dev/null 2>&1
+check "untracked .s stamps -dirty"        "v9.9.9-dirty" "$(stamped version)"
+make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
+check "untracked .s refuses a release"    "nonzero" "$([[ $rc -ne 0 ]] && echo nonzero || echo zero)"
+rm -f "$UNTRACKED_ASM"
 
 echo
 echo "=== a refusal preserves artifacts that were already there ==="
@@ -119,9 +147,22 @@ check "build-release exits zero"       "0" "$rc"
 check "three artifacts"                "3" "$(ls build/release/twilightd-* 2>/dev/null | wc -l | tr -d ' ')"
 check "named with the clean version"   "3" "$(ls build/release/twilightd-v9.9.9-* 2>/dev/null | wc -l | tr -d ' ')"
 check "checksums cover every artifact" "3" "$(grep -c 'twilightd-' build/release/SHA256SUMS 2>/dev/null || echo 0)"
-# Built from `git archive HEAD`, so the artifact is the commit it names.
-check "release stamps the committed HEAD" "$(git rev-parse HEAD)" \
-  "$(build/release/twilightd-v9.9.9-darwin-arm64 version --long 2>/dev/null | awk -F': *' '$1=="commit"{print $2}')"
+# Every artifact, not just the host-native one, and without executing any of them:
+# a Linux validator or CI runner cannot exec the darwin build, and picking the
+# host's target would leave the other two unverified.
+HEAD_SHA="$(git rev-parse HEAD)"
+stamped_all=0
+for a in build/release/twilightd-v9.9.9-*; do
+  grep -aqF "$HEAD_SHA" "$a" && stamped_all=$((stamped_all + 1))
+done
+check "every artifact carries the commit" "3" "$stamped_all"
+flags_all=0
+for a in build/release/twilightd-v9.9.9-*; do
+  go version -m "$a" 2>/dev/null | grep -q 'trimpath=true' \
+    && go version -m "$a" 2>/dev/null | grep -q 'CGO_ENABLED=0' \
+    && flags_all=$((flags_all + 1))
+done
+check "every artifact is trimpath+CGO0"   "3" "$flags_all"
 rm -rf build/release
 make build >/dev/null 2>&1   # leave a normally-stamped binary behind
 
