@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -362,43 +361,34 @@ func cancelAuthorityNominationCmd() *cobra.Command {
 		})
 }
 
-// decodeParams reads a Params document in either JSON dialect the chain hands an
-// operator.
+// decodeParams reads a Params document through the chain's own JSON codec.
 //
-// The two disagree, and neither side is wrong on its own. `coreslot-query params`
-// renders through PROTO3 JSON, which encodes 64-bit integers as strings:
+// That codec is the SINGLE parser, deliberately. It already accepts both numeric
+// spellings an operator can hold — gogoproto's jsonpb strips the quotes from a
+// 64-bit integer before parsing it, so proto3 output like "max_active_slots":"100"
+// and a hand-written 100 both decode — so query output round-trips without a
+// second parser contract existing alongside it.
 //
-//	{"slot_voting_power":"1","max_active_slots":"100"}
+// An earlier version fell back to encoding/json on the belief that the codec
+// would refuse bare numbers. It does not, so the fallback bought no
+// compatibility, and its only real effect was to accept documents the codec
+// correctly REJECTS. encoding/json ignores unknown fields, so a typo such as
+// key_rotation_delay_block decoded to the zero value instead of failing — and
+// because update-params writes the WHOLE struct and Params.Validate permits zero
+// there, an authorized update would silently persist a parameter nobody chose.
 //
-// while the gogoproto-generated struct carries plain int64/uint64 with no
-// `,string` tag, so encoding/json requires unquoted numbers. Reading with
-// encoding/json alone meant the obvious workflow — query the parameters, change
-// one field, submit — failed with "cannot unmarshal string into Go struct field
-// Params.slot_voting_power of type int64". The document the chain produced was
-// not a document the chain accepted.
-//
-// Both are accepted rather than one being chosen, because a runbook or script
-// holding a hand-written file with bare numbers is as legitimate as query output,
-// and update-params writes the WHOLE struct — so an operator changing one field
-// has to reproduce every other field exactly. Narrowing the accepted form would
-// break the working path to fix the broken one.
-//
-// The codec is tried first because it is the chain's own dialect, and its error
-// is the one reported when neither succeeds.
+// Rejecting an unrecognized field is the property worth keeping: in a
+// whole-struct write, a field the parser does not understand is far more likely
+// to be a mistake than an intention.
+
 func decodeParams(cmd *cobra.Command, bz []byte) (*types.Params, error) {
 	ctx, err := client.GetClientTxContext(cmd)
 	if err != nil {
 		return nil, err
 	}
 	var params types.Params
-	protoErr := ctx.Codec.UnmarshalJSON(bz, &params)
-	if protoErr == nil {
-		return &params, nil
+	if err := ctx.Codec.UnmarshalJSON(bz, &params); err != nil {
+		return nil, fmt.Errorf("decode params: %w", err)
 	}
-	// The legacy bare-number form.
-	params = types.Params{}
-	if jsonErr := json.Unmarshal(bz, &params); jsonErr == nil {
-		return &params, nil
-	}
-	return nil, fmt.Errorf("decode params: %w", protoErr)
+	return &params, nil
 }

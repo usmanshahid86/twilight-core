@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"context"
 	"encoding/base64"
-	"encoding/json"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdked25519 "github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
@@ -183,42 +186,105 @@ func TestBothHelpersAgreeOnABareKey(t *testing.T) {
 	require.Equal(t, strict.Value, expanded.Value)
 }
 
-// Both JSON dialects an operator can hold must decode to the same Params.
+// decodeParams is exercised directly, not imitated.
 //
-// `coreslot-query params` renders through proto3 JSON, which quotes 64-bit
-// integers; the gogoproto struct's tags carry no `,string`, so encoding/json
-// requires them unquoted. Reading only the second meant the chain's own query
-// output could not be fed back into update-params, breaking the obvious
-// workflow: query the parameters, change one field, submit.
-//
-// Asserted as EQUALITY of the decoded values, not merely that both parse — the
-// point is that an operator gets the same transaction either way.
-func TestParamsDecodeAcceptsBothJSONDialects(t *testing.T) {
-	const addr = "twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqx9k9g5"
-	quoted := `{"authority":"` + addr + `","emergency_authority":"` + addr + `",` +
-		`"slot_voting_power":"1","min_active_slots":"1","max_active_slots":"100",` +
-		`"key_rotation_delay_blocks":"1","consensus_key_reuse_lockout":"100000",` +
-		`"allow_self_registration":false,"selection_policy_update_cooldown_blocks":"720"}`
-	bare := `{"authority":"` + addr + `","emergency_authority":"` + addr + `",` +
-		`"slot_voting_power":1,"min_active_slots":1,"max_active_slots":100,` +
-		`"key_rotation_delay_blocks":1,"consensus_key_reuse_lockout":100000,` +
-		`"allow_self_registration":false,"selection_policy_update_cooldown_blocks":720}`
-
+// The previous version of this test called cdc.UnmarshalJSON and json.Unmarshal
+// separately and never touched the production decoder, so it stayed green
+// whichever branch production kept — including the fallback that made a typo'd
+// field decode to zero. A test that routes around the code it is about cannot
+// fail for the reason it exists.
+func paramsCmdWithCodec(t *testing.T) *cobra.Command {
+	t.Helper()
 	registry := codectypes.NewInterfaceRegistry()
 	types.RegisterInterfaces(registry)
-	cdc := codec.NewProtoCodec(registry)
 
-	// The query dialect, through the chain's own codec — what an operator starts
-	// from when they read the current parameters.
-	var fromQuoted types.Params
-	require.NoError(t, cdc.UnmarshalJSON([]byte(quoted), &fromQuoted),
-		"query output must be readable; it is the document the chain itself produced")
+	// The real command, so its flags and context handling are the ones under test.
+	cmd := updateParamsCmd()
+	clientCtx := client.Context{}.
+		WithCodec(codec.NewProtoCodec(registry)).
+		WithTxConfig(nil).
+		WithOffline(true)
+	cmd.SetContext(context.WithValue(context.Background(), client.ClientContextKey, &clientCtx))
+	return cmd
+}
 
-	// The legacy hand-written dialect.
-	var fromBare types.Params
-	require.NoError(t, json.Unmarshal([]byte(bare), &fromBare))
+const paramsTestAddr = "twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqx9k9g5"
 
-	require.Equal(t, fromBare, fromQuoted, "both dialects must produce identical Params")
-	require.EqualValues(t, 100, fromQuoted.MaxActiveSlots)
-	require.EqualValues(t, 1, fromQuoted.SlotVotingPower)
+func paramsJSON(t *testing.T, fields string) []byte {
+	t.Helper()
+	return []byte(`{"authority":"` + paramsTestAddr + `","emergency_authority":"` + paramsTestAddr + `",` + fields + `}`)
+}
+
+// Both numeric spellings must decode, and to the SAME thing. gogoproto's jsonpb
+// strips the quotes from a 64-bit integer before parsing, so the chain's own
+// codec reads query output and a hand-written file alike — which is why no second
+// parser is needed.
+func TestDecodeParamsAcceptsBothNumericSpellings(t *testing.T) {
+	cmd := paramsCmdWithCodec(t)
+
+	quoted, err := decodeParams(cmd, paramsJSON(t,
+		`"slot_voting_power":"1","min_active_slots":"1","max_active_slots":"100",`+
+			`"key_rotation_delay_blocks":"1","consensus_key_reuse_lockout":"100000",`+
+			`"selection_policy_update_cooldown_blocks":"720"`))
+	require.NoError(t, err, "query output must decode; it is the document the chain itself produced")
+
+	bare, err := decodeParams(cmd, paramsJSON(t,
+		`"slot_voting_power":1,"min_active_slots":1,"max_active_slots":100,`+
+			`"key_rotation_delay_blocks":1,"consensus_key_reuse_lockout":100000,`+
+			`"selection_policy_update_cooldown_blocks":720`))
+	require.NoError(t, err, "a hand-written file with bare numbers must keep working")
+
+	require.Equal(t, *bare, *quoted, "both spellings must produce identical Params")
+	require.EqualValues(t, 100, quoted.MaxActiveSlots)
+	require.EqualValues(t, 1, quoted.SlotVotingPower)
+	require.EqualValues(t, 100000, quoted.ConsensusKeyReuseLockout)
+}
+
+// A field the parser does not recognize must be an error, not a silent default.
+//
+// update-params writes the WHOLE struct, so an unrecognized name means some real
+// field keeps its zero value. Params.Validate permits zero for several of them,
+// so the transaction would succeed and persist a parameter nobody chose — the
+// bulk-write hazard, reintroduced through a decoder.
+func TestDecodeParamsRejectsUnknownFields(t *testing.T) {
+	cmd := paramsCmdWithCodec(t)
+
+	// BARE numbers throughout, deliberately. An encoding/json fallback rejects a
+	// quoted number outright, so a quoted fixture would fail for the wrong reason
+	// and pass whether or not the fallback exists. Only a document encoding/json
+	// would happily accept — bare numbers, unknown field ignored — discriminates
+	// between the two decoders. Verified: with the fallback restored, these fail;
+	// with quoted fixtures they did not.
+	for name, fields := range map[string]string{
+		// One character short of key_rotation_delay_blocks: the realistic typo.
+		"singular typo":  `"max_active_slots":100,"key_rotation_delay_block":5`,
+		"invented field": `"max_active_slots":100,"max_activ_slots":7`,
+		"stray field":    `"max_active_slots":100,"note":"why I changed this"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := decodeParams(cmd, paramsJSON(t, fields))
+			require.Error(t, err, "an unrecognized field must fail rather than default to zero")
+			require.Nil(t, got)
+			require.Contains(t, err.Error(), "unknown field")
+		})
+	}
+}
+
+func TestDecodeParamsRejectsInvalidValues(t *testing.T) {
+	cmd := paramsCmdWithCodec(t)
+
+	for name, fields := range map[string]string{
+		"wrong type":        `"max_active_slots":"not-a-number"`,
+		"boolean for uint":  `"max_active_slots":true`,
+		"negative for uint": `"max_active_slots":"-1"`,
+		// Beyond uint64.
+		"out of range":   `"max_active_slots":"18446744073709551616"`,
+		"malformed json": `"max_active_slots":`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := decodeParams(cmd, paramsJSON(t, fields))
+			require.Error(t, err)
+			require.Nil(t, got)
+		})
+	}
 }

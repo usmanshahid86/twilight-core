@@ -31,6 +31,14 @@ jobs:
         run: go build ./...
       - name: Test
         run: go test -count=1 ./...
+      - name: Vulncheck toolchain pin
+        # Same script as `make check-vulncheck-pin`. The vulnerability gate pins
+        # the Go toolchain to the version go.mod declares, and THIS job cannot
+        # detect the loss of that pin on its own: setup-go has already selected
+        # the same toolchain, so removing the pin leaves every job green while a
+        # developer machine silently scans under a different compiler. The check
+        # runs the real script against a fake `go` and inspects what it passes.
+        run: ./scripts/check-vulncheck-pin.sh
       - name: CLI surface
         # Same script as `make check-cli-surface`. The Go test asserts the
         # assembled cobra tree, which proves a command exists, not that it runs:

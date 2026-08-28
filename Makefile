@@ -1,4 +1,4 @@
-.PHONY: build build-release check-release-stamping check-cli-surface test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
+.PHONY: build build-release check-release-stamping check-cli-surface check-vulncheck-pin test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 # Version and commit are stamped at link time; the chain and binary names are
@@ -79,6 +79,13 @@ check-release-stamping:
 # test job, so local and CI results cannot diverge.
 check-cli-surface:
 	./scripts/check-cli-surface.sh
+
+# Proves the vulnerability gate runs under the Go version go.mod declares, by
+# running the real script against a fake `go` and inspecting the environment it
+# hands its child. CI cannot detect the pin's removal by itself, because its
+# runner has already selected that same toolchain.
+check-vulncheck-pin:
+	./scripts/check-vulncheck-pin.sh
 
 test:
 	go test ./...
