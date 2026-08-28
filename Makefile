@@ -1,14 +1,27 @@
-.PHONY: build build-release test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
+.PHONY: build build-release check-release-stamping test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 # Version and commit are stamped at link time; the chain and binary names are
 # compiled in (see cmd/twilightd/main.go) so even an unstamped build identifies
-# itself. VERSION comes from the tag when the tree is clean and carries -dirty
-# otherwise, so a binary built from uncommitted work says so.
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
+# itself.
+#
+# Dirtiness is derived separately from VERSION and is NOT overridable. Carrying
+# it inside VERSION meant an explicit `VERSION=v0.1.0` replaced the whole
+# `git describe --dirty` expression and silently dropped the marker: the binary
+# then claimed to be exactly COMMIT while the source differed from it, and the
+# checksum hashed that artifact faithfully without being able to disclose the
+# mismatch. So `--dirty` comes off git describe, and the marker is appended to
+# whatever VERSION says — default and explicit builds behave identically.
+#
+# diff-index considers tracked files only, so untracked material (docs/specs/)
+# does not count as a modification.
+DIRTY   := $(shell git diff-index --quiet HEAD -- 2>/dev/null || echo -dirty)
+VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo unknown)
 COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 BUILD_TAGS ?=
-LDFLAGS = -X github.com/cosmos/cosmos-sdk/version.Version=$(VERSION) \
+# The effective stamp. Always carries the dirty marker when the tree is dirty.
+STAMP = $(VERSION)$(DIRTY)
+LDFLAGS = -X github.com/cosmos/cosmos-sdk/version.Version=$(STAMP) \
           -X github.com/cosmos/cosmos-sdk/version.Commit=$(COMMIT) \
           -X github.com/cosmos/cosmos-sdk/version.BuildTags=$(BUILD_TAGS)
 
@@ -25,11 +38,18 @@ build:
 RELEASE_DIR ?= build/release
 RELEASE_TARGETS = linux/amd64 linux/arm64 darwin/arm64
 
+# A release artifact built from uncommitted work is never legitimate, so the
+# refusal comes BEFORE anything is cleared or built — there is no escape hatch,
+# and the remedy is to commit. `make build` stays usable on a dirty tree because
+# it is a development convenience, and it says -dirty when it is one.
 build-release:
+	@test -z "$(DIRTY)" || { \
+	  echo "refusing to build a release from a dirty tree: uncommitted changes in tracked files" >&2; \
+	  git --no-pager diff --stat HEAD -- >&2; exit 1; }
 	@rm -rf $(RELEASE_DIR) && mkdir -p $(RELEASE_DIR)
 	@for t in $(RELEASE_TARGETS); do \
 	  os=$${t%%/*}; arch=$${t##*/}; \
-	  out=$(RELEASE_DIR)/twilightd-$(VERSION)-$$os-$$arch; \
+	  out=$(RELEASE_DIR)/twilightd-$(STAMP)-$$os-$$arch; \
 	  echo "  building $$out"; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
 	    go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/twilightd || exit 1; \
@@ -37,6 +57,11 @@ build-release:
 	@cd $(RELEASE_DIR) && { command -v sha256sum >/dev/null && sha256sum twilightd-* \
 	    || shasum -a 256 twilightd-*; } > SHA256SUMS
 	@echo; echo "  $(RELEASE_DIR)/SHA256SUMS"; cat $(RELEASE_DIR)/SHA256SUMS
+
+# Provenance checks for the stamping and release targets above. Fast, and needs
+# a clean tree because it deliberately dirties a tracked file and restores it.
+check-release-stamping:
+	./scripts/check-release-stamping.sh
 
 test:
 	go test ./...
