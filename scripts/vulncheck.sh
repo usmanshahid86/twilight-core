@@ -20,6 +20,25 @@ set -euo pipefail
 GOVULNCHECK_VERSION="v1.5.0"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# The TOOLCHAIN is pinned for the same reason the version is, and pinning only one
+# of them left the intent half enforced: the tool was fixed while the compiler
+# under it was not.
+#
+# `go run …/govulncheck@vX` carries its own Go requirement, and under the default
+# GOTOOLCHAIN=auto the toolchain is chosen to satisfy that module — so whichever
+# newer Go happens to sit in the local module cache wins. Once a go1.26 toolchain
+# appeared locally, the scan failed to LOAD PACKAGES at all: a transitive
+# dependency uses runtime internals that changed there. The gate then exited
+# non-zero having scanned nothing, which reads like a finding and is not one.
+#
+# Derived from go.mod rather than written down again, so the two cannot drift.
+GO_VERSION="$(awk '/^go [0-9]/ { print $2; exit }' "${ROOT}/go.mod")"
+if [[ -z "${GO_VERSION}" ]]; then
+  echo "vulncheck: could not read the go directive from go.mod" >&2
+  exit 2
+fi
+export GOTOOLCHAIN="go${GO_VERSION}"
 ALLOWFILE="${ROOT}/.govulncheck-allow.json"
 TARGET="${1:-./...}"
 
@@ -28,7 +47,7 @@ command -v jq >/dev/null 2>&1 || { echo "vulncheck: jq is required but not insta
 TMP="$(mktemp -d)"
 trap 'rm -rf "${TMP}"' EXIT
 
-echo "vulncheck: scanning ${TARGET} with govulncheck ${GOVULNCHECK_VERSION}"
+echo "vulncheck: scanning ${TARGET} with govulncheck ${GOVULNCHECK_VERSION} under ${GOTOOLCHAIN}"
 go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" -format json "${TARGET}" \
   > "${TMP}/scan.json"
 

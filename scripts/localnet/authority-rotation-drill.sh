@@ -117,23 +117,16 @@ new_key() { # <name> -> address, funded
   echo "$a"
 }
 
-# params_doc emits a Params document `coreslot update-params` can actually read.
+# params_doc emits a Params document for `coreslot update-params`.
 #
-# The query renders every numeric field as a JSON STRING (proto3 JSON), while the
-# Go struct carries plain int64/uint64 with no `,string` tag — so feeding the
-# query's own output straight back in fails with "cannot unmarshal string into Go
-# struct field Params.slot_voting_power of type int64". The obvious operator
-# workflow (query params, edit one field, submit) is therefore broken; that is a
-# CLI defect independent of this drill, tracked separately.
-#
-# Numeric-looking strings are converted by trying tonumber and keeping the
-# original on failure, rather than by naming the numeric fields: an enumerated
-# list would silently rot the next time a field is added to Params.
+# No numeric conversion. The query renders 64-bit integers as JSON strings
+# (proto3 JSON) and update-params now reads that dialect directly, so query
+# output feeds straight back in — which is the operator workflow, and this drill
+# is the real-binary proof that it works. Before, the same document failed with
+# "cannot unmarshal string into Go struct field ... of type int64" and the drill
+# had to convert every numeric field first.
 params_doc() { # <jq filter applied to the params object>
-  # `catch .` would bind `.` to the ERROR MESSAGE, not the original value, which
-  # silently replaced every bech32 address with a parser diagnostic. Bind the input
-  # first so a failed conversion keeps what it was given.
-  q params | jq "$1" | jq 'with_entries(.value |= (if type == "string" then (. as $v | try ($v|tonumber) catch $v) else . end))'
+  q params | jq "$1"
 }
 
 params_authority() { q params 2>/dev/null | jq -r '.params.authority // "?"'; }

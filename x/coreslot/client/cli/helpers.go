@@ -35,6 +35,23 @@ func pubKeyAny(value string) (*anypb.Any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode consensus key: %w", err)
 	}
+	// The input must be the CANONICAL encoding of the bytes it decodes to, not
+	// merely a decodable spelling of them.
+	//
+	// Go's base64 decoder ignores \r and \n (though not spaces), so a key with a
+	// trailing newline — the shape a key read from a file or piped through a shell
+	// routinely has — decodes to the right 32 bytes. Genesis then writes the
+	// caller's ORIGINAL string into the CometBFT validator entry while the CoreSlot
+	// record holds the decoded key, and the two halves of one document describe
+	// different keys. The command exits 0 and `coreslot-genesis validate` refuses
+	// what it just produced.
+	//
+	// Re-encoding and requiring equality is the whole rule: this helper may accept
+	// only what the writer can store back verbatim.
+	if canonical := base64.StdEncoding.EncodeToString(raw); canonical != value {
+		return nil, fmt.Errorf(
+			"consensus key must be canonical base64 with no surrounding or embedded whitespace")
+	}
 	return ed25519AnyFromBytes(raw)
 }
 

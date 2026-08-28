@@ -484,3 +484,49 @@ func TestGenesisCLIStillAcceptsABareConsensusKey(t *testing.T) {
 	// the divergent-representation bug produced but failed.
 	require.NoError(t, runCLI(t, validateGenesisCmd(), home, cdc))
 }
+
+// TestGenesisCLIRejectsNonCanonicalConsensusKeys closes the last form of the
+// divergence #145 began: an input that decodes to the right bytes but is not the
+// canonical spelling of them.
+//
+// Go's base64 decoder ignores \r and \n, so a newline-padded key decoded fine
+// while genesis wrote the caller's original string — newline included — into the
+// CometBFT validator entry. `coreslot-genesis add` exited 0 and produced a
+// document whose two halves named different keys, caught only by a later
+// `coreslot-genesis validate`.
+//
+// A key read from a file or piped through a shell carries a trailing newline
+// routinely, so this was reachable by ordinary use rather than by hand-editing.
+func TestGenesisCLIRejectsNonCanonicalConsensusKeys(t *testing.T) {
+	bare := testConsensusKeyB64()
+
+	for name, key := range map[string]string{
+		"trailing newline": bare + "\n",
+		"leading newline":  "\n" + bare,
+		"embedded newline": bare[:10] + "\n" + bare[10:],
+		"carriage return":  bare + "\r\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			configDir := filepath.Join(home, "config")
+			require.NoError(t, os.MkdirAll(configDir, 0o755))
+
+			cdc := testCodec(t)
+			authority, emergency, operator, payout, settlement := testAddresses()
+			writeTestGenesis(t, configDir, cdc, types.DefaultGenesis(authority, emergency), `"1"`)
+
+			path := filepath.Join(configDir, "genesis.json")
+			before, err := os.ReadFile(path)
+			require.NoError(t, err)
+
+			require.Error(t,
+				runCLI(t, addGenesisSlotCmd(), home, cdc, operator, payout, settlement, key, testMoniker),
+				"a key that does not round-trip verbatim must be refused before anything is written")
+
+			after, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.Equal(t, before, after,
+				"a refused add must leave the genesis bytes byte-for-byte unchanged")
+		})
+	}
+}

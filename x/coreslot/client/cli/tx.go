@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -248,11 +247,11 @@ func updateParamsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		var params types.Params
-		if err := json.Unmarshal(bz, &params); err != nil {
+		params, err := decodeParams(cmd, bz)
+		if err != nil {
 			return err
 		}
-		return broadcast(cmd, &types.MsgUpdateParams{Authority: from, Params: &params})
+		return broadcast(cmd, &types.MsgUpdateParams{Authority: from, Params: params})
 	})
 }
 
@@ -360,4 +359,36 @@ func cancelAuthorityNominationCmd() *cobra.Command {
 			}
 			return broadcast(cmd, &types.MsgCancelAuthorityNomination{Authority: from, Role: role})
 		})
+}
+
+// decodeParams reads a Params document through the chain's own JSON codec.
+//
+// That codec is the SINGLE parser, deliberately. It already accepts both numeric
+// spellings an operator can hold — gogoproto's jsonpb strips the quotes from a
+// 64-bit integer before parsing it, so proto3 output like "max_active_slots":"100"
+// and a hand-written 100 both decode — so query output round-trips without a
+// second parser contract existing alongside it.
+//
+// An earlier version fell back to encoding/json on the belief that the codec
+// would refuse bare numbers. It does not, so the fallback bought no
+// compatibility, and its only real effect was to accept documents the codec
+// correctly REJECTS. encoding/json ignores unknown fields, so a typo such as
+// key_rotation_delay_block decoded to the zero value instead of failing — and
+// because update-params writes the WHOLE struct and Params.Validate permits zero
+// there, an authorized update would silently persist a parameter nobody chose.
+//
+// Rejecting an unrecognized field is the property worth keeping: in a
+// whole-struct write, a field the parser does not understand is far more likely
+// to be a mistake than an intention.
+
+func decodeParams(cmd *cobra.Command, bz []byte) (*types.Params, error) {
+	ctx, err := client.GetClientTxContext(cmd)
+	if err != nil {
+		return nil, err
+	}
+	var params types.Params
+	if err := ctx.Codec.UnmarshalJSON(bz, &params); err != nil {
+		return nil, fmt.Errorf("decode params: %w", err)
+	}
+	return &params, nil
 }
