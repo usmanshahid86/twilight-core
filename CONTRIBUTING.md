@@ -64,9 +64,9 @@ the numbering below is this project's convention for them:
 
 `v0.1.0` is the **first proven upgrade-capable operational baseline** — the first version
 carrying `x/upgrade`, with the upgrade proven end to end across four validators and
-export/restore/join characterized. It is **not** a public-testnet or genesis release: the
-pre-public gates remain open, notably authority-rotation hardening (#130) and the
-block-gas/anti-spam cluster. Nothing upgrades *to* it, so it registers no handler.
+export/restore/join characterized. It is **not** a public-testnet or genesis release: it
+predates the two-step authority rotation added in #130, and the block-gas/anti-spam cluster
+(#147) is still open. Nothing upgrades *to* it, so it registers no handler.
 
 Earlier commits carry descriptive tags rather than version numbers, because a chain launched
 from a build without `x/upgrade` can never be upgraded, and numbering such a build would imply
