@@ -7,6 +7,7 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/runtime"
+	"github.com/spf13/cobra"
 
 	"cosmossdk.io/core/appmodule"
 
@@ -16,6 +17,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
+	"github.com/twilight-project/twilight-core/x/coreslot/client/cli"
 	"github.com/twilight-project/twilight-core/x/coreslot/keeper"
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
@@ -47,6 +49,28 @@ func (AppModuleBasic) RegisterGRPCGatewayRoutes(clientCtx client.Context, mux *g
 		panic(err)
 	}
 }
+
+// GetTxCmd supplies the hand-written CoreSlot transaction tree, which AutoCLI
+// mounts at `tx coreslot` INSTEAD OF generating one from the Msg service.
+//
+// The generated tree could not work. Every CoreSlot message carrying a consensus
+// key takes a google.protobuf.Any, and AutoCLI's Any flag builder resolves
+// `@type` against protoregistry.GlobalTypes, which holds only pulsar-registered
+// types. cosmos.crypto.ed25519.PubKey lives in the gogoproto InterfaceRegistry,
+// which that builder never consults, so `tx coreslot register-core-slot` failed
+// during flag parsing — before signing, before any network call — for every
+// encoding an operator could supply. An operator hit this on a live devnet.
+//
+// The two trees covered the same 13 operations, so nothing is lost by supplying
+// this one: the four names they shared are unchanged, and the nine generated-only
+// names give way to the nine hand-written equivalents. This tree builds the Any
+// in Go from a base64 or show-validator key, which is why it works.
+//
+// No GetQueryCmd counterpart is defined, deliberately. Queries carry no Any and
+// the generated ones are correct; supplying a custom query command here would
+// displace them and move `query coreslot ...` for no reason.
+func (AppModuleBasic) GetTxCmd() *cobra.Command { return cli.GetTxCmd() }
+
 func (b AppModuleBasic) DefaultGenesis(cdc codec.JSONCodec) json.RawMessage {
 	return cdc.MustMarshalJSON(types.DefaultGenesis(b.authority, b.emergencyAuthority))
 }
