@@ -53,7 +53,11 @@ RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 # execute the plan it is handed.
 FROM_TAG="${FROM_TAG:-v0.1.0}"
 UPGRADE_NAME="${UPGRADE_NAME:-v0.2.0}"
-CANDIDATE_REF="${CANDIDATE_REF:-HEAD}"
+# The candidate is whatever is CHECKED OUT, and cannot be otherwise: the release
+# build archives HEAD by construction, so an artifact is the commit it names. A
+# knob naming some other ref would be a label the binary does not carry.
+#
+# To rehearse a different commit, check it out.
 
 DRILL_EVID_DIR="$ROOT/build/localnet/evidence/$RUN_ID/release-upgrade"
 WORK="$ROOT/build/localnet/rehearsal-$RUN_ID"
@@ -110,8 +114,8 @@ expect "released_artifact_matches_published_checksum" "$PUBLISHED_SHA" "$(sha256
 expect "released_artifact_reports_its_version" "$FROM_TAG" \
   "$("$BIN_A" version --long 2>/dev/null | awk -F': *' '$1=="version" {print $2}')"
 
-echo "==> building the candidate from $CANDIDATE_REF through the release path"
-CANDIDATE_COMMIT="$(git -C "$ROOT" rev-parse "$CANDIDATE_REF")"
+CANDIDATE_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
+echo "==> building the candidate from $CANDIDATE_COMMIT through the release path"
 # Built the way a release is built, not with a bare `go build`. A candidate that
 # reports no version and no commit carries none of the provenance this run exists
 # to establish, and would be a different artifact from the one that ships.
