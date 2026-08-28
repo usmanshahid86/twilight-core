@@ -76,7 +76,7 @@ devnet/           devnet genesis and configuration
 ## Build, test, and run
 
 ```bash
-make build            # go build ./cmd/twilightd
+make build            # stamped binary at build/twilightd
 make test             # go test ./...
 make localnet-smoke   # spin up a 4-node localnet, run a sanity pass, tear down
 ```

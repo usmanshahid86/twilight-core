@@ -1,8 +1,42 @@
-.PHONY: build test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
+.PHONY: build build-release test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
+# Version and commit are stamped at link time; the chain and binary names are
+# compiled in (see cmd/twilightd/main.go) so even an unstamped build identifies
+# itself. VERSION comes from the tag when the tree is clean and carries -dirty
+# otherwise, so a binary built from uncommitted work says so.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
+COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+BUILD_TAGS ?=
+LDFLAGS = -X github.com/cosmos/cosmos-sdk/version.Version=$(VERSION) \
+          -X github.com/cosmos/cosmos-sdk/version.Commit=$(COMMIT) \
+          -X github.com/cosmos/cosmos-sdk/version.BuildTags=$(BUILD_TAGS)
+
 build:
-	go build ./cmd/twilightd
+	go build -ldflags '$(LDFLAGS)' -o build/twilightd ./cmd/twilightd
+
+# Release artifacts for the platforms validators run, plus one developer target.
+# CGO_ENABLED=0 keeps them static on the default goleveldb backend; RocksDB is an
+# indirect dependency and is not compiled in without its build tag.
+#
+# The checksum file is the artifact operators actually verify: cosmovisor runs
+# with DAEMON_ALLOW_DOWNLOAD_BINARIES=false, so a pre-staged binary is trusted
+# because its hash matches, not because of where it came from.
+RELEASE_DIR ?= build/release
+RELEASE_TARGETS = linux/amd64 linux/arm64 darwin/arm64
+
+build-release:
+	@rm -rf $(RELEASE_DIR) && mkdir -p $(RELEASE_DIR)
+	@for t in $(RELEASE_TARGETS); do \
+	  os=$${t%%/*}; arch=$${t##*/}; \
+	  out=$(RELEASE_DIR)/twilightd-$(VERSION)-$$os-$$arch; \
+	  echo "  building $$out"; \
+	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
+	    go build -trimpath -ldflags '$(LDFLAGS)' -o $$out ./cmd/twilightd || exit 1; \
+	done
+	@cd $(RELEASE_DIR) && { command -v sha256sum >/dev/null && sha256sum twilightd-* \
+	    || shasum -a 256 twilightd-*; } > SHA256SUMS
+	@echo; echo "  $(RELEASE_DIR)/SHA256SUMS"; cat $(RELEASE_DIR)/SHA256SUMS
 
 test:
 	go test ./...

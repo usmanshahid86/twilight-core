@@ -31,7 +31,7 @@ checks CI enforces (the `make` targets are the local shorthand; CI is the source
 truth and differs in a few ways noted inline):
 
 ```bash
-make build     # go build ./cmd/twilightd  (CI builds all packages: go build ./...)
+make build     # stamped binary at build/twilightd  (CI builds all packages: go build ./...)
 make test      # go test ./...
 make fmt       # gofmt
 make lint      # golangci-lint             (CI pins v2.12.2, gates only-new-issues)

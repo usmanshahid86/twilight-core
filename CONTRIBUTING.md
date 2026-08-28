@@ -23,7 +23,7 @@ and `app/` is high.
 Requires **Go 1.25.x** (see `go.mod`).
 
 ```bash
-make build     # go build ./cmd/twilightd
+make build     # stamped binary at build/twilightd
 make test      # go test ./...
 make fmt       # gofmt
 make lint      # golangci-lint (matches CI)
@@ -73,6 +73,17 @@ renamed or edited, because a syncing node must replay the same handler at the sa
 Each release publishes **SHA-256 checksums** for its binaries. Operators run cosmovisor with
 `DAEMON_ALLOW_DOWNLOAD_BINARIES=false` and verify pre-staged binaries by hash, so the
 checksum is the artifact that matters, not the download.
+
+`make build` stamps the version and commit at link time and writes to
+`build/twilightd`; `twilightd version --long` reports them. The chain and binary names are
+compiled in, so even an unstamped `go build ./cmd/twilightd` identifies itself — an
+unstamped build reports an empty version, which is honest, because it was not released.
+
+`make build-release` produces the release artifacts and their checksums:
+
+```bash
+make build-release VERSION=v0.1.0
+```
 
 Binaries target the platforms validators actually run:
 
