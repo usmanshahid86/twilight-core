@@ -242,6 +242,26 @@ func (k Keeper) validateGenesisEconomicAddresses(genesis *types.GenesisState) er
 			return types.ErrInvalidAddress.Wrapf("slot %d settlement address: %v", slot.SlotId, err)
 		}
 	}
+	// Pending nominations take the same rule as a live nomination destination.
+	// A genesis document is not a trusted source: without this, a module account
+	// or a bank-blocked address could be installed as a pending successor by
+	// writing it into the file by hand, and accepted later against rules it would
+	// never have passed at nomination.
+	//
+	// It belongs in this preflight rather than in the import loop because the
+	// import runs AFTER Params.Set — discovering an inadmissible nominee there
+	// would mean params had already been written to the InitChain cache.
+	for _, entry := range genesis.PendingAuthorityTransfers {
+		if entry == nil || entry.Transfer == nil {
+			// Structure is GenesisState.Validate's job and it runs first; this is
+			// a defensive guard so a future caller that skips it cannot panic here.
+			return types.ErrInvalidGenesis.Wrap("pending authority transfer is empty")
+		}
+		if _, err := k.economicAddresses.Validate(entry.Transfer.Nominee); err != nil {
+			return types.ErrInvalidAddress.Wrapf(
+				"pending authority transfer nominee for role %s: %v", entry.Role, err)
+		}
+	}
 	return nil
 }
 
@@ -324,38 +344,22 @@ func fmtHex(value []byte) string {
 	return string(out)
 }
 
-// initPendingAuthorityTransfers validates and commits imported nominations.
+// initPendingAuthorityTransfers commits nominations that preflight has already
+// accepted.
 //
-// The admissibility check lives HERE rather than in GenesisState.Validate
-// because it needs the app-derived module-account and bank-blocked sets, which
-// a pure types-level validator has no access to. Validating only the syntax
-// there and the full rule here means an imported document cannot install a
-// destination that a live nomination would have been refused.
+// It performs no semantic validation. Structure, role, duplicates, nominee syntax
+// and height are decided by GenesisState.Validate, and app-derived admissibility
+// by validateGenesisEconomicAddresses — both before the first store write. A
+// check here would run AFTER Params.Set, which is precisely the ordering that
+// let a malformed document be reported as valid and then fail mid-import.
 func (k Keeper) initPendingAuthorityTransfers(ctx context.Context, genesis *types.GenesisState) error {
-	seen := make(map[types.AuthorityRole]struct{}, len(genesis.PendingAuthorityTransfers))
 	for _, entry := range genesis.PendingAuthorityTransfers {
-		if entry == nil || entry.Transfer == nil {
-			return types.ErrInvalidGenesis.Wrap("pending authority transfer is empty")
-		}
 		key, err := authorityRoleKey(entry.Role)
 		if err != nil {
+			// Unreachable: preflight rejects an invalid role. Returned rather than
+			// ignored so a future reordering fails loudly instead of silently
+			// dropping a nomination.
 			return types.ErrInvalidGenesis.Wrapf("pending authority transfer: %v", err)
-		}
-		// At most one nomination per role. Two entries for the same role would
-		// leave which one survives dependent on iteration order, and only one of
-		// them could be the intended successor.
-		if _, duplicate := seen[entry.Role]; duplicate {
-			return types.ErrInvalidGenesis.Wrapf("duplicate pending authority transfer for role %s", entry.Role)
-		}
-		seen[entry.Role] = struct{}{}
-
-		if _, err := k.economicAddresses.Validate(entry.Transfer.Nominee); err != nil {
-			return types.ErrInvalidGenesis.Wrapf("pending authority transfer nominee for role %s: %v", entry.Role, err)
-		}
-		if entry.Transfer.NominatedHeight < 0 {
-			return types.ErrInvalidGenesis.Wrapf(
-				"pending authority transfer for role %s has negative nominated height %d",
-				entry.Role, entry.Transfer.NominatedHeight)
 		}
 		if err := k.PendingAuthority.Set(ctx, key, *entry.Transfer); err != nil {
 			return err

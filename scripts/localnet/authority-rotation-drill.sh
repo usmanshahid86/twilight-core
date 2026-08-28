@@ -43,9 +43,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NODE_COUNT="${NODE_COUNT:-4}"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 DRILL_EVID_DIR="$ROOT/build/localnet/evidence/$RUN_ID/authority-rotation"
-DRILL_ASSERT_LOG="$DRILL_EVID_DIR/assertions.jsonl"
-DRILL_SUMMARY="$DRILL_EVID_DIR/summary.csv"
-mkdir -p "$DRILL_EVID_DIR"
+
+# A reused RUN_ID must not be able to append to an earlier run's evidence, or to
+# leave its PASS verdict standing after a later run terminates early. Refuse
+# rather than delete: evidence from a previous run is the record of that run, and
+# silently removing it would destroy the thing a re-reader came for.
+if [[ -e "$DRILL_EVID_DIR" ]]; then
+  echo "refusing to run: $DRILL_EVID_DIR already exists; use a fresh RUN_ID" >&2
+  exit 2
+fi
+drill_assert_init "$DRILL_EVID_DIR" || { echo "could not initialise evidence" >&2; exit 2; }
 
 # The codespace-2 error registered as ErrUnauthorized. Asserted by value, not as
 # "non-zero": a stale sequence also fails, and would otherwise be indistinguishable
@@ -218,9 +225,14 @@ expect "authority_unchanged_after_nomination" "$AUTH0" "$(params_authority)"
 expect "incumbent_still_acts" "0" "$(authority_action operator0 90)"
 expect "incumbent_action_took_effect" "90" "$(params_max_slots)"
 
-# And the nominee cannot act yet — asserted against the SPECIFIC unauthorized
-# code, because a nominee with a bad sequence would also fail.
-expect "nominee_cannot_act_yet" "$CODE_UNAUTHORIZED" "$(authority_action rotate-primary 91)"
+# And the PENDING NOMINEE cannot act yet — rotate-displaced, which is the key
+# nominated above, not some other stranger. Signing this with a third party would
+# prove only that a stranger cannot act, which was never in doubt and is not the
+# property under test: the claim is that being nominated confers nothing.
+#
+# Asserted against the SPECIFIC unauthorized code, because a nominee with a bad
+# sequence would also fail.
+expect "nominee_cannot_act_yet" "$CODE_UNAUTHORIZED" "$(authority_action rotate-displaced 91)"
 expect "nominee_action_had_no_effect" "90" "$(params_max_slots)"
 phase_end "nomination-inert" "nomination records a successor without moving the role"
 

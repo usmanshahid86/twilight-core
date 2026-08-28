@@ -5,6 +5,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/cosmos/cosmos-sdk/codec"
+	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
+	"github.com/cosmos/cosmos-sdk/runtime"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/twilight-project/twilight-core/x/coreslot/keeper"
@@ -510,4 +513,184 @@ func TestImportedNominationsAreValidated(t *testing.T) {
 			require.Error(t, err, "an unusable nomination must stop genesis rather than be imported")
 		})
 	}
+}
+
+// A module account is the destination the whole guard exists for: an ordinary,
+// well-formed bech32 address that no key controls. Installing one as an authority
+// removes every capability that role gates, permanently — for the primary role
+// that includes the upgrade path, so the chain could not even upgrade out of it.
+//
+// Asserted explicitly rather than left to the all-zero case. The two are refused
+// by different branches of the economic rule (ErrModuleAccount vs the zero
+// check), and only one of them is a plausible operator mistake.
+func TestModuleAccountIsRefusedAsANominee(t *testing.T) {
+	bothRoles(t, "module account refused", func(t *testing.T, role types.AuthorityRole) {
+		ms, k, ctx, _, _ := authoritySetup(t)
+		incumbent := holder(t, k, ctx, role)
+
+		_, err := ms.NominateAuthority(ctx, &types.MsgNominateAuthority{
+			Authority: incumbent, Role: role, Nominee: testModuleAddress(testModuleAccountName),
+		})
+		require.ErrorIs(t, err, types.ErrInvalidAddress)
+		require.Contains(t, err.Error(), "module account")
+
+		_, getErr := k.PendingAuthority.Get(ctx, int32(role))
+		require.Error(t, getErr, "a refused nomination must leave no pending state")
+		require.Equal(t, incumbent, holder(t, k, ctx, role))
+	})
+}
+
+// Acceptance re-checks admissibility, and this proves the check is INDEPENDENT of
+// the one at nomination rather than a second call with the same answer.
+//
+// The nominee is admissible when nominated and inadmissible when the acceptance
+// executes. That is not contrived: a nomination is durable state that can outlive
+// a binary upgrade, and the inadmissible set is app-derived — a bank-blocked
+// address added between the two steps produces exactly this.
+//
+// The seam is the injected validator. A second keeper is built over the SAME
+// store with a stricter blocked set, so the pending nomination written by the
+// first is read by the second under the newer rule.
+func TestAcceptanceRevalidatesUnderCurrentRules(t *testing.T) {
+	bothRoles(t, "newly blocked nominee cannot accept", func(t *testing.T, role types.AuthorityRole) {
+		lenient, ctx, _, _, storeKey := setupWithRawStore(t)
+		primary, emergency := addr(0x11), addr(0x12)
+		require.NoError(t, lenient.Params.Set(ctx, types.DefaultParams(primary, emergency)))
+
+		incumbent := primary
+		if role == types.AuthorityRole_AUTHORITY_ROLE_EMERGENCY {
+			incumbent = emergency
+		}
+		nominee := addr(0x21)
+
+		// Admissible now.
+		_, err := keeper.NewMsgServer(lenient).NominateAuthority(ctx, &types.MsgNominateAuthority{
+			Authority: incumbent, Role: role, Nominee: nominee,
+		})
+		require.NoError(t, err)
+
+		// The same store, read by a keeper whose rules now refuse that address.
+		strict := keeper.NewKeeper(
+			authorityTestCodec(), runtime.NewKVStoreService(storeKey), testEconomicAddresses(t, nominee), nil)
+
+		pending, err := strict.PendingAuthority.Get(ctx, int32(role))
+		require.NoError(t, err, "the nomination must still be there to be re-judged")
+		require.Equal(t, nominee, pending.Nominee)
+
+		_, err = keeper.NewMsgServer(strict).AcceptAuthority(ctx, &types.MsgAcceptAuthority{
+			Nominee: nominee, Role: role,
+		})
+		require.ErrorIs(t, err, types.ErrInvalidAddress,
+			"a destination inadmissible under CURRENT rules must not be installed because it was admissible when named")
+
+		// The incumbent keeps the role, and the nomination is left pending rather
+		// than silently cleared — a refused acceptance is not a cancellation.
+		require.Equal(t, incumbent, holder(t, strict, ctx, role))
+		_, err = strict.PendingAuthority.Get(ctx, int32(role))
+		require.NoError(t, err)
+	})
+}
+
+// authorityTestCodec builds the same codec the shared setup uses, so a keeper
+// rebuilt over an existing store decodes what the first one wrote.
+func authorityTestCodec() codec.Codec {
+	registry := codectypes.NewInterfaceRegistry()
+	types.RegisterInterfaces(registry)
+	return codec.NewProtoCodec(registry)
+}
+
+// Malformed pending state must be refused by ORDINARY genesis validation, not
+// only by keeper import.
+//
+// The distinction is operational. `coreslot-genesis validate` and the module's
+// ValidateGenesis run the pure types-level check; before it covered pending
+// transfers, a document naming role 99 with a malformed nominee and a negative
+// height was reported as "a valid genesis file" and refused only later, during
+// import, after params had already been written to the InitChain cache. Tooling
+// that says a broken document is fine is worse than tooling that says nothing.
+func TestGenesisValidateRejectsMalformedPendingTransfers(t *testing.T) {
+	entry := func(role types.AuthorityRole, nominee string, height int64) *types.PendingAuthorityTransferEntry {
+		return &types.PendingAuthorityTransferEntry{
+			Role:     role,
+			Transfer: &types.PendingAuthorityTransfer{Nominee: nominee, NominatedHeight: height},
+		}
+	}
+
+	for name, tc := range map[string]struct {
+		transfers []*types.PendingAuthorityTransferEntry
+		wantErr   string
+	}{
+		"nil entry":    {[]*types.PendingAuthorityTransferEntry{nil}, "is nil"},
+		"nil transfer": {[]*types.PendingAuthorityTransferEntry{{Role: types.AuthorityRole_AUTHORITY_ROLE_PRIMARY}}, "no transfer"},
+		"unspecified role": {
+			[]*types.PendingAuthorityTransferEntry{entry(types.AuthorityRole_AUTHORITY_ROLE_UNSPECIFIED, addr(0x21), 1)},
+			"invalid role",
+		},
+		"unknown role": {
+			[]*types.PendingAuthorityTransferEntry{entry(types.AuthorityRole(99), addr(0x21), 1)},
+			"invalid role",
+		},
+		"duplicate role": {
+			[]*types.PendingAuthorityTransferEntry{
+				entry(types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, addr(0x21), 1),
+				entry(types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, addr(0x22), 1),
+			},
+			"duplicate",
+		},
+		"malformed nominee": {
+			[]*types.PendingAuthorityTransferEntry{entry(types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, "not-an-address", 1)},
+			"invalid nominee",
+		},
+		"negative height": {
+			[]*types.PendingAuthorityTransferEntry{entry(types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, addr(0x21), -1)},
+			"negative nominated height",
+		},
+		// Runtime nomination refuses naming the incumbent, so a document a real
+		// chain produced cannot contain one. Refusing it keeps imported state
+		// canonical with state the chain can actually reach.
+		"nominee is the incumbent": {
+			[]*types.PendingAuthorityTransferEntry{entry(types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, addr(0x11), 1)},
+			"names the current holder",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, k, ctx, _, _ := genesisAuthoritySetup(t)
+			genesis, err := k.ExportGenesis(ctx)
+			require.NoError(t, err)
+			genesis.PendingAuthorityTransfers = tc.transfers
+
+			err = genesis.Validate()
+			require.Error(t, err, "pure genesis validation must reject this without a keeper")
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+// A module account passes every pure check — it is well-formed bech32 — so only
+// the keeper's app-derived preflight can refuse it. It must do so BEFORE the
+// first store write, or a document that fails halfway leaves params behind.
+func TestGenesisPreflightRejectsInadmissiblePendingNominee(t *testing.T) {
+	_, k, ctx, _, _ := genesisAuthoritySetup(t)
+	genesis, err := k.ExportGenesis(ctx)
+	require.NoError(t, err)
+	genesis.PendingAuthorityTransfers = []*types.PendingAuthorityTransferEntry{{
+		Role: types.AuthorityRole_AUTHORITY_ROLE_PRIMARY,
+		Transfer: &types.PendingAuthorityTransfer{
+			Nominee: testModuleAddress(testModuleAccountName), NominatedHeight: 1,
+		},
+	}}
+
+	// Pure validation cannot see this: module-account membership is app-derived.
+	require.NoError(t, genesis.Validate(),
+		"a module account is well-formed bech32, so the types layer must not be expected to catch it")
+
+	fresh, freshCtx, _, _ := setup(t)
+	_, err = fresh.InitGenesis(freshCtx, genesis)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "module account")
+
+	// Nothing was committed: params must not exist on a keeper whose genesis was
+	// refused, which is what proves the check ran before the first write.
+	_, paramsErr := fresh.Params.Get(freshCtx)
+	require.Error(t, paramsErr, "a refused genesis must leave no params behind")
 }

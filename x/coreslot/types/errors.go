@@ -60,8 +60,11 @@ var (
 	// rotate the primary authority.
 	ErrInvalidAuthorityRole = errorsmod.Register(ModuleName, 21, "invalid authority role")
 
-	// ErrNoPendingNomination reports an accept or cancel for a role that has no
-	// nomination outstanding — including one already accepted, canceled or
-	// replaced.
+	// ErrNoPendingNomination reports an accept or cancel for a role that has NO
+	// nomination outstanding — never nominated, already accepted, or canceled.
+	//
+	// A REPLACED nominee is a different case and gets ErrUnauthorized: the
+	// replacement leaves a nomination pending, so there is something to accept and
+	// the displaced party simply is not the one entitled to accept it.
 	ErrNoPendingNomination = errorsmod.Register(ModuleName, 22, "no pending authority nomination for this role")
 )
