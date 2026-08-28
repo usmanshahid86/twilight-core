@@ -27,7 +27,7 @@ UNTRACKED_GO="cmd/twilightd/zz_provenance_probe.go"
 UNTRACKED_ASM="cmd/twilightd/zz_provenance_probe.s"
 GOWORK_PROBE="go.work"
 BIN="build/twilightd"
-cleanup() { git checkout -- "$PROBE" 2>/dev/null || true; rm -f "$UNTRACKED_GO" "$UNTRACKED_ASM" "$GOWORK_PROBE"; }
+cleanup() { git checkout -- "$PROBE" 2>/dev/null || true; rm -f "$UNTRACKED_GO" "$UNTRACKED_ASM" go.work go.work.sum; }
 trap cleanup EXIT
 
 # Refuse to run against a tree that is already modified: the cases below dirty a
@@ -148,7 +148,9 @@ make build VERSION=v9.9.9 >/dev/null 2>&1
 check "go.work stamps -dirty anyway"        "v9.9.9-dirty" "$(stamped version)"
 make build-release VERSION=v9.9.9 >/dev/null 2>&1; rc=$?
 check "go.work refuses a release"           "nonzero" "$([[ $rc -ne 0 ]] && echo nonzero || echo zero)"
-rm -f "$GOWORK_PROBE"
+# go build writes go.work.sum alongside it, and that file is checked by name too,
+# so leaving it behind would make every later case run against a "dirty" tree.
+rm -f go.work go.work.sum
 
 echo
 echo "=== ambient GOFLAGS cannot alter a release ==="
