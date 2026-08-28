@@ -85,6 +85,34 @@ node_alive() {
   kill -0 "$(cat "$pidfile")" 2>/dev/null
 }
 
+# require_free_ports refuses to start when a port this localnet will bind is
+# already in use.
+#
+# Every port here is derived from the node index and is not configurable, so a
+# drill run on a host that already carries a node competes with it for the same
+# listeners. On one rehearsal host node2's gRPC port was the port a live service
+# read through, and running as written would have taken out a production path
+# mid-gate. Losing the race is the good outcome; winning it is the bad one.
+#
+# See #155 for making the base ports configurable, which this does not do.
+require_free_ports() {
+  local n port busy=()
+  for ((n = 0; n < NODE_COUNT; n++)); do
+    for port in $((26657 + n * 100)) $((26656 + n * 100)) $((9090 + n * 100)); do
+      if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+        busy+=("$port")
+      fi
+    done
+  done
+  if (( ${#busy[@]} > 0 )); then
+    echo "refusing to start: ports already in use: ${busy[*]}" >&2
+    echo "  another localnet or a live node is running; stop it, or run this in an isolated" >&2
+    echo "  network namespace. These ports are not configurable (see #155)." >&2
+    return 1
+  fi
+  return 0
+}
+
 setup_localnet() {
   mkdir -p "$EVID_DIR"
   "$ROOT/scripts/localnet/init.sh"
