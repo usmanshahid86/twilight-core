@@ -78,22 +78,35 @@ type MigrationKeepers struct {
 	Mining   miningkeeper.Keeper
 }
 
-// Upgrades is the live registry. It is deliberately empty in the released binary:
-// no upgrade has been performed on any long-lived chain yet, and an entry here is
-// a commitment that cannot be withdrawn.
+// Upgrades is the live registry.
 //
-// An empty registry does NOT prevent a plan being scheduled, and must not — the
-// binary that executes an upgrade does not exist yet on the nodes that schedule
-// it. What makes an empty registry safe is that a plan naming an upgrade this
-// binary cannot run stays visible through `query upgrade plan` and the
-// coreslot_upgrade_scheduled event, and remains cancellable by the authority for
-// the whole window before its height. Only when that height arrives do blocks
-// stop, and the answer then is to supply the binary.
-//
-// A scheduling-time check that the name is known would be worse than useless: it
-// is the state upstream aborts the block on for every height before the upgrade's
-// own. See ADR-0003 §1b.
-var Upgrades []Upgrade
+// A scheduling-time check that a name is known would be worse than useless: it is
+// the state upstream aborts the block on for every height before the upgrade's
+// own. A plan naming an upgrade this binary cannot run stays visible through
+// `query upgrade plan` and the coreslot_upgrade_scheduled event, and remains
+// cancellable by the authority for the whole window before its height. Only when
+// that height arrives do blocks stop, and the answer then is to supply the
+// binary. See ADR-0003 §1b.
+var Upgrades = []Upgrade{
+	{
+		// The first state-machine change after v0.1.0, which shipped CoreSlot at
+		// consensus version 1. Two-step authority rotation takes it to 2, so a
+		// chain running the released baseline needs a named upgrade to advance its
+		// module version map.
+		//
+		// Named for the version it upgrades TO, per CONTRIBUTING.md. Released
+		// entries are append-only and may never be edited.
+		//
+		// No StoreUpgrades: the pending-authority collection lives under a new
+		// PREFIX inside the CoreSlot store, not in a new store, so nothing has to
+		// be mounted before the application loads.
+		//
+		// No Migrate: the module-level 1->2 migration is a state no-op, and there
+		// is no chain-specific state to transform beyond it. A body here would be
+		// fabricating state the released chain never had.
+		Name: "v0.2.0",
+	},
+}
 
 // ValidateUpgrades rejects a registry that cannot be executed unambiguously.
 //

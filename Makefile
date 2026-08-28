@@ -1,4 +1,4 @@
-.PHONY: build build-release check-release-stamping check-cli-surface test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
+.PHONY: build build-release check-release-stamping check-cli-surface test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 # Version and commit are stamped at link time; the chain and binary names are
@@ -179,6 +179,12 @@ localnet-export-restore-faults:
 # real coordinated halt and a partial rollout. Deliberately NOT part of `drills`
 # — it is minutes long by nature (a protocol epoch must close so a settlement
 # spans the boundary) and would make the routine drill set too slow to run often.
+# Two-step authority rotation on a live 4-node network, for both operational
+# roles: nominate, prove the incumbent still acts and the nominee does not,
+# accept, prove the roles swapped, and prove UpdateParams cannot rotate either.
+localnet-authority-rotation-drill:
+	./scripts/localnet/authority-rotation-drill.sh
+
 localnet-upgrade-drill:
 	./scripts/localnet/upgrade-drill.sh
 

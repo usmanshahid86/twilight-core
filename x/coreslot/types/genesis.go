@@ -26,6 +26,9 @@ func (g GenesisState) Validate() error {
 	if err := g.Params.Validate(); err != nil {
 		return err
 	}
+	if err := g.validatePendingAuthorityTransfers(); err != nil {
+		return err
+	}
 	policies, err := indexGenesisPolicies(g.SelectionPolicies)
 	if err != nil {
 		return err
@@ -360,4 +363,71 @@ func validateConsensusPubKey(value *anypb.Any) error {
 		return fmt.Errorf("expected %d-byte key", sdked25519.PubKeySize)
 	}
 	return nil
+}
+
+// validatePendingAuthorityTransfers checks everything about an imported
+// nomination that is decidable WITHOUT app-derived context.
+//
+// It exists because genesis tooling has to be able to reject a bad document
+// before a node ever starts. `coreslot-genesis validate` and the module's own
+// ValidateGenesis both run this; without it a document naming an unknown role, a
+// malformed nominee or a negative height was reported as "a valid genesis file"
+// and only refused later, during keeper import, after params had already been
+// written to the in-memory InitChain cache.
+//
+// Module-account and bank-blocked admissibility is deliberately NOT checked here.
+// Those sets are derived from the running application, and a types-level
+// validator has no access to them; the keeper applies that rule in its genesis
+// preflight, before any store write.
+func (g GenesisState) validatePendingAuthorityTransfers() error {
+	seen := make(map[AuthorityRole]struct{}, len(g.PendingAuthorityTransfers))
+	for i, entry := range g.PendingAuthorityTransfers {
+		if entry == nil {
+			return fmt.Errorf("pending authority transfer %d is nil", i)
+		}
+		if entry.Transfer == nil {
+			return fmt.Errorf("pending authority transfer %d for role %s has no transfer", i, entry.Role)
+		}
+		switch entry.Role {
+		case AuthorityRole_AUTHORITY_ROLE_PRIMARY, AuthorityRole_AUTHORITY_ROLE_EMERGENCY:
+		default:
+			// Includes the unspecified zero value, which must never be defaulted:
+			// an entry that omitted the field would otherwise become a pending
+			// handover of the primary authority.
+			return fmt.Errorf("pending authority transfer %d has invalid role %s", i, entry.Role)
+		}
+		// At most one per role. Two entries for the same role would make which
+		// survives depend on iteration order, and only one can be the intended
+		// successor.
+		if _, duplicate := seen[entry.Role]; duplicate {
+			return fmt.Errorf("duplicate pending authority transfer for role %s", entry.Role)
+		}
+		seen[entry.Role] = struct{}{}
+
+		if _, err := sdk.AccAddressFromBech32(entry.Transfer.Nominee); err != nil {
+			return fmt.Errorf("pending authority transfer for role %s has an invalid nominee: %w", entry.Role, err)
+		}
+		if entry.Transfer.NominatedHeight < 0 {
+			return fmt.Errorf(
+				"pending authority transfer for role %s has a negative nominated height %d",
+				entry.Role, entry.Transfer.NominatedHeight)
+		}
+		// Runtime nomination refuses naming the incumbent, so a document produced
+		// by a real chain cannot contain one. Rejecting it here keeps imported
+		// state canonical with state the running chain can actually reach, rather
+		// than admitting a pending handover that would change nothing.
+		if entry.Transfer.Nominee == currentRoleHolder(*g.Params, entry.Role) {
+			return fmt.Errorf(
+				"pending authority transfer for role %s names the current holder", entry.Role)
+		}
+	}
+	return nil
+}
+
+// currentRoleHolder returns the address holding a role in the given params.
+func currentRoleHolder(params Params, role AuthorityRole) string {
+	if role == AuthorityRole_AUTHORITY_ROLE_EMERGENCY {
+		return params.EmergencyAuthority
+	}
+	return params.Authority
 }

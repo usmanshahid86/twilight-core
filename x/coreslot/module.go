@@ -22,7 +22,17 @@ import (
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
-const ConsensusVersion = 1
+// ConsensusVersion is 2 as of the two-step authority rotation.
+//
+// v0.1.0 shipped CoreSlot at version 1 (tag resolves to b8ed78e), and that is a
+// released baseline with live state. Version 2 adds the pending-authority
+// collection and changes the authorization path for a role that gates validator
+// admission, so the two implementations must be distinguishable in the module
+// version map. Leaving both at 1 would make a later migration unable to tell a
+// v0.1.0 chain from a post-rotation one, and the version map is exactly what a
+// future upgrade consults to decide whether to migrate a module or to treat it
+// as newly added and run InitGenesis over live state.
+const ConsensusVersion = 2
 
 type AppModuleBasic struct {
 	authority          string
@@ -99,6 +109,24 @@ func (AppModule) ConsensusVersion() uint64 { return ConsensusVersion }
 func (am AppModule) RegisterServices(cfg module.Configurator) {
 	types.RegisterMsgServer(cfg.MsgServer(), keeper.NewMsgServer(am.keeper))
 	types.RegisterQueryServer(cfg.QueryServer(), keeper.NewQueryServer(am.keeper))
+
+	// 1 -> 2 is a STATE no-op, and deliberately so.
+	//
+	// Version 2 adds the pending-authority collection, which is correctly absent
+	// on version-1 state: no nomination can exist on a chain whose binary had no
+	// way to create one, and an absent collection reads as empty. There is
+	// therefore nothing to transform, and writing anything here would be
+	// fabricating state the released chain never had.
+	//
+	// It is registered anyway because its purpose is the version boundary, not the
+	// transformation. Without it RunMigrations refuses to advance a module whose
+	// consensus version moved, and the module version map would keep describing a
+	// post-rotation chain as CoreSlot v1.
+	if err := cfg.RegisterMigration(types.ModuleName, 1, func(sdk.Context) error {
+		return nil
+	}); err != nil {
+		panic(fmt.Errorf("register coreslot 1->2 migration: %w", err))
+	}
 }
 
 func (am AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, raw json.RawMessage) []abci.ValidatorUpdate {

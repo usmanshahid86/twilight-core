@@ -38,6 +38,7 @@ func GetTxCmd() *cobra.Command {
 		registerCmd(), activateCmd(), inactivateCmd(), suspendCmd(), removeCmd(), rotateCmd(),
 		updatePayoutCmd(), updateMetadataCmd(), updateSettlementCmd(), updateSelectionPolicyCmd(), updateParamsCmd(),
 		scheduleUpgradeCmd(), cancelUpgradeCmd(),
+		nominateAuthorityCmd(), acceptAuthorityCmd(), cancelAuthorityNominationCmd(),
 	)
 	return cmd
 }
@@ -294,4 +295,69 @@ func cancelUpgradeCmd() *cobra.Command {
 		}
 		return broadcast(cmd, &types.MsgCancelUpgrade{Authority: from})
 	})
+}
+
+// parseAuthorityRole accepts the two operational roles by short name.
+//
+// The unspecified zero value is unreachable from the CLI by construction: an
+// unrecognized word is an error rather than a default, so a mistyped role cannot
+// silently become a nomination for the primary authority — the more
+// consequential of the two.
+func parseAuthorityRole(value string) (types.AuthorityRole, error) {
+	switch value {
+	case "primary":
+		return types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, nil
+	case "emergency":
+		return types.AuthorityRole_AUTHORITY_ROLE_EMERGENCY, nil
+	default:
+		return types.AuthorityRole_AUTHORITY_ROLE_UNSPECIFIED,
+			fmt.Errorf("role must be %q or %q, got %q", "primary", "emergency", value)
+	}
+}
+
+func nominateAuthorityCmd() *cobra.Command {
+	return txCmd("nominate-authority [primary|emergency] [nominee]", cobra.ExactArgs(2),
+		func(cmd *cobra.Command, args []string) error {
+			from, err := signer(cmd)
+			if err != nil {
+				return err
+			}
+			role, err := parseAuthorityRole(args[0])
+			if err != nil {
+				return err
+			}
+			return broadcast(cmd, &types.MsgNominateAuthority{Authority: from, Role: role, Nominee: args[1]})
+		})
+}
+
+func acceptAuthorityCmd() *cobra.Command {
+	return txCmd("accept-authority [primary|emergency]", cobra.ExactArgs(1),
+		func(cmd *cobra.Command, args []string) error {
+			// Signed by the nominee, not the incumbent — this signature IS the proof
+			// that the destination key is controlled.
+			from, err := signer(cmd)
+			if err != nil {
+				return err
+			}
+			role, err := parseAuthorityRole(args[0])
+			if err != nil {
+				return err
+			}
+			return broadcast(cmd, &types.MsgAcceptAuthority{Nominee: from, Role: role})
+		})
+}
+
+func cancelAuthorityNominationCmd() *cobra.Command {
+	return txCmd("cancel-authority-nomination [primary|emergency]", cobra.ExactArgs(1),
+		func(cmd *cobra.Command, args []string) error {
+			from, err := signer(cmd)
+			if err != nil {
+				return err
+			}
+			role, err := parseAuthorityRole(args[0])
+			if err != nil {
+				return err
+			}
+			return broadcast(cmd, &types.MsgCancelAuthorityNomination{Authority: from, Role: role})
+		})
 }

@@ -33,4 +33,8 @@ var (
 	// genesis collection. It exists so resolving "the version applicable at height
 	// H" is one predecessor seek rather than a walk over a slot's whole history.
 	PolicyStartsPrefix = []byte{0x0C}
+	// PendingAuthorityPrefix holds nominations awaiting acceptance, keyed by
+	// AuthorityRole. Canonical state: a nomination that vanished would strand a
+	// rotation, and one that appeared would be an unauthorized handover.
+	PendingAuthorityPrefix = []byte{0x0D}
 )

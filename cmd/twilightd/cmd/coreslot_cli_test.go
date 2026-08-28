@@ -9,11 +9,14 @@ import (
 )
 
 // coreslotTxCommands is every CoreSlot operation an operator can perform, as the
-// hand-written tree names them. All 13 must be reachable at `tx coreslot`.
+// hand-written tree names them. All 16 must be reachable at `tx coreslot`.
 var coreslotTxCommands = []string{
+	"accept-authority",
 	"activate",
+	"cancel-authority-nomination",
 	"cancel-upgrade",
 	"inactivate",
+	"nominate-authority",
 	"register",
 	"remove",
 	"rotate-key",
@@ -90,9 +93,10 @@ func TestCoreSlotCommandSurface(t *testing.T) {
 	})
 
 	t.Run("the counts stay consistent", func(t *testing.T) {
-		// Pinned so the 9/4/13 split cannot drift silently. A new Msg needs a new
-		// hand-written command, and this fails until it has one.
-		require.Len(t, coreslotTxCommands, 13)
+		// Pinned so the split cannot drift silently. A new Msg needs a new
+		// hand-written command, and this fails until it has one — which is how the
+		// three authority-rotation commands were caught when they were added.
+		require.Len(t, coreslotTxCommands, 16)
 		require.Len(t, generatedOnlyTxCommands, 9)
 
 		parent := find(root, "tx", "coreslot")

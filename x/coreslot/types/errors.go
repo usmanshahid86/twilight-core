@@ -53,4 +53,18 @@ var (
 	// ErrInvalidUpgrade reports a plan the chain refuses: an empty name, or a
 	// height that is not in the future.
 	ErrInvalidUpgrade = errorsmod.Register(ModuleName, 20, "invalid upgrade plan")
+
+	// ErrInvalidAuthorityRole reports a role outside the two defined operational
+	// roles, including the unspecified zero value. The zero value is refused
+	// rather than defaulted: a message that omitted the field must not silently
+	// rotate the primary authority.
+	ErrInvalidAuthorityRole = errorsmod.Register(ModuleName, 21, "invalid authority role")
+
+	// ErrNoPendingNomination reports an accept or cancel for a role that has NO
+	// nomination outstanding — never nominated, already accepted, or canceled.
+	//
+	// A REPLACED nominee is a different case and gets ErrUnauthorized: the
+	// replacement leaves a nomination pending, so there is something to accept and
+	// the displaced party simply is not the one entitled to accept it.
+	ErrNoPendingNomination = errorsmod.Register(ModuleName, 22, "no pending authority nomination for this role")
 )
