@@ -25,7 +25,7 @@ import (
 // ConsensusVersion is 2 as of the two-step authority rotation.
 //
 // v0.1.0 shipped CoreSlot at version 1 (tag resolves to b8ed78e), and that is a
-// released baseline with live state. Version 2 adds the pending-authority
+// released baseline capable of carrying v1 live state. Version 2 adds the pending-authority
 // collection and changes the authorization path for a role that gates validator
 // admission, so the two implementations must be distinguishable in the module
 // version map. Leaving both at 1 would make a later migration unable to tell a

@@ -407,9 +407,17 @@ func (g GenesisState) validatePendingAuthorityTransfers() error {
 		if _, err := sdk.AccAddressFromBech32(entry.Transfer.Nominee); err != nil {
 			return fmt.Errorf("pending authority transfer for role %s has an invalid nominee: %w", entry.Role, err)
 		}
-		if entry.Transfer.NominatedHeight < 0 {
+		// Positive, not merely non-negative. Runtime nomination stamps the block
+		// height it was submitted in, and a transaction cannot be included in
+		// block zero, so every record a chain produced carries at least 1.
+		//
+		// Zero is the reachable mistake rather than a theoretical one: proto3 JSON
+		// omits zero values, so a hand-assembled document that simply leaves the
+		// field out decodes to 0 and would otherwise import as a nomination the
+		// running chain could never have created.
+		if entry.Transfer.NominatedHeight <= 0 {
 			return fmt.Errorf(
-				"pending authority transfer for role %s has a negative nominated height %d",
+				"pending authority transfer for role %s has a non-positive nominated height %d",
 				entry.Role, entry.Transfer.NominatedHeight)
 		}
 		// Runtime nomination refuses naming the incumbent, so a document produced

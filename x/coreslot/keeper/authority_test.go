@@ -643,7 +643,23 @@ func TestGenesisValidateRejectsMalformedPendingTransfers(t *testing.T) {
 		},
 		"negative height": {
 			[]*types.PendingAuthorityTransferEntry{entry(types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, addr(0x21), -1)},
-			"negative nominated height",
+			"non-positive nominated height",
+		},
+		// Zero is the reachable case, not negative: proto3 JSON omits zero values,
+		// so a hand-assembled document that leaves the field out decodes to 0. A
+		// chain cannot produce it — nomination stamps the block height and no
+		// transaction is included in block zero.
+		"zero height": {
+			[]*types.PendingAuthorityTransferEntry{entry(types.AuthorityRole_AUTHORITY_ROLE_PRIMARY, addr(0x21), 0)},
+			"non-positive nominated height",
+		},
+		// The omitted-field path spelled out: an entry whose height was never set.
+		"height field absent": {
+			[]*types.PendingAuthorityTransferEntry{{
+				Role:     types.AuthorityRole_AUTHORITY_ROLE_PRIMARY,
+				Transfer: &types.PendingAuthorityTransfer{Nominee: addr(0x21)},
+			}},
+			"non-positive nominated height",
 		},
 		// Runtime nomination refuses naming the incumbent, so a document a real
 		// chain produced cannot contain one. Refusing it keeps imported state
