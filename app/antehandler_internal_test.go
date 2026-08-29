@@ -13,7 +13,7 @@ import (
 func TestWrappingAnAbsentAnteChainPanics(t *testing.T) {
 	require.PanicsWithValue(t,
 		"no ante handler to wrap: the transaction chain is absent, and installing "+
-			"the MsgMultiSend output cap alone would disable signature verification",
-		func() { newMultiSendOutputCap(nil) },
+			"the bank output cap alone would disable signature verification",
+		func() { newBankOutputCap(nil) },
 		"an absent ante chain must fail closed at startup")
 }
