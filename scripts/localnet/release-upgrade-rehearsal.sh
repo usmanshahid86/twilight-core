@@ -77,11 +77,19 @@ DRILL_VERDICT_GATES=(
   "stale=HELD_AT_H_MINUS_1" "state=PRESERVED" "surface=PRESENT"
 )
 
-# Locked after calibration. Zero means "not yet pinned" and the finalizer skips
-# the check, which is only acceptable while the contract is being designed.
-DRILL_EXPECTED_PHASES="${DRILL_EXPECTED_PHASES:-0}"
-DRILL_EXPECTED_ASSERTIONS="${DRILL_EXPECTED_ASSERTIONS:-0}"
-DRILL_EXPECTED_MULTISET="${DRILL_EXPECTED_MULTISET:-}"
+# The proof contract, locked against a calibration run and then read back against
+# the requirements rather than copied blindly. A count alone is a floor: it lets
+# one node's assertion vanish while another is duplicated in its place, which is
+# why the multiset is keyed by (assertion, node).
+#
+# The cardinalities are the contract. Four for anything proven per validator at
+# the halt — application height, block-store height, upgrade-info, running binary.
+# Three for the upgraded quorum. One for provenance, topology, state preservation
+# and the command surface. Changing any of these numbers should require changing
+# the proof, which is the point.
+DRILL_EXPECTED_PHASES=10
+DRILL_EXPECTED_ASSERTIONS=81
+DRILL_EXPECTED_MULTISET="a_matches_published_checksum|-:1,a_reports_released_commit|-:1,a_reports_released_version|-:1,a_survived_init|-:1,b_reports_candidate_commit|-:1,b_reports_upgrade_version|-:1,binaries_differ|-:1,cometbft_validators|-:1,converged_binary_is_b|3:1,coreslot_active_slots|-:1,coreslot_snapshots_taken|-:1,coreslot_state_unchanged_across_boundary|-:1,final_agree_app_hash|0:1,final_agree_app_hash|1:1,final_agree_app_hash|2:1,final_agree_app_hash|3:1,halt_app_height|0:1,halt_app_height|1:1,halt_app_height|2:1,halt_app_height|3:1,halt_block_store_height|0:1,halt_block_store_height|1:1,halt_block_store_height|2:1,halt_block_store_height|3:1,halt_logged_upgrade_required|0:1,halt_logged_upgrade_required|1:1,halt_logged_upgrade_required|2:1,halt_logged_upgrade_required|3:1,nomination_builds_the_right_msg|-:1,nomination_carries_the_nominee|-:1,nomination_carries_the_role|-:1,pending_plan_height|0:1,pending_plan_height|1:1,pending_plan_height|2:1,pending_plan_height|3:1,pending_plan_name|0:1,pending_plan_name|1:1,pending_plan_name|2:1,pending_plan_name|3:1,quorum_still_ahead_of_stale|0:1,quorum_still_ahead_of_stale|1:1,quorum_still_ahead_of_stale|2:1,running_binary_is_a|0:1,running_binary_is_a|1:1,running_binary_is_a|2:1,running_binary_is_a|3:1,running_binary_is_b|0:1,running_binary_is_b|1:1,running_binary_is_b|2:1,schedule_tx_delivered|-:1,stale_caught_up_on_b|-:1,stale_did_not_commit_h|3:1,stale_process_after_refusal_characterization|3:1,stale_refusal_is_fresh|3:1,stale_rpc_after_refusal_characterization|3:1,upgrade_info_height|0:1,upgrade_info_height|1:1,upgrade_info_height|2:1,upgrade_info_height|3:1,upgrade_info_name|0:1,upgrade_info_name|1:1,upgrade_info_name|2:1,upgrade_info_name|3:1,upgrade_info_present|0:1,upgrade_info_present|1:1,upgrade_info_present|2:1,upgrade_info_present|3:1,upgrade_recorded_applied|-:1,upgraded_agree_app_hash|0:1,upgraded_agree_app_hash|1:1,upgraded_agree_app_hash|2:1,upgraded_agree_next_validators_hash|0:1,upgraded_agree_next_validators_hash|1:1,upgraded_agree_next_validators_hash|2:1,upgraded_agree_validators_hash|0:1,upgraded_agree_validators_hash|1:1,upgraded_agree_validators_hash|2:1,upgraded_quorum_passed_the_boundary|-:1,validator_power_max|-:1,validator_power_min|-:1,version_map_is_expected|-:1"
 
 # ---- failure handling ---------------------------------------------------------
 #
