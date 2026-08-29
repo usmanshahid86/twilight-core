@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"sort"
 	"testing"
 
 	dbm "github.com/cosmos/cosmos-db"
@@ -344,20 +345,53 @@ func TestModuleTransfersAreUnaffected(t *testing.T) {
 		"module-to-module movement must not be gated by the account-funding rule")
 }
 
-// The allow-list must cover every module that actually pays an ordinary
-// account, and the inventory is derived from source rather than restated here.
-// A module that gains a payout path without being listed fails HERE rather than
-// in production, where the failure is a halted block.
-func TestTheExemptionListCoversEverySendingModule(t *testing.T) {
+// The allow-list and the source-derived inventory must be the SAME SET.
+//
+// Containment in one direction is not enough, and the gap is not theoretical.
+// A test that only proved
+//
+//	source-derived senders ⊆ allow-list
+//
+// catches a payout path added without an exemption, but passes a speculative
+// exemption added before any payout path exists. That is the more dangerous
+// drift: once a module sits on the list unnecessarily, the day someone gives it
+// a SendCoinsFromModuleToAccount path, the new path inherits the bypass and the
+// inventory notices nothing — defeating the whole purpose of deriving the set
+// from source.
+//
+// So both directions are proven at once, by comparing canonical sets.
+func TestTheExemptionListMatchesTheSendingModulesExactly(t *testing.T) {
 	sending, sites, err := payoutledger.SendingModules("../x", "../app")
 	require.NoError(t, err,
 		"every module payout call site must be resolvable; an unreadable one is a "+
 			"reason to widen the parser deliberately, not to skip it")
 	require.NotEmpty(t, sites, "the inventory found no payout call sites at all")
 
-	for _, module := range sending {
-		require.Contains(t, app.ProtocolPayoutModulesForTest(), module,
-			"module %q pays ordinary accounts but is not exempt; without the exemption "+
-				"a sub-floor payout halts the block, so this needs a deliberate decision", module)
+	// Copied before sorting. ProtocolPayoutModulesForTest hands back the
+	// production slice itself, and a test must not reorder the list the running
+	// application reads.
+	allowed := append([]string(nil), app.ProtocolPayoutModulesForTest()...)
+	sort.Strings(allowed)
+
+	// A duplicate would make the sets differ, so exact equality already catches
+	// it — but it would fail with a confusing length mismatch rather than saying
+	// what is wrong.
+	seen := make(map[string]struct{}, len(allowed))
+	for _, module := range allowed {
+		_, duplicate := seen[module]
+		require.False(t, duplicate, "module %q appears twice in the exemption list", module)
+		seen[module] = struct{}{}
 	}
+
+	// SendingModules returns its distinct set sorted; sorted again here so the
+	// comparison does not depend silently on that.
+	expected := append([]string(nil), sending...)
+	sort.Strings(expected)
+
+	require.Equal(t, expected, allowed,
+		"protocol payout exemptions must exactly match the source-derived "+
+			"module-to-account senders.\n"+
+			"  a module in SOURCE but not ALLOWED halts the block on a sub-floor payout;\n"+
+			"  a module ALLOWED but not in SOURCE silently pre-exempts a payout path "+
+			"that does not exist yet, so the day it is added it inherits the bypass unnoticed")
 }
