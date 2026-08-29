@@ -108,16 +108,23 @@ CAL_FUND_BATCH="${CAL_FUND_BATCH:-10}"
 
 # The service target the knee is defined against.
 CAL_TARGET_BLOCK_MS="${CAL_TARGET_BLOCK_MS:-2000}"
-# The minimum number of usable active-block intervals a step must carry before its
-# p95 may inform the knee.
+# The minimum number of USABLE BLOCK INTERVALS a step must contribute before its p95
+# may inform the knee.
 #
-# A p95 over one or two blocks is arithmetically defined and is not a tail
-# measurement — it is the maximum wearing a percentile's name. The default is
-# deliberately high enough that the shipped smoke ramp will NOT earn a candidate: a
-# representative calibration has to be sized for it, and a smoke that wants to
-# exercise the mechanics must lower this EXPLICITLY. The effective value is recorded
-# in the manifest so a reviewer can see which regime a result came from.
-CAL_MIN_ACTIVE_BLOCKS_PER_STEP="${CAL_MIN_ACTIVE_BLOCKS_PER_STEP:-20}"
+# Intervals, not blocks, and the distinction is load-bearing: a block can be ACTIVE
+# and supply no interval — it is the first block of a range, or its timestamp did not
+# parse. Checking block cardinality would let a step hold twenty active blocks and one
+# usable interval while satisfying a minimum of twenty, and the p95 would then be a
+# one-sample statistic. The cardinality gated here is exactly the one the p95 is
+# computed from.
+#
+# A p95 over one or two observations is arithmetically defined and is not a tail
+# measurement. The default is deliberately high enough that the shipped smoke ramp
+# will NOT earn a candidate: a representative calibration has to be sized for it, and
+# a smoke that wants to exercise the mechanics must lower this EXPLICITLY. The
+# effective value is recorded in the manifest and result so a reviewer can see which
+# regime a result came from.
+CAL_MIN_ACTIVE_INTERVALS_PER_STEP="${CAL_MIN_ACTIVE_INTERVALS_PER_STEP:-20}"
 # Quiet blocks AFTER a wave has fully drained. These are recorded as QUIET and are
 # excluded from the load response; they are not, and must never be, the evidence that
 # the wave finished.
@@ -728,6 +735,9 @@ accounts_at() {
 COLLECT_FROM=$(( RAMP_MIN_HEIGHT > 1 ? RAMP_MIN_HEIGHT - 1 : 1 ))
 PREV_MS=""; PREV_ACC=""; PREV_DB=""
 UNREADABLE_BLOCKS=0; ACCOUNT_SAMPLES=0; ACCOUNT_EXPECTED=0; APPDB_SAMPLES=0
+# Blocks whose timestamp was present but would not parse. Counted separately from
+# wholly unreadable blocks because the failure mode is different and quieter.
+TIMING_UNREADABLE=0
 # Delta coverage is tracked SEPARATELY from sample coverage, and only over ACTIVE
 # blocks. A policy is a statement about growth, so a block whose account count was
 # read but whose delta could not be formed contributes no growth evidence at all —
@@ -747,7 +757,16 @@ for (( h = COLLECT_FROM; h <= RAMP_MAX_HEIGHT; h++ )); do
     PREV_MS=""
     continue
   fi
+  # A timestamp that is PRESENT but unparseable is a measurement-integrity failure,
+  # not an observation to drop. The load-response signal is block timing, so silently
+  # removing a malformed reading shrinks the timing distribution while the experiment
+  # keeps claiming authority over it — and the step's p95 would then rest on fewer
+  # observations than its own eligibility check believed.
   ms="$(rfc3339_to_ms "$tm")" || ms=""
+  if [[ ! "$ms" =~ ^[0-9]+$ ]]; then
+    TIMING_UNREADABLE=$(( TIMING_UNREADABLE + 1 ))
+    ms=""
+  fi
   if [[ -n "$ms" && -n "$PREV_MS" ]]; then iv=$(( ms - PREV_MS )); else iv="-"; fi
   acc="-"; dacc="-"
   # Coverage is counted over ACTIVE blocks on both sides. Sampling every block but
@@ -780,6 +799,9 @@ for (( h = COLLECT_FROM; h <= RAMP_MAX_HEIGHT; h++ )); do
 done
 if (( UNREADABLE_BLOCKS > 0 )); then
   invalidate "$UNREADABLE_BLOCKS blocks in the measured range could not be read"
+fi
+if (( TIMING_UNREADABLE > 0 )); then
+  invalidate "$TIMING_UNREADABLE blocks reported a timestamp that could not be parsed; the timing distribution is incomplete"
 fi
 
 # Availability is tracked SEPARATELY from the numbers. An axis that was not measured
@@ -846,7 +868,9 @@ fi
 # The tail is the signal. A median hides exactly the behaviour that matters: a step
 # where most blocks are comfortable and a tail is not has already begun to fail.
 say "==> analysing per step"
-echo "step,senders,active_blocks,offered,accepted,delivered_ok,delivered_failed,unresolved,accepted_per_s,max_concurrent,p50_interval_ms,p95_interval_ms,max_interval_ms,p95_gas_wanted,max_gas_wanted,max_gas_used,max_tx_count,account_growth,appdb_growth_kb,waves_expected,waves_valid,eligibility,class" >"$STEPS_CSV"
+# usable_intervals is appended rather than inserted: the knee reads p95_gas_wanted by
+# column index, and renumbering it here would silently repoint that read.
+echo "step,senders,active_blocks,offered,accepted,delivered_ok,delivered_failed,unresolved,accepted_per_s,max_concurrent,p50_interval_ms,p95_interval_ms,max_interval_ms,p95_gas_wanted,max_gas_wanted,max_gas_used,max_tx_count,account_growth,appdb_growth_kb,waves_expected,waves_valid,eligibility,class,usable_intervals" >"$STEPS_CSV"
 
 # Per-step classification and eligibility, both recorded so the qualification can be
 # audited rather than trusted. Parallel indexed arrays: bash 3.2 has no associative
@@ -886,7 +910,10 @@ for (( sidx = 1; sidx <= STEP_IDX; sidx++ )); do
   # Waves that completed their FULL intended workload, from the recorded per-wave
   # verdict rather than from a count of rows.
   WAVES_OK="$(awk -F, -v s="$sidx" 'NR > 1 && $1 == s && $19 == "OK" { n++ } END { print n + 0 }' "$WAVES_CSV")"
-  ELIG="$(step_eligibility "$WAVES_OK" "$CAL_WAVES_PER_STEP" "$ACTIVE_BLOCKS" "$CAL_MIN_ACTIVE_BLOCKS_PER_STEP")"
+  # The exact cardinality the p95 was computed from — not the ACTIVE block count,
+  # which can exceed it whenever a block supplied no usable interval.
+  USABLE_INTERVALS=${#INTERVALS[@]}
+  ELIG="$(step_eligibility "$WAVES_OK" "$CAL_WAVES_PER_STEP" "$USABLE_INTERVALS" "$CAL_MIN_ACTIVE_INTERVALS_PER_STEP")"
   if [[ "$P95" =~ ^[0-9]+$ ]]; then
     ANALYSED_STEPS=$(( ANALYSED_STEPS + 1 ))
     if (( P95 <= CAL_TARGET_BLOCK_MS )); then CLASS="SAFE"; else CLASS="UNSAFE"; fi
@@ -897,10 +924,10 @@ for (( sidx = 1; sidx <= STEP_IDX; sidx++ )); do
   STEP_CLASS[$sidx]="$CLASS"; STEP_ELIG[$sidx]="$ELIG"
   [[ "$ELIG" == "ELIGIBLE" || -n "$INELIGIBLE_REASON" ]] || INELIGIBLE_REASON="$ELIG"
 
-  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
     "$sidx" "$SENDERS_OF_STEP" "$ACTIVE_BLOCKS" "$S_OFFERED" "$S_ACCEPTED" "$S_OK" "$S_FAILED" "$S_UNRES" \
     "$S_RATE" "$S_CONC" "$P50" "$P95" "$MAXIV" "$P95GW" "$MAXGW" "$MAXGU" "$MAXTX" "$ACCT_OUT" "$DB_OUT" \
-    "$CAL_WAVES_PER_STEP" "$WAVES_OK" "$ELIG" "$CLASS" >>"$STEPS_CSV"
+    "$CAL_WAVES_PER_STEP" "$WAVES_OK" "$ELIG" "$CLASS" "$USABLE_INTERVALS" >>"$STEPS_CSV"
 done
 (( ANALYSED_STEPS > 0 )) || invalidate "no step produced a usable block-interval distribution"
 
@@ -1052,7 +1079,7 @@ jq -n \
   --arg txgas "$CAL_TX_GAS" --arg txgasms "$CAL_TX_GAS_MULTISEND" --arg amt "$CAL_SEND_AMOUNT" \
   --arg fund "$CAL_FUND_PER_SENDER" --arg fb "$CAL_FUND_BATCH" \
   --arg target "$CAL_TARGET_BLOCK_MS" --arg quiet "$CAL_QUIET_BLOCKS" --arg drain "$CAL_DRAIN_TIMEOUT_S" \
-  --arg minblocks "$CAL_MIN_ACTIVE_BLOCKS_PER_STEP" --arg trunc "$RUN_TRUNCATED" \
+  --arg minblocks "$CAL_MIN_ACTIVE_INTERVALS_PER_STEP" --arg trunc "$RUN_TRUNCATED" \
   --arg maxsec "$CAL_MAX_SECONDS" --arg lag "$CAL_ENDPOINT_LAG_BLOCKS" --arg bps "$CAL_GAS_SAFETY_BPS" \
   --arg accs "$CAL_ACCOUNT_SAMPLING" --arg nodehome "$(jqs "$CAL_NODE_HOME")" \
   --arg acctaxis "$ACCOUNT_AXIS" --arg dbaxis "$APPDB_AXIS" \
@@ -1078,7 +1105,7 @@ jq -n \
      policy: { target_block_ms: ($target|tonumber), quiet_blocks: ($quiet|tonumber),
                drain_timeout_s: ($drain|tonumber), max_seconds: ($maxsec|tonumber),
                endpoint_lag_blocks: ($lag|tonumber), gas_safety_bps: ($bps|tonumber),
-               min_active_blocks_per_step: ($minblocks|tonumber),
+               min_active_intervals_per_step: ($minblocks|tonumber),
                max_accounts_per_block: ($accpolicy | nul), max_appdb_kb_per_block: ($dbpolicy | nul),
                legitimate_gas_floor: ($floor | nul) },
      sampling: { account_sampling_requested: ($accs|tonumber), account_axis: $acctaxis,
@@ -1101,7 +1128,7 @@ jq -n \
   --arg aguard "$ACCOUNT_GUARD" --arg dguard "$APPDB_GUARD" --arg dworst "$WORST_APPDB_PER_BLOCK" \
   --arg acov "$ACCT_DELTA_COVERAGE" --arg dcov "$APPDB_DELTA_COVERAGE" \
   --arg acovn "$ACCT_DELTA_SEEN" --arg dcovn "$APPDB_DELTA_SEEN" --arg covd "$ACCOUNT_EXPECTED" \
-  --arg minblocks "$CAL_MIN_ACTIVE_BLOCKS_PER_STEP" --arg trunc "$RUN_TRUNCATED" \
+  --arg minblocks "$CAL_MIN_ACTIVE_INTERVALS_PER_STEP" --arg trunc "$RUN_TRUNCATED" \
   --arg acctaxis "$ACCOUNT_AXIS" --arg dbaxis "$APPDB_AXIS" \
   --arg floor "$(jqs "$CAL_LEGITIMATE_GAS_FLOOR")" --arg fclass "$FLOOR_CLASS" \
   --arg pstatus "$PRODUCTION_STATUS" --arg run_id "$RUN_ID" \
@@ -1119,7 +1146,7 @@ jq -n \
      candidate_status: $cstatus,
      interpolation: "NOT_ATTEMPTED_GEOMETRIC_RAMP_TOO_COARSE",
      run_truncated_by_deadline: ($trunc == "1"),
-     min_active_blocks_per_step: ($minblocks|tonumber),
+     min_active_intervals_per_step: ($minblocks|tonumber),
      state_growth: {
        account_guard: $aguard,
        appdb_guard: $dguard,
@@ -1161,7 +1188,7 @@ printf '  %-22s %s\n' delivered_ok "$TOTAL_OK"
 printf '  %-22s %s\n' delivered_failed "$TOTAL_FAILED"
 printf '  %-22s %s\n' unresolved_timeout "$TOTAL_TIMEOUT"
 say ""
-say "measured heights $RAMP_MIN_HEIGHT..$RAMP_MAX_HEIGHT ($UNREADABLE_BLOCKS unreadable)"
+say "measured heights $RAMP_MIN_HEIGHT..$RAMP_MAX_HEIGHT ($UNREADABLE_BLOCKS unreadable, $TIMING_UNREADABLE with unparseable timestamps)"
 (( RUN_TRUNCATED )) && warn "the ramp was truncated by CAL_MAX_SECONDS; no candidate may be derived from it"
 say "state-growth axes: accounts=$ACCOUNT_AXIS ($ACCOUNT_SAMPLES of $ACCOUNT_EXPECTED active blocks sampled), appdb=$APPDB_AXIS"
 say "state-growth delta coverage: accounts=$ACCT_DELTA_COVERAGE ($ACCT_DELTA_SEEN/$ACCOUNT_EXPECTED), appdb=$APPDB_DELTA_COVERAGE ($APPDB_DELTA_SEEN/$ACCOUNT_EXPECTED)"
@@ -1173,12 +1200,12 @@ say "per step (ACTIVE blocks only; QUIET drain blocks excluded):"
 column -s, -t "$STEPS_CSV" 2>/dev/null || cat "$STEPS_CSV"
 say ""
 say "knee: p95 active block interval against a ${CAL_TARGET_BLOCK_MS}ms target"
-say "  minimum active blocks per contributing step: $CAL_MIN_ACTIVE_BLOCKS_PER_STEP"
+say "  minimum usable block intervals per contributing step: $CAL_MIN_ACTIVE_INTERVALS_PER_STEP"
 STEP_RESPONSE=""
 for (( i = 1; i <= STEP_IDX; i++ )); do
   STEP_RESPONSE="$STEP_RESPONSE $i:${STEP_CLASS[$i]:-?}/${STEP_ELIG[$i]:-?}"
 done
-say "  step response:     $STEP_RESPONSE"
+say "  step response:     $STEP_RESPONSE   (class/eligibility; intervals in steps.csv)"
 say "  highest safe step:  ${STEP_SAFE:-none}"
 say "  first unsafe step:  ${STEP_UNSAFE:-none}"
 say "  bracketed:          $KNEE_BRACKETED"
@@ -1197,10 +1224,12 @@ else
     NON_MONOTONIC_RESPONSE_RETRY)
       say "  no candidate: the load response is not monotonic — a step recovered above an"
       say "  unsafe one. That is a confounded experiment, not a knee. Re-run on a quiet host." ;;
-    INSUFFICIENT_ACTIVE_BLOCKS_NO_CANDIDATE)
-      say "  no candidate: a contributing step carried fewer than $CAL_MIN_ACTIVE_BLOCKS_PER_STEP active"
-      say "  blocks, so its p95 is not a tail measurement. Lengthen the steps, or lower"
-      say "  CAL_MIN_ACTIVE_BLOCKS_PER_STEP deliberately to exercise the mechanics." ;;
+    INSUFFICIENT_ACTIVE_INTERVALS_NO_CANDIDATE)
+      say "  no candidate: a contributing step supplied fewer than $CAL_MIN_ACTIVE_INTERVALS_PER_STEP usable"
+      say "  block intervals, so its p95 is not a tail measurement. Note this counts"
+      say "  INTERVALS, not active blocks — a block contributes none if it opens the range"
+      say "  or its timestamp did not parse. Lengthen the steps, or lower"
+      say "  CAL_MIN_ACTIVE_INTERVALS_PER_STEP deliberately to exercise the mechanics." ;;
     TRUNCATED_RUN_NO_COMPLETE_BRACKET)
       say "  no candidate: the ramp was cut short by CAL_MAX_SECONDS, so at least one step"
       say "  never ran its configured waves. Raise CAL_MAX_SECONDS or shorten the ramp." ;;

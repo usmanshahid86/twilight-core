@@ -520,27 +520,34 @@ wave_workload_valid() {
   return 0
 }
 
-# step_eligibility <completed-waves> <expected-waves> <active-blocks> <min-active-blocks>
+# step_eligibility <completed-waves> <expected-waves> <usable-intervals> <min-intervals>
 #
-# A step may inform the knee only if it ran to completion and carries enough blocks to
-# support the tail statistic taken from it.
+# A step may inform the knee only if it ran to completion and carries enough USABLE
+# TIMING INTERVALS to support the tail statistic taken from it.
 #
-# The deadline case is the dangerous one: `break 2` on CAL_MAX_SECONDS leaves a
-# partially executed step in the data, and one unsafe wave out of three configured is
-# enough to make that step look UNSAFE and complete a bracket that the full step might
-# never have produced.
+# The third argument is deliberately named for intervals rather than blocks, because
+# the two are not the same and confusing them reintroduces a false-candidate path: a
+# block can be ACTIVE and still contribute no interval — it is the first block of a
+# range, or its timestamp did not parse. A step could then hold twenty active blocks
+# and one usable interval while satisfying a configured minimum of twenty, and its p95
+# would be a one-sample statistic wearing a percentile's name.
 #
-# The sample-size case is quieter. A p95 over one or two active blocks is defined but
-# is not a tail measurement; it is the maximum wearing a percentile's name.
+# The cardinality checked here must therefore be exactly the cardinality the p95 is
+# computed from.
+#
+# The deadline case is the other half: `break 2` on CAL_MAX_SECONDS leaves a partially
+# executed step in the data, and one unsafe wave out of three configured is enough to
+# make that step look UNSAFE and complete a bracket the full step might never have
+# produced.
 step_eligibility() {
-  local done_waves="${1:-}" want_waves="${2:-}" blocks="${3:-}" min_blocks="${4:-}"
+  local done_waves="${1:-}" want_waves="${2:-}" intervals="${3:-}" min_intervals="${4:-}"
   local v
-  for v in "$done_waves" "$want_waves" "$blocks" "$min_blocks"; do
+  for v in "$done_waves" "$want_waves" "$intervals" "$min_intervals"; do
     [[ "$v" =~ ^[0-9]+$ ]] || { echo "UNREADABLE"; return 1; }
   done
-  (( want_waves > 0 ))          || { echo "NO_WAVES_CONFIGURED"; return 1; }
-  (( done_waves >= want_waves )) || { echo "INCOMPLETE_STEP"; return 1; }
-  (( blocks >= min_blocks ))     || { echo "INSUFFICIENT_ACTIVE_BLOCKS"; return 1; }
+  (( want_waves > 0 ))                || { echo "NO_WAVES_CONFIGURED"; return 1; }
+  (( done_waves >= want_waves ))      || { echo "INCOMPLETE_STEP"; return 1; }
+  (( intervals >= min_intervals ))    || { echo "INSUFFICIENT_ACTIVE_INTERVALS"; return 1; }
   echo "ELIGIBLE"
   return 0
 }
@@ -561,7 +568,7 @@ candidate_precheck() {
   if [[ "$truncated" == "1" ]]; then echo "TRUNCATED_RUN_NO_COMPLETE_BRACKET"; return 0; fi
   case "$reason" in
     "")                         echo "PROCEED" ;;
-    INSUFFICIENT_ACTIVE_BLOCKS) echo "INSUFFICIENT_ACTIVE_BLOCKS_NO_CANDIDATE" ;;
+    INSUFFICIENT_ACTIVE_INTERVALS) echo "INSUFFICIENT_ACTIVE_INTERVALS_NO_CANDIDATE" ;;
     INCOMPLETE_STEP)            echo "INCOMPLETE_STEPS_NO_CANDIDATE" ;;
     *)                          echo "NO_USABLE_STEPS" ;;
   esac

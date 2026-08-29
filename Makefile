@@ -206,8 +206,17 @@ localnet-block-gas-drill:
 block-gas-faults:
 	./scripts/localnet/block-gas-drill-faults.sh
 
-# #160/TW-004: the measurement rig that produces the data a block.max_gas value has
-# to be chosen from. Deliberately has NO pass/fail verdict — its output is a CSV.
+# #160/TW-004: the measurement instrument a block.max_gas value has to be chosen
+# from. It keeps three things apart — whether the workload completed, whether the
+# MEASUREMENT was trustworthy, and whether the data QUALIFIES a candidate — and
+# reports each. A qualified, monotonic, adequately-sampled bracket yields a
+# performance candidate; anything less yields a named reason and no number.
+#
+# Output is machine-readable: result.json, manifest.json (binary, endpoints, full
+# configuration, recipient seed, host) and per-block/wave/step CSVs.
+#
+# It does NOT ratify or ship max_gas. A candidate is an input to human review, to be
+# read against the heaviest legitimate block (#107) and the permanent-state columns.
 # Targets an existing network; see the header for the CAL_* knobs.
 localnet-load-calibration:
 	./scripts/localnet/load-calibration.sh

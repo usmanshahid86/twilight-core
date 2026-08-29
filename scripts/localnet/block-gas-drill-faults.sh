@@ -450,11 +450,40 @@ check "  and records the verdict per wave"       "1" \
 # ---------------------------------------------------------------------------------
 group steps "a step must be complete and adequately sampled to inform a knee"
 
-check "a complete, well-sampled step"            "ELIGIBLE" "$(step_eligibility 3 3 20 20)"
+# The third argument is the count of USABLE INTERVALS the p95 was computed from, not
+# the ACTIVE block count. The two diverge whenever a block supplies no interval — it
+# opens the range, or its timestamp did not parse — and gating on blocks would let a
+# step with twenty active blocks and one usable interval satisfy a minimum of twenty.
+check "20 usable intervals, minimum 20"          "ELIGIBLE" "$(step_eligibility 3 3 20 20)"
+check "19 usable intervals, minimum 20"          "INSUFFICIENT_ACTIVE_INTERVALS" "$(step_eligibility 3 3 19 20)"
+check "1 usable interval, minimum 20"            "INSUFFICIENT_ACTIVE_INTERVALS" "$(step_eligibility 3 3 1 20)"
+check "0 usable intervals, minimum 20"           "INSUFFICIENT_ACTIVE_INTERVALS" "$(step_eligibility 3 3 0 20)"
 check "a deadline-truncated step"                "INCOMPLETE_STEP" "$(step_eligibility 1 3 20 20)"
-check "a step below the sample minimum"          "INSUFFICIENT_ACTIVE_BLOCKS" "$(step_eligibility 3 3 2 20)"
-check "one active block is not a p95"            "INSUFFICIENT_ACTIVE_BLOCKS" "$(step_eligibility 3 3 1 20)"
-check "an explicitly lowered minimum passes"     "ELIGIBLE" "$(step_eligibility 3 3 2 2)"
+check "a lowered smoke minimum, met exactly"     "ELIGIBLE" "$(step_eligibility 3 3 2 2)"
+# The exact mismatch this pass closes: block cardinality would have passed where
+# interval cardinality does not.
+check "gating on 20 blocks would have passed"    "ELIGIBLE" "$(step_eligibility 3 3 20 20)"
+check "  gating on its 1 usable interval refuses" "INSUFFICIENT_ACTIVE_INTERVALS" "$(step_eligibility 3 3 1 20)"
+check "the rig counts the p95's own inputs"      "1" \
+  "$(grep -c 'USABLE_INTERVALS=\${#INTERVALS\[@\]}' "$CAL")"
+check "  and passes them to step_eligibility"    "1" \
+  "$(grep -c 'step_eligibility "\$WAVES_OK" "\$CAL_WAVES_PER_STEP" "\$USABLE_INTERVALS"' "$CAL")"
+check "  and never passes ACTIVE_BLOCKS"         "0" \
+  "$(grep -c 'step_eligibility .*ACTIVE_BLOCKS' "$CAL")"
+
+# A timestamp that is present but unparseable must fail the measurement, not quietly
+# shrink the timing distribution while the experiment keeps claiming authority.
+check "a valid timestamp is usable"              "1788004800000" "$(rfc3339_to_ms 2026-08-29T12:00:00Z)"
+rfc3339_to_ms "29/08/2026 12:00:00" >/dev/null 2>&1
+check "a present-but-malformed timestamp fails"  "nonzero" "$(rc_of $?)"
+rfc3339_to_ms "2026-08-29T12:00:00" >/dev/null 2>&1
+check "  a missing zone also fails"              "nonzero" "$(rc_of $?)"
+check "the rig counts unparseable timestamps"    "1" \
+  "$(grep -c 'TIMING_UNREADABLE=\$(( TIMING_UNREADABLE + 1 ))' "$CAL")"
+check "  and invalidates the run on any"         "1" \
+  "$(grep -c 'blocks reported a timestamp that could not be parsed' "$CAL")"
+check "  rather than dropping the observation"   "1" \
+  "$(grep -c 'if (( TIMING_UNREADABLE > 0 )); then' "$CAL")"
 step_eligibility x 3 20 20 >/dev/null 2>&1
 check "unreadable counters refuse"               "nonzero" "$(rc_of $?)"
 # The review's scenario: step 1 complete and SAFE, step 2 one wave of three and
@@ -468,7 +497,7 @@ check "a clean run proceeds"                     "PROCEED" "$(candidate_precheck
 check "truncation blocks, before eligibility"    "TRUNCATED_RUN_NO_COMPLETE_BRACKET" "$(candidate_precheck YES 1 "")"
 check "  even with every step eligible"          "TRUNCATED_RUN_NO_COMPLETE_BRACKET" "$(candidate_precheck YES 1 "")"
 check "an invalid measurement outranks all"      "MEASUREMENT_INVALID" "$(candidate_precheck NO 1 INCOMPLETE_STEP)"
-check "an undersampled step blocks"              "INSUFFICIENT_ACTIVE_BLOCKS_NO_CANDIDATE" "$(candidate_precheck YES 0 INSUFFICIENT_ACTIVE_BLOCKS)"
+check "an undersampled step blocks"              "INSUFFICIENT_ACTIVE_INTERVALS_NO_CANDIDATE" "$(candidate_precheck YES 0 INSUFFICIENT_ACTIVE_INTERVALS)"
 check "an incomplete step blocks"                "INCOMPLETE_STEPS_NO_CANDIDATE" "$(candidate_precheck YES 0 INCOMPLETE_STEP)"
 check "an unclassifiable step blocks"            "NO_USABLE_STEPS" "$(candidate_precheck YES 0 NO_INTERVALS)"
 check "the rig delegates the precedence"         "1" \
@@ -476,7 +505,9 @@ check "the rig delegates the precedence"         "1" \
 check "  and records the truncation"             "1" \
   "$(grep -c 'RUN_TRUNCATED=1' "$CAL")"
 check "the minimum is configurable"              "1" \
-  "$(grep -c 'CAL_MIN_ACTIVE_BLOCKS_PER_STEP="\${CAL_MIN_ACTIVE_BLOCKS_PER_STEP:-20}"' "$CAL")"
+  "$(grep -c 'CAL_MIN_ACTIVE_INTERVALS_PER_STEP="\${CAL_MIN_ACTIVE_INTERVALS_PER_STEP:-20}"' "$CAL")"
+check "  and is reported in the result"          "1" \
+  "$(grep -c 'min_active_intervals_per_step' "$CAL" | awk '{print ($1 > 0) ? 1 : 0}')"
 
 # ---------------------------------------------------------------------------------
 group knee "no bracket, no number, and no bracket without monotonicity"
@@ -756,7 +787,7 @@ check "  and records PASS"                       "overall=PASS" "$(grep '^overal
 GROUP_NAMES=(gasreaders ceiling meta params delivery saturation stall drain concurrency
              attribution na namespace endpoints waits workload steps knee growthpolicy
              dbpolicy percentile deferral cardinality time address genesis contract verdict)
-PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 18 23 12 16 8 6 5 11 7 5 9 7)
+PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 31 23 12 16 8 6 5 11 7 5 9 7)
 
 EXPECTED_CHECKS=0
 for e in "${PER_GROUP_EXPECTED[@]}"; do EXPECTED_CHECKS=$(( EXPECTED_CHECKS + e )); done
