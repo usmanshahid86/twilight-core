@@ -39,6 +39,13 @@ jobs:
         # developer machine silently scans under a different compiler. The check
         # runs the real script against a fake `go` and inspects what it passes.
         run: ./scripts/check-vulncheck-pin.sh
+      - name: Release-upgrade rehearsal faults
+        # Same script as `make release-upgrade-faults`. The rehearsal itself
+        # downloads a published artifact and runs four validators through a real
+        # upgrade boundary, which is too slow and too network-dependent for every
+        # push — but its proof primitives are exactly the things whose silent
+        # failure turns a broken run green, so they are covered here against stubs.
+        run: ./scripts/localnet/release-upgrade-rehearsal-faults.sh
       - name: CLI surface
         # Same script as `make check-cli-surface`. The Go test asserts the
         # assembled cobra tree, which proves a command exists, not that it runs:

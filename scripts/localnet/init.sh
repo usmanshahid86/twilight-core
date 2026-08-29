@@ -11,8 +11,22 @@ CHAIN_ID="${CHAIN_ID:-twilight-localnet-1}"
 # TIME — these scripts have always assumed a single localnet per machine.
 NODE_COUNT="${NODE_COUNT:-4}"
 
-mkdir -p "$ROOT/build"
-GOCACHE="${GOCACHE:-/tmp/twilight-go-build}" go build -o "$BIN" "$ROOT/cmd/twilightd"
+# The build writes to $BIN, so a caller that points BIN at a binary it wants
+# PRESERVED — a published release artifact, say — would have it silently replaced
+# by a local rebuild, and every later assertion would describe the rebuild rather
+# than the artifact under test. That very nearly happened during the first
+# v0.1.0 -> v0.2.0 rehearsal.
+#
+# LOCALNET_SKIP_BUILD says "use the binary that is already there". The genesis is
+# then authored by that binary, which is the point when the exercise is about a
+# specific released build.
+if [[ "${LOCALNET_SKIP_BUILD:-0}" == "1" ]]; then
+  [[ -x "$BIN" ]] || { echo "init: LOCALNET_SKIP_BUILD=1 but $BIN is not an executable" >&2; exit 2; }
+  echo "init: using the existing binary at $BIN (skipping build)"
+else
+  mkdir -p "$ROOT/build"
+  GOCACHE="${GOCACHE:-/tmp/twilight-go-build}" go build -o "$BIN" "$ROOT/cmd/twilightd"
+fi
 rm -rf "$NET"
 mkdir -p "$NET"
 
