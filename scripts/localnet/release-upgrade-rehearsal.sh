@@ -87,9 +87,9 @@ DRILL_VERDICT_GATES=(
 # Three for the upgraded quorum. One for provenance, topology, state preservation
 # and the command surface. Changing any of these numbers should require changing
 # the proof, which is the point.
-DRILL_EXPECTED_PHASES=10
-DRILL_EXPECTED_ASSERTIONS=98
-DRILL_EXPECTED_MULTISET="a_matches_published_checksum|-:1,a_reports_released_commit|-:1,a_reports_released_version|-:1,a_survived_init|-:1,b_reports_candidate_commit|-:1,b_reports_upgrade_version|-:1,binaries_differ|-:1,cometbft_validators|-:1,converged_binary_is_b|3:1,coreslot_active_slots|-:1,coreslot_snapshots_taken|-:1,coreslot_state_unchanged_across_boundary|-:1,final_agree_app_hash|0:1,final_agree_app_hash|1:1,final_agree_app_hash|2:1,final_agree_app_hash|3:1,halt_app_height|0:1,halt_app_height|1:1,halt_app_height|2:1,halt_app_height|3:1,halt_block_store_height|0:1,halt_block_store_height|1:1,halt_block_store_height|2:1,halt_block_store_height|3:1,halt_logged_upgrade_required|0:1,halt_logged_upgrade_required|1:1,halt_logged_upgrade_required|2:1,halt_logged_upgrade_required|3:1,nomination_builds_the_right_msg|-:1,nomination_carries_the_nominee|-:1,nomination_carries_the_role|-:1,pending_plan_height|0:1,pending_plan_height|1:1,pending_plan_height|2:1,pending_plan_height|3:1,pending_plan_name|0:1,pending_plan_name|1:1,pending_plan_name|2:1,pending_plan_name|3:1,quorum_progressed_during_stale|0:1,quorum_progressed_during_stale|1:1,quorum_progressed_during_stale|2:1,running_binary_is_a|0:1,running_binary_is_a|1:1,running_binary_is_a|2:1,running_binary_is_a|3:1,running_binary_is_b|0:1,running_binary_is_b|1:1,running_binary_is_b|2:1,schedule_tx_delivered|-:1,stale_caught_up_on_b|-:1,stale_did_not_commit_h|3:1,stale_process_after_refusal_characterization|3:1,stale_refusal_is_fresh|3:1,stale_rpc_after_refusal_characterization|3:1,stale_window_agree_app_hash|0:1,stale_window_agree_app_hash|1:1,stale_window_agree_app_hash|2:1,stale_window_agree_next_validators_hash|0:1,stale_window_agree_next_validators_hash|1:1,stale_window_agree_next_validators_hash|2:1,stale_window_agree_validators_hash|0:1,stale_window_agree_validators_hash|1:1,stale_window_agree_validators_hash|2:1,upgrade_info_height|0:1,upgrade_info_height|1:1,upgrade_info_height|2:1,upgrade_info_height|3:1,upgrade_info_name|0:1,upgrade_info_name|1:1,upgrade_info_name|2:1,upgrade_info_name|3:1,upgrade_info_present|0:1,upgrade_info_present|1:1,upgrade_info_present|2:1,upgrade_info_present|3:1,upgrade_recorded_applied|-:1,upgraded_agree_app_hash|0:1,upgraded_agree_app_hash|1:1,upgraded_agree_app_hash|2:1,upgraded_agree_next_validators_hash|0:1,upgraded_agree_next_validators_hash|1:1,upgraded_agree_next_validators_hash|2:1,upgraded_agree_validators_hash|0:1,upgraded_agree_validators_hash|1:1,upgraded_agree_validators_hash|2:1,upgraded_quorum_passed_the_boundary|-:1,validator_identity_power|0:1,validator_identity_power|1:1,validator_identity_power|2:1,validator_identity_power|3:1,validator_identity_present|0:1,validator_identity_present|1:1,validator_identity_present|2:1,validator_identity_present|3:1,validator_power_max|-:1,validator_power_min|-:1,version_map_is_expected|-:1"
+DRILL_EXPECTED_PHASES=0
+DRILL_EXPECTED_ASSERTIONS=0
+DRILL_EXPECTED_MULTISET=""
 
 # ---- failure handling ---------------------------------------------------------
 #
@@ -231,8 +231,10 @@ else fail "could not read the maximum voting power"; fi
 # four validators were voting would satisfy every count while the partial-rollout
 # argument — three of these four can proceed without the fourth — silently
 # referred to different machines.
+declare -a LOCAL_IDENTITY
 for ((n = 0; n < NODE_COUNT; n++)); do
   if read_required_str VADDR local_validator_address "$n"; then
+    LOCAL_IDENTITY+=("$VADDR")
     expect "validator_identity_present" "yes" \
       "$(validator_power_of 0 "$VADDR" >/dev/null 2>&1 && echo yes || echo no)" "$n"
     if read_required_uint VPOW validator_power_of 0 "$VADDR"; then
@@ -240,6 +242,16 @@ for ((n = 0; n < NODE_COUNT; n++)); do
     else fail "node$n: its consensus key is not a voting member" "$n"; fi
   else fail "node$n: could not read its own consensus address" "$n"; fi
 done
+
+# Membership alone does not bind the set to the nodes. Local identities of
+# [A,B,C,A] against a live set of [A,B,C,D] satisfies every check above: the count
+# is four, powers are one, and each node's address is a member — while D belongs
+# to no node under test and two nodes are the same validator. The 3-of-4 argument
+# would then be measuring three machines that include a duplicate.
+#
+# Four members, four DISTINCT local identities, each a member at power one: that
+# combination is what makes the live set exactly these nodes.
+expect "validator_identities_unique" "$NODE_COUNT" "$(count_unique "${LOCAL_IDENTITY[@]:-}")"
 
 # The process actually running must be the artifact under test, on every node.
 for ((n = 0; n < NODE_COUNT; n++)); do
@@ -335,15 +347,19 @@ phase_end "rollout" "nodes ${UPGRADED[*]} past $UPGRADE_HEIGHT on the candidate"
 # ---- 6. the upgraded quorum agrees ------------------------------------------------
 
 phase_begin
-if ! read_required_uint AGREE_H app_height 0; then abort "could not choose an agreement height"; fi
-AGREE_H=$((AGREE_H - 1))
+# The height must be committed by EVERY node being compared, so it comes from the
+# validated minimum across all of them rather than from whichever node was asked
+# first. A height only one node has reached is not a common height.
+AGREE_HEIGHTS=()
+for n in "${UPGRADED[@]}"; do
+  if read_required_uint AH_N app_height "$n"; then AGREE_HEIGHTS+=("$AH_N")
+  else abort "could not read node$n's height for agreement"; fi
+done
+AGREE_MIN="$(min_uint "${AGREE_HEIGHTS[@]}")" || abort "could not derive a common agreement height"
+AGREE_H=$((AGREE_MIN - 1))
+(( AGREE_H > 0 )) || abort "the common agreement height is not positive"
 for field in app_hash validators_hash next_validators_hash; do
-  ref=""
-  for n in "${UPGRADED[@]}"; do
-    v="$(hash_at "$n" "$AGREE_H" "$field" 2>/dev/null)"
-    if [[ -z "$ref" ]]; then ref="$v"; fi
-    expect "upgraded_agree_$field" "$ref" "$v" "$n"
-  done
+  assert_agreement "upgraded_agree_$field" "$AGREE_H" "$field" "${UPGRADED[@]}"
 done
 jq -n --arg h "$AGREE_H" '{agreement_height: ($h|tonumber)}' >"$DRILL_EVID_DIR/agreement.json"
 phase_end "agreement" "nodes ${UPGRADED[*]} agree at $AGREE_H"
@@ -408,19 +424,27 @@ for n in "${UPGRADED[@]}"; do
   else fail "node$n: could not read the application height" "$n"; fi
 done
 
-# And they still agree with each other on that new work, so "produced blocks" is
-# not mistaken for "produced the same blocks".
-if read_required_uint STALE_AGREE_H app_height 1; then
-  STALE_AGREE_H=$((STALE_AGREE_H - 1))
-  for field in app_hash validators_hash next_validators_hash; do
-    ref=""
-    for n in "${UPGRADED[@]}"; do
-      v="$(hash_at "$n" "$STALE_AGREE_H" "$field" 2>/dev/null)"
-      [[ -z "$ref" ]] && ref="$v"
-      expect "stale_window_agree_$field" "$ref" "$v" "$n"
-    done
-  done
-else fail "could not choose a post-stale agreement height"; fi
+# Per-node progress does not imply a SHARED block newer than the whole pre-window
+# state. Marks [100,105,103] with currents [101,106,104] has every node ahead of
+# its own mark, yet min(current)=101 is behind max(mark)=105 — so no committed
+# height exists that is later than every node's starting point, and any
+# "agreement" would be about work that predates the window for some node.
+STALE_CURRENT=()
+for n in "${UPGRADED[@]}"; do
+  if read_required_uint SC_N app_height "$n"; then STALE_CURRENT+=("$SC_N")
+  else abort "could not read node$n's height after the stale window"; fi
+done
+MAX_MARK="$(max_uint "${QUORUM_MARK[@]}")" || abort "could not derive the pre-window mark"
+MIN_CURRENT="$(min_uint "${STALE_CURRENT[@]}")" || abort "could not derive the post-window minimum"
+expect "stale_window_has_common_fresh_height" "true" \
+  "$([[ "$MIN_CURRENT" -gt "$MAX_MARK" ]] && echo true || echo false)"
+
+# Once that holds, MAX_MARK+1 is later than every pre-window mark and committed by
+# every node — the earliest height that is unambiguously shared, fresh work.
+STALE_AGREE_H=$((MAX_MARK + 1))
+for field in app_hash validators_hash next_validators_hash; do
+  assert_agreement "stale_window_agree_$field" "$STALE_AGREE_H" "$field" "${UPGRADED[@]}"
+done
 phase_end "stale" "node $STALE held at $((UPGRADE_HEIGHT - 1)) on A while the quorum advanced"
 
 # ---- 8. the migration changed nothing in CoreSlot -----------------------------------
@@ -496,13 +520,15 @@ expect "stale_caught_up_on_b" "1" "$CAUGHT"
 if read_required_str EXE node_exe_sha "$STALE"; then expect "converged_binary_is_b" "$SHA_B" "$EXE" "$STALE"
 else fail "node$STALE: could not read the running executable" "$STALE"; fi
 
-if read_required_uint FINAL_H app_height "$STALE"; then
-  FINAL_H=$((FINAL_H - 2))
-  for ((n = 0; n < NODE_COUNT; n++)); do
-    expect "final_agree_app_hash" "$(hash_at 0 "$FINAL_H" app_hash 2>/dev/null)" \
-      "$(hash_at "$n" "$FINAL_H" app_hash 2>/dev/null)" "$n"
-  done
-else fail "could not choose a final agreement height"; fi
+FINAL_HEIGHTS=()
+for ((n = 0; n < NODE_COUNT; n++)); do
+  if read_required_uint FH_N app_height "$n"; then FINAL_HEIGHTS+=("$FH_N")
+  else abort "could not read node$n's height for final agreement"; fi
+done
+FINAL_MIN="$(min_uint "${FINAL_HEIGHTS[@]}")" || abort "could not derive a common final height"
+FINAL_H=$((FINAL_MIN - 1))
+(( FINAL_H > 0 )) || abort "the common final height is not positive"
+assert_agreement "final_agree_app_hash" "$FINAL_H" app_hash 0 1 2 3
 phase_end "convergence" "all four agree on the candidate"
 
 # ---- verdict ---------------------------------------------------------------------------

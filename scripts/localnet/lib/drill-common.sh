@@ -508,3 +508,65 @@ validator_power_of() {
   rpc_get "$1" /validators \
     | jq -er --arg a "$2" '.result.validators[] | select(.address == $a) | .voting_power'
 }
+
+# ---- pure numeric helpers for common-height selection -------------------------
+#
+# Extracted so the fast fault suite exercises the SAME code the rehearsal runs,
+# rather than a second, more permissive reimplementation in test shell.
+#
+# Both validate every input. A non-numeric argument is a refusal, never a value
+# silently treated as zero — the whole point of choosing a common height is that
+# it is committed everywhere, and a zero would satisfy that vacuously.
+
+min_uint() { # <n>... -> smallest, or non-zero if any input is not an unsigned int
+  local m="" v
+  (( $# > 0 )) || return 1
+  for v in "$@"; do
+    [[ "$v" =~ ^[0-9]+$ ]] || return 1
+    if [[ -z "$m" ]] || (( v < m )); then m="$v"; fi
+  done
+  echo "$m"
+}
+
+max_uint() { # <n>... -> largest, or non-zero if any input is not an unsigned int
+  local m="" v
+  (( $# > 0 )) || return 1
+  for v in "$@"; do
+    [[ "$v" =~ ^[0-9]+$ ]] || return 1
+    if [[ -z "$m" ]] || (( v > m )); then m="$v"; fi
+  done
+  echo "$m"
+}
+
+# count_unique <s>... — how many distinct non-empty values were given.
+#
+# Deliberately not an associative array: macOS ships bash 3.2, which has none.
+# LC_ALL=C fixes the collation so the count cannot vary with the environment.
+count_unique() {
+  (( $# > 0 )) || { echo 0; return 0; }
+  printf '%s\n' "$@" | LC_ALL=C sort -u | grep -c .
+}
+
+# assert_agreement <assertion> <height> <field> <node>... — compare one header
+# field across nodes at one height, failing closed on every unreadable value.
+#
+# The pattern this replaces compared `$(hash_at ... 2>/dev/null)` values directly.
+# Under `set +e` an unreachable node yields an empty string, and empty compares
+# equal to empty — so a group where NOTHING could be read agreed perfectly. Worse,
+# an empty first read became the reference every later value was measured against.
+#
+# Here every read goes through the strict reader, the reference is the first
+# SUCCESSFULLY validated value, and a failed read records its own FAIL row so the
+# assertion cardinality per node is the same whether it passed or failed.
+assert_agreement() {
+  local name="$1" height="$2" field="$3"; shift 3
+  local ref="" n v
+  for n in "$@"; do
+    if read_required_str v hash_at "$n" "$height" "$field"; then
+      if [[ -z "$ref" ]]; then ref="$v"; fi
+      expect "$name" "$ref" "$v" "$n"
+    else
+      record_assert "$n" "$name" "<a readable hash>" "<unreadable>" FAIL
+    fi
+  done
+}

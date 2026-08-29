@@ -240,6 +240,89 @@ check "agreeing nodes match"                 "same" \
 check "one altered app hash is detected"     "different" \
   "$([[ "$(hash_at 0 9 app_hash)" != "$(hash_at 2 9 app_hash)" ]] && echo different || echo SAME)"
 
+# ---- identity uniqueness -------------------------------------------------------------
+
+group "membership alone does not bind the validator set to the nodes"
+
+# The exact mutation the previous contract could not see: four equal-power
+# validators [A,B,C,D], local identities [A,B,C,A]. Every membership and power
+# lookup succeeds, D belongs to no node under test, and two nodes are the same
+# validator — so a 3-of-4 argument would be counting a duplicate.
+printf '{"result":{"total":"4","validators":[{"address":"AAAA","voting_power":"1"},{"address":"BBBB","voting_power":"1"},{"address":"CCCC","voting_power":"1"},{"address":"DDDD","voting_power":"1"}]}}\n' \
+  >"$(stub_path /validators)"
+DUP_LOCAL=(AAAA BBBB CCCC AAAA)
+
+check "count still reads four"                "4" "$(validator_count 0)"
+check "min power still reads one"             "1" "$(min_validator_power 0)"
+check "max power still reads one"             "1" "$(max_validator_power 0)"
+memb=0
+for a in "${DUP_LOCAL[@]}"; do validator_power_of 0 "$a" >/dev/null 2>&1 && memb=$((memb + 1)); done
+check "every local identity is a member"      "4" "$memb"
+# ...and only uniqueness catches it.
+check "uniqueness predicate FAILS on [A,B,C,A]" "3" "$(count_unique "${DUP_LOCAL[@]}")"
+check "  which is not the node count"         "different" \
+  "$([[ "$(count_unique "${DUP_LOCAL[@]}")" != "4" ]] && echo different || echo SAME)"
+check "a genuinely distinct set passes"       "4" "$(count_unique AAAA BBBB CCCC DDDD)"
+
+# ---- strict agreement ------------------------------------------------------------------
+
+group "agreement fails closed on any unreadable hash"
+
+# assert_agreement is the production helper, exercised directly rather than
+# reimplemented — a second, more permissive copy in test shell would prove
+# nothing about the code that runs.
+# Returns the number of FAILURES the group raised. One per unreadable node:
+# read_required_str raises it, and assert_agreement records the row without
+# raising a second. Zero means the group agreed — which must only happen when
+# every value was independently validated.
+agree_probe() { # <name> <blocks...>
+  local name="$1"; shift
+  local i=0
+  for b in "$@"; do printf '%s' "$b" >"$WORK/block-$i.json"; i=$((i + 1)); done
+  DRILL_ASSERT_LOG="$WORK/ag.jsonl"; : >"$DRILL_ASSERT_LOG"; FAILURES=0
+  assert_agreement "$name" 9 app_hash 0 1 2 >/dev/null 2>&1
+  echo "$FAILURES"
+}
+GOOD='{"result":{"block":{"header":{"app_hash":"AAAA"}}}}'
+BAD='{"result":{"block":{"header":{"app_hash":"BBBB"}}}}'
+EMPTY=''
+
+check "all equal -> no failures"              "0" "$(agree_probe ag_ok  "$GOOD" "$GOOD" "$GOOD")"
+check "one mismatch -> failure"               "1" "$(agree_probe ag_mm  "$GOOD" "$GOOD" "$BAD")"
+# The reference node itself unreadable: the old pattern seeded an EMPTY reference
+# that later empty reads matched.
+check "reference unreadable -> failure"       "1" "$(agree_probe ag_r0  "$EMPTY" "$GOOD" "$GOOD")"
+check "later node unreadable -> failure"      "1" "$(agree_probe ag_r2  "$GOOD" "$GOOD" "$EMPTY")"
+check "all unreadable -> failures, not agreement" "3" "$(agree_probe ag_all "$EMPTY" "$EMPTY" "$EMPTY")"
+# The regression this replaces: three empty reads compared equal to each other and
+# the group reported perfect agreement having read nothing at all.
+check "  and never reports agreement"        "nonzero" \
+  "$([[ "$(agree_probe ag_all2 "$EMPTY" "$EMPTY" "$EMPTY")" -gt 0 ]] && echo nonzero || echo AGREED)"
+
+# ---- common-height selection ---------------------------------------------------------------
+
+group "the comparison height is common, and fresh"
+
+# Chosen from the validated minimum, so a lagging participant cannot be compared
+# at a height it has not committed.
+check "minimum, not first-asked"              "101" "$(min_uint 106 101 104)"
+check "a lagging node sets the height"        "40"  "$(min_uint 55 40 61)"
+
+# The no-common-fresh-block case from the review, exactly.
+MARKS=(100 105 103); CURRENTS=(101 106 104)
+prog=0
+for i in 0 1 2; do [[ "${CURRENTS[$i]}" -gt "${MARKS[$i]}" ]] && prog=$((prog + 1)); done
+check "every node beat its own mark"          "3" "$prog"
+MM="$(max_uint "${MARKS[@]}")"; MC="$(min_uint "${CURRENTS[@]}")"
+check "  yet no common fresh height exists"   "false" "$([[ "$MC" -gt "$MM" ]] && echo true || echo false)"
+
+# And a genuine window passes, with a height later than every mark.
+MARKS2=(100 105 103); CURRENTS2=(106 106 106)
+MM2="$(max_uint "${MARKS2[@]}")"; MC2="$(min_uint "${CURRENTS2[@]}")"
+check "a genuine window has one"              "true" "$([[ "$MC2" -gt "$MM2" ]] && echo true || echo false)"
+check "  and the chosen height beats all marks" "true" \
+  "$([[ $((MM2 + 1)) -gt 105 && $((MM2 + 1)) -le "$MC2" ]] && echo true || echo false)"
+
 # ---- the version map -----------------------------------------------------------------
 
 group "the module version map is parsed without fallback"
