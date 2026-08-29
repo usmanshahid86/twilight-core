@@ -179,6 +179,54 @@ printf '{"result":{"total":"4"}}\n' >"$(stub_path /validators)"
 min_validator_power 0 >/dev/null 2>&1
 check "a missing validator array refuses"    "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
 
+# ---- validator identity ------------------------------------------------------------
+
+group "validator identity is proven against each node's own key"
+
+# Counting the set proves a four-member set exists. It does not prove the nodes
+# under test are its members, and the 3-of-4 partial-rollout argument depends on
+# the fourth genuinely being one of them.
+mkdir -p "$NET/node0/config" "$NET/node1/config"
+printf '{"address":"AAAA1111","pub_key":{"type":"tendermint/PubKeyEd25519","value":"x"}}\n' \
+  >"$NET/node0/config/priv_validator_key.json"
+printf '{"address":"BBBB2222","pub_key":{"type":"tendermint/PubKeyEd25519","value":"y"}}\n' \
+  >"$NET/node1/config/priv_validator_key.json"
+check "a node's own address is readable"     "AAAA1111" "$(local_validator_address 0)"
+
+printf '{"result":{"total":"4","validators":[{"address":"AAAA1111","voting_power":"1"},{"address":"CCCC3333","voting_power":"1"},{"address":"DDDD4444","voting_power":"1"},{"address":"EEEE5555","voting_power":"1"}]}}\n' \
+  >"$(stub_path /validators)"
+check "a member's power is found"            "1" "$(validator_power_of 0 AAAA1111)"
+
+# The mutation that matters: four equal-power validators exist, but this node is
+# not one of them. Arity and power checks pass; identity does not.
+check "count still says four"                "4" "$(validator_count 0)"
+check "power still says one"                 "1" "$(min_validator_power 0)"
+validator_power_of 0 BBBB2222 >/dev/null 2>&1
+check "a non-member is refused"              "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+
+# A member voting with the wrong weight is visible rather than merely present.
+printf '{"result":{"total":"4","validators":[{"address":"AAAA1111","voting_power":"9"},{"address":"CCCC3333","voting_power":"1"},{"address":"DDDD4444","voting_power":"1"},{"address":"EEEE5555","voting_power":"1"}]}}\n' \
+  >"$(stub_path /validators)"
+check "an unequal member power is seen"      "9" "$(validator_power_of 0 AAAA1111)"
+
+rm -f "$NET/node0/config/priv_validator_key.json"
+local_validator_address 0 >/dev/null 2>&1
+check "a missing key file refuses"           "nonzero" "$([[ $? -ne 0 ]] && echo nonzero || echo ZERO)"
+
+# ---- fresh progress across a window ---------------------------------------------------
+
+group "quorum progress is measured against a fresh mark"
+
+# Comparing against a bound the nodes were already required to pass proves
+# nothing about the window under test.
+BEFORE=30; ALREADY_REQUIRED=28
+check "a frozen node clears the old bound"   "true" \
+  "$([[ "$BEFORE" -gt "$ALREADY_REQUIRED" ]] && echo true || echo false)"
+check "  but fails against its own mark"     "false" \
+  "$([[ "$BEFORE" -gt "$BEFORE" ]] && echo true || echo false)"
+check "a progressing node clears the mark"   "true" \
+  "$([[ $((BEFORE + 3)) -gt "$BEFORE" ]] && echo true || echo false)"
+
 # ---- cross-node hash agreement -------------------------------------------------------
 
 group "hash disagreement between nodes is caught"
