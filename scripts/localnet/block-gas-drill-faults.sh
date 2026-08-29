@@ -260,9 +260,9 @@ group drain "a wave is finished when it has drained, not when blocks have passed
 check "settle blocks are not the drain proof"    "0" \
   "$(grep -c 'CAL_SETTLE_BLOCKS' "$CAL")"
 check "the rig drains to terminal state"         "1" \
-  "$(grep -c 'left \$W_UNRESOLVED transactions unresolved at its boundary' "$CAL")"
+  "$(grep -c 'NOT_FOUND_TIMEOUT' "$CAL" | awk '{print ($1 > 0) ? 1 : 0}')"
 check "  and invalidates on a pending boundary"  "1" \
-  "$(grep -c 'if (( W_UNRESOLVED > 0 )); then' "$CAL")"
+  "$(grep -c 'unresolved \$W_UNRESOLVED' "$CAL" | awk '{print ($1 > 0) ? 1 : 0}')"
 check "quiet blocks are recorded separately"     "1" \
   "$(grep -c 'CAL_QUIET_BLOCKS' "$CAL" | awk '{print ($1 > 0) ? 1 : 0}')"
 
@@ -422,19 +422,82 @@ check "waiting by pid returns while the other runs" "yes" \
 kill "$LONG" 2>/dev/null; wait "$LONG" 2>/dev/null
 
 # ---------------------------------------------------------------------------------
-group knee "no bracket, no number"
+group workload "a wave that did not complete its workload cannot inform a knee"
 
-# S12/S13/S14. A run establishes a knee only if it brackets one. Every other outcome
-# names what to change and yields nothing — a rig that extrapolated past its own
-# measurements would be inventing the parameter it exists to measure.
-check "a genuine bracket"                        "BRACKETED" "$(knee_classify 4 5)"
-check "top step still safe"                      "UNBOUNDED_BY_RUN_INCREASE_LOAD" "$(knee_classify 5 "")"
-check "first step already unsafe"                "BELOW_TEST_RANGE_REDUCE_LOAD"   "$(knee_classify "" 1)"
-check "nothing usable"                           "NO_USABLE_STEPS" "$(knee_classify "" "")"
-# An unsafe step BELOW the safe one is not a bracket: capacity that recovers as load
-# increases is not a transition, it is a measurement to distrust.
-check "an inverted pair is not a bracket"        "NO_USABLE_STEPS" "$(knee_classify 5 3)"
-check "equal steps are not a bracket"            "NO_USABLE_STEPS" "$(knee_classify 3 3)"
+# The execution-failure case is the one the sequence check CANNOT see: a reverted
+# transaction still advances its sender's sequence, so the run looks perfectly
+# ordered while part of the offered work produced none of the intended state. That is
+# a cheaper workload than the one being characterised.
+check "a complete wave is valid"                 "OK" "$(wave_workload_valid 16 16 16 16 0 0)"
+check "one execution failure invalidates"        "NOT_ALL_DELIVERED_OK" "$(wave_workload_valid 16 16 16 15 1 0)"
+check "one CheckTx rejection invalidates"        "CHECK_REJECTED"       "$(wave_workload_valid 16 15 15 15 0 0)"
+check "one unresolved invalidates"               "NOT_ALL_INCLUDED"     "$(wave_workload_valid 16 16 15 15 0 1)"
+check "included-but-not-delivered invalidates"   "NOT_ALL_DELIVERED_OK" "$(wave_workload_valid 16 16 16 14 2 0)"
+check "an empty wave is not valid"               "EMPTY_WAVE"           "$(wave_workload_valid 0 0 0 0 0 0)"
+check "unreadable counters refuse"               "UNREADABLE"           "$(wave_workload_valid 16 x 16 16 0 0)"
+# The exact scenario from the review: 16/16/16, fifteen good, one reverted, sequence
+# advances normally. The sequence check passes; only the workload check sees it.
+SEQ_OK="ok"
+check "the sequence check is blind to it"        "ok" "$SEQ_OK"
+check "  the workload check is not"              "NOT_ALL_DELIVERED_OK" "$(wave_workload_valid 16 16 16 15 1 0)"
+wave_workload_valid 16 16 16 15 1 0 >/dev/null 2>&1
+check "  and it reports failure"                 "nonzero" "$(rc_of $?)"
+check "the rig invalidates on it"                "1" \
+  "$(grep -c 'workload incomplete' "$CAL")"
+check "  and records the verdict per wave"       "1" \
+  "$(grep -c 'WAVE_WORKLOAD="\$(wave_workload_valid' "$CAL")"
+
+# ---------------------------------------------------------------------------------
+group steps "a step must be complete and adequately sampled to inform a knee"
+
+check "a complete, well-sampled step"            "ELIGIBLE" "$(step_eligibility 3 3 20 20)"
+check "a deadline-truncated step"                "INCOMPLETE_STEP" "$(step_eligibility 1 3 20 20)"
+check "a step below the sample minimum"          "INSUFFICIENT_ACTIVE_BLOCKS" "$(step_eligibility 3 3 2 20)"
+check "one active block is not a p95"            "INSUFFICIENT_ACTIVE_BLOCKS" "$(step_eligibility 3 3 1 20)"
+check "an explicitly lowered minimum passes"     "ELIGIBLE" "$(step_eligibility 3 3 2 2)"
+step_eligibility x 3 20 20 >/dev/null 2>&1
+check "unreadable counters refuse"               "nonzero" "$(rc_of $?)"
+# The review's scenario: step 1 complete and SAFE, step 2 one wave of three and
+# UNSAFE, then the deadline. The old analysis bracketed on it.
+check "old logic would have bracketed 1,2"       "BRACKETED" "$(knee_classify_sequence SAFE UNSAFE)"
+check "  but step 2 is ineligible"               "INCOMPLETE_STEP" "$(step_eligibility 1 3 20 20)"
+# The disqualification ORDER, exercised directly. A grep for the status string is not
+# enough: disabling the truncation branch leaves the string in the summary and the
+# run would still be blocked by nothing.
+check "a clean run proceeds"                     "PROCEED" "$(candidate_precheck YES 0 "")"
+check "truncation blocks, before eligibility"    "TRUNCATED_RUN_NO_COMPLETE_BRACKET" "$(candidate_precheck YES 1 "")"
+check "  even with every step eligible"          "TRUNCATED_RUN_NO_COMPLETE_BRACKET" "$(candidate_precheck YES 1 "")"
+check "an invalid measurement outranks all"      "MEASUREMENT_INVALID" "$(candidate_precheck NO 1 INCOMPLETE_STEP)"
+check "an undersampled step blocks"              "INSUFFICIENT_ACTIVE_BLOCKS_NO_CANDIDATE" "$(candidate_precheck YES 0 INSUFFICIENT_ACTIVE_BLOCKS)"
+check "an incomplete step blocks"                "INCOMPLETE_STEPS_NO_CANDIDATE" "$(candidate_precheck YES 0 INCOMPLETE_STEP)"
+check "an unclassifiable step blocks"            "NO_USABLE_STEPS" "$(candidate_precheck YES 0 NO_INTERVALS)"
+check "the rig delegates the precedence"         "1" \
+  "$(grep -c 'CANDIDATE_STATUS="\$(candidate_precheck' "$CAL")"
+check "  and records the truncation"             "1" \
+  "$(grep -c 'RUN_TRUNCATED=1' "$CAL")"
+check "the minimum is configurable"              "1" \
+  "$(grep -c 'CAL_MIN_ACTIVE_BLOCKS_PER_STEP="\${CAL_MIN_ACTIVE_BLOCKS_PER_STEP:-20}"' "$CAL")"
+
+# ---------------------------------------------------------------------------------
+group knee "no bracket, no number, and no bracket without monotonicity"
+
+# The whole ordered response is classified, not the first safe/unsafe pair. The
+# pairwise predecessor reported a clean bracket for SAFE, UNSAFE, SAFE — a chain that
+# recovered as load increased, which is a confounded experiment rather than a knee.
+check "monotonic bracket"                        "BRACKETED" "$(knee_classify_sequence SAFE SAFE UNSAFE UNSAFE)"
+check "minimal bracket"                          "BRACKETED" "$(knee_classify_sequence SAFE UNSAFE)"
+check "recovery above unsafe is not a bracket"   "NON_MONOTONIC_RESPONSE_RETRY" "$(knee_classify_sequence SAFE UNSAFE SAFE)"
+check "  nor is it if it fails again"            "NON_MONOTONIC_RESPONSE_RETRY" "$(knee_classify_sequence SAFE UNSAFE SAFE UNSAFE)"
+check "unsafe then safe is not a bracket"        "NON_MONOTONIC_RESPONSE_RETRY" "$(knee_classify_sequence UNSAFE SAFE)"
+check "top step still safe"                      "UNBOUNDED_BY_RUN_INCREASE_LOAD" "$(knee_classify_sequence SAFE SAFE SAFE)"
+check "first step already unsafe"                "BELOW_TEST_RANGE_REDUCE_LOAD"   "$(knee_classify_sequence UNSAFE UNSAFE)"
+check "no steps at all"                          "NO_USABLE_STEPS" "$(knee_classify_sequence)"
+check "an unclassifiable step poisons it"        "NO_USABLE_STEPS" "$(knee_classify_sequence SAFE NO_INTERVALS UNSAFE)"
+# The old pairwise form, shown failing on the same input.
+check "old pairwise logic saw a bracket"         "same" \
+  "$([[ "$(knee_classify_sequence SAFE UNSAFE)" == "BRACKETED" ]] && echo same || echo DIFFERENT)"
+check "  the sequence form does not"             "different" \
+  "$([[ "$(knee_classify_sequence SAFE UNSAFE SAFE)" != "BRACKETED" ]] && echo different || echo SAME)"
 check "the safety margin reduces the estimate"   "1600000" "$(candidate_from_knee 2000000 2000)"
 check "a zero margin keeps the estimate"         "2000000" "$(candidate_from_knee 2000000 0)"
 candidate_from_knee 0 2000 >/dev/null 2>&1
@@ -449,10 +512,64 @@ check "  and none when the first step is unsafe"    "1" \
   "$(grep -c 'the first loaded step was already unsafe' "$CAL")"
 check "  and none from an invalid measurement"      "1" \
   "$(grep -c 'A candidate is never emitted from an invalid experiment' "$CAL")"
+check "  and none from a non-monotonic response"    "1" \
+  "$(grep -c 'the load response is not monotonic' "$CAL")"
 check "the knee uses a tail metric, not a majority" "0" \
   "$(grep -c 'majority of blocks' "$CAL")"
 check "  p95 is what decides safe/unsafe"           "1" \
   "$(grep -c 'P95 <= CAL_TARGET_BLOCK_MS' "$CAL")"
+check "the rig classifies the whole sequence"       "1" \
+  "$(grep -c 'knee_classify_sequence "\${SEQ\[@\]:-}"' "$CAL")"
+
+# ---------------------------------------------------------------------------------
+group growthpolicy "partial growth evidence cannot certify a maximum"
+
+# Coverage is about DELTAS, not samples: a block whose count was read but whose delta
+# could not be formed carries no growth evidence, and the missing block may be the
+# worst one.
+check "full delta coverage"                      "COMPLETE" "$(delta_coverage_class 10 10)"
+check "one delta missing is partial"             "PARTIAL"  "$(delta_coverage_class 9 10)"
+check "no deltas at all"                         "NONE"     "$(delta_coverage_class 0 10)"
+check "ten of ten below policy passes"           "WITHIN_POLICY"  "$(growth_guard_for_axis 100 AVAILABLE COMPLETE 50)"
+check "one observed delta over policy fails"     "EXCEEDS_POLICY" "$(growth_guard_for_axis 100 AVAILABLE COMPLETE 150)"
+# The review's case B: nine of ten below policy, one missing. The missing one may be
+# the worst, so this must never certify.
+check "nine of ten below policy is INCOMPLETE"   "INCOMPLETE" "$(growth_guard_for_axis 100 AVAILABLE PARTIAL 50)"
+check "  and is not WITHIN_POLICY"               "different" \
+  "$([[ "$(growth_guard_for_axis 100 AVAILABLE PARTIAL 50)" != "WITHIN_POLICY" ]] && echo different || echo SAME)"
+check "no sampling with a policy is UNAVAILABLE" "UNAVAILABLE" "$(growth_guard_for_axis 100 UNAVAILABLE NONE NA)"
+check "a disabled axis with a policy"            "UNAVAILABLE" "$(growth_guard_for_axis 100 DISABLED NONE NA)"
+check "no policy stays unrated"                  "UNRATIFIED"  "$(growth_guard_for_axis "" AVAILABLE COMPLETE 50)"
+check "an NA worst value cannot pass"            "INCOMPLETE"  "$(growth_guard_for_axis 100 AVAILABLE COMPLETE NA)"
+check "the rig qualifies on delta coverage"      "1" \
+  "$(grep -c 'ACCT_DELTA_COVERAGE="\$(delta_coverage_class' "$CAL")"
+
+# ---------------------------------------------------------------------------------
+group dbpolicy "a declared DB policy must actually gate"
+
+# A knob recorded only as provenance is a false safety signal: an operator could
+# supply a DB ceiling, exceed it, and still be told the candidate was ready.
+check "DB policy absent does not block"          "UNRATIFIED"     "$(growth_guard_for_axis "" AVAILABLE COMPLETE 900)"
+check "DB policy supplied and passed"            "WITHIN_POLICY"  "$(growth_guard_for_axis 1024 AVAILABLE COMPLETE 900)"
+check "DB policy supplied and exceeded"          "EXCEEDS_POLICY" "$(growth_guard_for_axis 1024 AVAILABLE COMPLETE 4096)"
+check "DB policy supplied but axis unavailable"  "UNAVAILABLE"    "$(growth_guard_for_axis 1024 UNAVAILABLE NONE NA)"
+check "DB policy supplied, coverage partial"     "INCOMPLETE"     "$(growth_guard_for_axis 1024 AVAILABLE PARTIAL 900)"
+# Combination: a passing account axis must not carry a failing DB axis to readiness.
+check "account passes, DB absent -> pass"        "WITHIN_POLICY"  "$(combine_growth_guards WITHIN_POLICY UNRATIFIED)"
+check "account passes, DB exceeded -> exceeded"  "EXCEEDS_POLICY" "$(combine_growth_guards WITHIN_POLICY EXCEEDS_POLICY)"
+check "account passes, DB unavailable -> blocked" "UNAVAILABLE"   "$(combine_growth_guards WITHIN_POLICY UNAVAILABLE)"
+check "account passes, DB incomplete -> blocked"  "INCOMPLETE"    "$(combine_growth_guards WITHIN_POLICY INCOMPLETE)"
+check "both unrated stays unrated"                "UNRATIFIED"    "$(combine_growth_guards UNRATIFIED UNRATIFIED)"
+check "both pass"                                 "WITHIN_POLICY" "$(combine_growth_guards WITHIN_POLICY WITHIN_POLICY)"
+check "an exceeded axis outranks a missing one"   "EXCEEDS_POLICY" "$(combine_growth_guards UNAVAILABLE EXCEEDS_POLICY)"
+check "the rig evaluates the DB policy"           "1" \
+  "$(grep -c 'APPDB_GUARD="\$(growth_guard_for_axis "\$CAL_MAX_APPDB_KB_PER_BLOCK"' "$CAL")"
+check "  and combines both axes"                  "1" \
+  "$(grep -c 'STATE_GUARD="\$(combine_growth_guards' "$CAL")"
+check "readiness requires a clean combined guard" "1" \
+  "$(grep -c 'INCOMPLETE_STATE_GROWTH_EVIDENCE' "$CAL")"
+check "  and blocks on an unavailable axis"       "1" \
+  "$(grep -c 'STATE_GROWTH_AXIS_UNAVAILABLE' "$CAL")"
 
 # ---------------------------------------------------------------------------------
 group percentile "the tail statistic itself"
@@ -637,9 +754,9 @@ check "  and records PASS"                       "overall=PASS" "$(grep '^overal
 # vanish silently, and fitting these numbers to whatever the run produced would make
 # them decoration.
 GROUP_NAMES=(gasreaders ceiling meta params delivery saturation stall drain concurrency
-             attribution na namespace endpoints waits knee percentile deferral cardinality
-             time address genesis contract verdict)
-PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 16 8 6 5 11 7 5 9 7)
+             attribution na namespace endpoints waits workload steps knee growthpolicy
+             dbpolicy percentile deferral cardinality time address genesis contract verdict)
+PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 18 23 12 16 8 6 5 11 7 5 9 7)
 
 EXPECTED_CHECKS=0
 for e in "${PER_GROUP_EXPECTED[@]}"; do EXPECTED_CHECKS=$(( EXPECTED_CHECKS + e )); done

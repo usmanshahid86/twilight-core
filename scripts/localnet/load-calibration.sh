@@ -108,6 +108,16 @@ CAL_FUND_BATCH="${CAL_FUND_BATCH:-10}"
 
 # The service target the knee is defined against.
 CAL_TARGET_BLOCK_MS="${CAL_TARGET_BLOCK_MS:-2000}"
+# The minimum number of usable active-block intervals a step must carry before its
+# p95 may inform the knee.
+#
+# A p95 over one or two blocks is arithmetically defined and is not a tail
+# measurement — it is the maximum wearing a percentile's name. The default is
+# deliberately high enough that the shipped smoke ramp will NOT earn a candidate: a
+# representative calibration has to be sized for it, and a smoke that wants to
+# exercise the mechanics must lower this EXPLICITLY. The effective value is recorded
+# in the manifest so a reviewer can see which regime a result came from.
+CAL_MIN_ACTIVE_BLOCKS_PER_STEP="${CAL_MIN_ACTIVE_BLOCKS_PER_STEP:-20}"
 # Quiet blocks AFTER a wave has fully drained. These are recorded as QUIET and are
 # excluded from the load response; they are not, and must never be, the evidence that
 # the wave finished.
@@ -457,10 +467,11 @@ trap 'stop_appdb_sampler' EXIT
 # than chain capacity.
 
 : >"$TXLOG"
-echo "step,senders,wave,offered,accepted,included,delivered_ok,delivered_failed,unresolved,submit_start_ms,submit_end_ms,submit_ms,max_concurrent,accepted_per_s,active_from,active_to,quiet_from,quiet_to" >"$WAVES_CSV"
+echo "step,senders,wave,offered,accepted,included,delivered_ok,delivered_failed,unresolved,submit_start_ms,submit_end_ms,submit_ms,max_concurrent,accepted_per_s,active_from,active_to,quiet_from,quiet_to,workload" >"$WAVES_CSV"
 start_appdb_sampler
 
 RAMP_MIN_HEIGHT=""; RAMP_MAX_HEIGHT=""
+RUN_TRUNCATED=0
 STEP_IDX=0
 WAVE_SERIAL=0
 DEADLINE=$(( SECONDS + CAL_MAX_SECONDS ))
@@ -469,9 +480,15 @@ DRAIN_FAILURES=0
 
 for senders in "${STEP_LIST[@]}"; do
   STEP_IDX=$(( STEP_IDX + 1 ))
+  WAVES_VALID_IN_STEP=0
   say "==> step $STEP_IDX: $senders senders x $CAL_WAVES_PER_STEP waves"
   for (( wave = 1; wave <= CAL_WAVES_PER_STEP; wave++ )); do
     if (( SECONDS >= DEADLINE )); then
+      # A truncated run leaves a partially executed step in the data. One unsafe wave
+      # out of three configured is enough to make that step look UNSAFE and complete a
+      # bracket the full step might never have produced, so truncation is recorded and
+      # blocks candidate emission outright.
+      RUN_TRUNCATED=1
       warn "CAL_MAX_SECONDS reached; stopping the ramp after step $STEP_IDX wave $((wave - 1))"
       break 2
     fi
@@ -592,7 +609,22 @@ for senders in "${STEP_LIST[@]}"; do
     # the sender's sequence is unknown, and the next signature may be stale.
     if (( W_UNRESOLVED > 0 )); then
       DRAIN_FAILURES=$(( DRAIN_FAILURES + W_UNRESOLVED ))
-      invalidate "wave $WAVE_SERIAL left $W_UNRESOLVED transactions unresolved at its boundary"
+    fi
+
+    # The workload a wave completed must be the workload it intended, exactly.
+    #
+    # An execution failure is the case the sequence check below CANNOT see: a
+    # transaction that reverts still advances its sender's sequence, so the run looks
+    # perfectly ordered while a share of the offered work produced none of the state
+    # the workload was supposed to create. That is a different, cheaper workload than
+    # the one being characterised, and a knee derived through it does not describe the
+    # load it claims to. A CheckTx rejection disqualifies for the mirror reason: part
+    # of the intended load never entered the mempool at all.
+    WAVE_WORKLOAD="$(wave_workload_valid "$OFFERED" "$ACCEPTED" "$W_INCLUDED" "$W_OK" "$W_FAILED" "$W_UNRESOLVED")"
+    if [[ "$WAVE_WORKLOAD" == "OK" ]]; then
+      WAVES_VALID_IN_STEP=$(( WAVES_VALID_IN_STEP + 1 ))
+    else
+      invalidate "wave $WAVE_SERIAL workload incomplete ($WAVE_WORKLOAD: offered $OFFERED, accepted $ACCEPTED, included $W_INCLUDED, delivered_ok $W_OK, failed $W_FAILED, unresolved $W_UNRESOLVED)"
     fi
 
     # --- the ACTIVE window, from transaction evidence ---
@@ -631,8 +663,8 @@ for senders in "${STEP_LIST[@]}"; do
     printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
       "$STEP_IDX" "$senders" "$wave" "$OFFERED" "$ACCEPTED" "$W_INCLUDED" "$W_OK" "$W_FAILED" "$W_UNRESOLVED" \
       "$SUBMIT_START" "$SUBMIT_END" "$SUBMIT_MS" "$MAX_CONC" "$ACCEPTED_PER_S" \
-      "${ACTIVE_FROM:--}" "${ACTIVE_TO:--}" "${QUIET_FROM:--}" "${QUIET_TO:--}" >>"$WAVES_CSV"
-    say "    wave $wave: offered $OFFERED accepted $ACCEPTED delivered $W_OK in ${SUBMIT_MS}ms (max concurrent $MAX_CONC), active ${ACTIVE_FROM:--}..${ACTIVE_TO:--}"
+      "${ACTIVE_FROM:--}" "${ACTIVE_TO:--}" "${QUIET_FROM:--}" "${QUIET_TO:--}" "$WAVE_WORKLOAD" >>"$WAVES_CSV"
+    say "    wave $wave: offered $OFFERED accepted $ACCEPTED delivered $W_OK in ${SUBMIT_MS}ms (max concurrent $MAX_CONC), active ${ACTIVE_FROM:--}..${ACTIVE_TO:--} [$WAVE_WORKLOAD]"
 
     if [[ "$ACTIVE_FROM" =~ ^[0-9]+$ ]]; then
       [[ -n "$RAMP_MIN_HEIGHT" ]] || RAMP_MIN_HEIGHT="$ACTIVE_FROM"
@@ -696,6 +728,11 @@ accounts_at() {
 COLLECT_FROM=$(( RAMP_MIN_HEIGHT > 1 ? RAMP_MIN_HEIGHT - 1 : 1 ))
 PREV_MS=""; PREV_ACC=""; PREV_DB=""
 UNREADABLE_BLOCKS=0; ACCOUNT_SAMPLES=0; ACCOUNT_EXPECTED=0; APPDB_SAMPLES=0
+# Delta coverage is tracked SEPARATELY from sample coverage, and only over ACTIVE
+# blocks. A policy is a statement about growth, so a block whose account count was
+# read but whose delta could not be formed contributes no growth evidence at all —
+# and one missing delta may be the worst-growth block.
+ACCT_DELTA_SEEN=0; APPDB_DELTA_SEEN=0
 for (( h = COLLECT_FROM; h <= RAMP_MAX_HEIGHT; h++ )); do
   gw="$(block_gas "$PRIMARY" "$h" gas_wanted)"  || gw=""
   gu="$(block_gas "$PRIMARY" "$h" gas_used)"    || gu=""
@@ -721,13 +758,20 @@ for (( h = COLLECT_FROM; h <= RAMP_MAX_HEIGHT; h++ )); do
   if a="$(accounts_at "$h")" && [[ "$a" =~ ^[0-9]+$ ]]; then
     acc="$a"
     [[ "$cls" == "ACTIVE" ]] && ACCOUNT_SAMPLES=$(( ACCOUNT_SAMPLES + 1 ))
-    [[ -n "$PREV_ACC" ]] && dacc=$(( a - PREV_ACC ))
+    if [[ -n "$PREV_ACC" ]]; then
+      dacc=$(( a - PREV_ACC ))
+      [[ "$cls" == "ACTIVE" ]] && ACCT_DELTA_SEEN=$(( ACCT_DELTA_SEEN + 1 ))
+    fi
     PREV_ACC="$a"
   fi
   db="-"; ddb="-"
   if d="$(appdb_at "$h")" && [[ "$d" =~ ^[0-9]+$ ]]; then
-    db="$d"; APPDB_SAMPLES=$(( APPDB_SAMPLES + 1 ))
-    [[ -n "$PREV_DB" ]] && ddb=$(( d - PREV_DB ))
+    db="$d"
+    [[ "$cls" == "ACTIVE" ]] && APPDB_SAMPLES=$(( APPDB_SAMPLES + 1 ))
+    if [[ -n "$PREV_DB" ]]; then
+      ddb=$(( d - PREV_DB ))
+      [[ "$cls" == "ACTIVE" ]] && APPDB_DELTA_SEEN=$(( APPDB_DELTA_SEEN + 1 ))
+    fi
     PREV_DB="$d"
   fi
   printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
@@ -743,8 +787,9 @@ fi
 # instrument must not invent.
 ACCOUNT_AXIS="$(axis_availability "$CAL_ACCOUNT_SAMPLING" "$ACCOUNT_SAMPLES" "$ACCOUNT_EXPECTED")"
 if [[ "$APPDB_AVAILABLE" != "yes" ]]; then APPDB_AXIS="UNAVAILABLE"
-elif (( APPDB_SAMPLES == 0 )); then APPDB_AXIS="UNAVAILABLE"
-else APPDB_AXIS="AVAILABLE"; fi
+else APPDB_AXIS="$(axis_availability 1 "$APPDB_SAMPLES" "$ACCOUNT_EXPECTED")"; fi
+ACCT_DELTA_COVERAGE="$(delta_coverage_class "$ACCT_DELTA_SEEN" "$ACCOUNT_EXPECTED")"
+APPDB_DELTA_COVERAGE="$(delta_coverage_class "$APPDB_DELTA_SEEN" "$ACCOUNT_EXPECTED")"
 
 # ---- 6. endpoint agreement ---------------------------------------------------------------
 #
@@ -801,9 +846,12 @@ fi
 # The tail is the signal. A median hides exactly the behaviour that matters: a step
 # where most blocks are comfortable and a tail is not has already begun to fail.
 say "==> analysing per step"
-echo "step,senders,active_blocks,offered,accepted,delivered_ok,delivered_failed,unresolved,accepted_per_s,max_concurrent,p50_interval_ms,p95_interval_ms,max_interval_ms,p95_gas_wanted,max_gas_wanted,max_gas_used,max_tx_count,account_growth,appdb_growth_kb" >"$STEPS_CSV"
+echo "step,senders,active_blocks,offered,accepted,delivered_ok,delivered_failed,unresolved,accepted_per_s,max_concurrent,p50_interval_ms,p95_interval_ms,max_interval_ms,p95_gas_wanted,max_gas_wanted,max_gas_used,max_tx_count,account_growth,appdb_growth_kb,waves_expected,waves_valid,eligibility,class" >"$STEPS_CSV"
 
-STEP_SAFE=""; STEP_UNSAFE=""; ANALYSED_STEPS=0
+# Per-step classification and eligibility, both recorded so the qualification can be
+# audited rather than trusted. Parallel indexed arrays: bash 3.2 has no associative
+# arrays.
+STEP_CLASS=(); STEP_ELIG=(); ANALYSED_STEPS=0; INELIGIBLE_REASON=""
 for (( sidx = 1; sidx <= STEP_IDX; sidx++ )); do
   SENDERS_OF_STEP="$(awk -F, -v s="$sidx" 'NR > 1 && $1 == s { print $2; exit }' "$WAVES_CSV")"
   [[ -n "$SENDERS_OF_STEP" ]] || continue
@@ -835,20 +883,24 @@ for (( sidx = 1; sidx <= STEP_IDX; sidx++ )); do
   ACCT_OUT="$(growth_render "$ACCT_SUM" "$ACCT_SEEN")"
   DB_OUT="$(growth_render "$DB_SUM" "$DB_SEEN")"
 
-  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
-    "$sidx" "$SENDERS_OF_STEP" "$ACTIVE_BLOCKS" "$S_OFFERED" "$S_ACCEPTED" "$S_OK" "$S_FAILED" "$S_UNRES" \
-    "$S_RATE" "$S_CONC" "$P50" "$P95" "$MAXIV" "$P95GW" "$MAXGW" "$MAXGU" "$MAXTX" "$ACCT_OUT" "$DB_OUT" >>"$STEPS_CSV"
-
+  # Waves that completed their FULL intended workload, from the recorded per-wave
+  # verdict rather than from a count of rows.
+  WAVES_OK="$(awk -F, -v s="$sidx" 'NR > 1 && $1 == s && $19 == "OK" { n++ } END { print n + 0 }' "$WAVES_CSV")"
+  ELIG="$(step_eligibility "$WAVES_OK" "$CAL_WAVES_PER_STEP" "$ACTIVE_BLOCKS" "$CAL_MIN_ACTIVE_BLOCKS_PER_STEP")"
   if [[ "$P95" =~ ^[0-9]+$ ]]; then
     ANALYSED_STEPS=$(( ANALYSED_STEPS + 1 ))
-    if (( P95 <= CAL_TARGET_BLOCK_MS )); then
-      # The highest safe step, but only while no unsafe step has been seen below it:
-      # a step that recovers above an unsafe one is not a bracket.
-      [[ -z "$STEP_UNSAFE" ]] && STEP_SAFE="$sidx"
-    else
-      [[ -z "$STEP_UNSAFE" ]] && STEP_UNSAFE="$sidx"
-    fi
+    if (( P95 <= CAL_TARGET_BLOCK_MS )); then CLASS="SAFE"; else CLASS="UNSAFE"; fi
+  else
+    CLASS="NO_INTERVALS"
+    [[ "$ELIG" == "ELIGIBLE" ]] && ELIG="NO_INTERVALS"
   fi
+  STEP_CLASS[$sidx]="$CLASS"; STEP_ELIG[$sidx]="$ELIG"
+  [[ "$ELIG" == "ELIGIBLE" || -n "$INELIGIBLE_REASON" ]] || INELIGIBLE_REASON="$ELIG"
+
+  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+    "$sidx" "$SENDERS_OF_STEP" "$ACTIVE_BLOCKS" "$S_OFFERED" "$S_ACCEPTED" "$S_OK" "$S_FAILED" "$S_UNRES" \
+    "$S_RATE" "$S_CONC" "$P50" "$P95" "$MAXIV" "$P95GW" "$MAXGW" "$MAXGU" "$MAXTX" "$ACCT_OUT" "$DB_OUT" \
+    "$CAL_WAVES_PER_STEP" "$WAVES_OK" "$ELIG" "$CLASS" >>"$STEPS_CSV"
 done
 (( ANALYSED_STEPS > 0 )) || invalidate "no step produced a usable block-interval distribution"
 
@@ -869,31 +921,69 @@ done
 #      default, not a hidden constant.
 #
 # Nothing here ratifies anything. The output is an input to review.
+# Layer 2 closes here: everything that could invalidate the MEASUREMENT has run by
+# this point, so qualification can consult it rather than being decided in parallel
+# with it and reconciled afterwards.
+MEASUREMENT_VALID_PRECHECK=YES
+[[ -z "$INVALID_REASONS" ]] || MEASUREMENT_VALID_PRECHECK=NO
+
 CANDIDATE="null"; KNEE_GAS="null"; KNEE_BRACKETED=false
-CANDIDATE_STATUS="$(knee_classify "$STEP_SAFE" "$STEP_UNSAFE")"
-if [[ "$CANDIDATE_STATUS" == "BRACKETED" ]]; then
-  KNEE_BRACKETED=true
-  KNEE_GAS="$(awk -F, -v s="$STEP_SAFE" 'NR > 1 && $1 == s { print $14; exit }' "$STEPS_CSV")"
-  if C="$(candidate_from_knee "$KNEE_GAS" "$CAL_GAS_SAFETY_BPS")"; then
-    CANDIDATE="$C"
-  else
-    KNEE_GAS="null"; CANDIDATE_STATUS="NO_GAS_AT_SAFE_STEP"
+STEP_SAFE=""; STEP_UNSAFE=""
+
+# Qualification is decided in a fixed order, most disqualifying first, so a run can
+# never acquire a candidate by satisfying a later test while failing an earlier one.
+# The disqualification order lives in candidate_precheck, so it is exercised directly
+# by the chain-free suite rather than being an untested branch chain here.
+CANDIDATE_STATUS="$(candidate_precheck "$MEASUREMENT_VALID_PRECHECK" "$RUN_TRUNCATED" "$INELIGIBLE_REASON")"
+if [[ "$CANDIDATE_STATUS" != "PROCEED" ]]; then
+  : # blocked; the status names why
+else
+  # Every configured step is eligible, so the whole ordered response can be
+  # classified. Passing the complete sequence is what makes a non-monotonic run
+  # visible: the previous pairwise form kept only the first safe and first unsafe
+  # step, so SAFE, UNSAFE, SAFE reported a clean bracket while the chain had in fact
+  # recovered as load increased.
+  SEQ=()
+  for (( sidx = 1; sidx <= STEP_IDX; sidx++ )); do
+    [[ -n "${STEP_CLASS[$sidx]:-}" ]] && SEQ+=("${STEP_CLASS[$sidx]}")
+  done
+  CANDIDATE_STATUS="$(knee_classify_sequence "${SEQ[@]:-}")"
+  if [[ "$CANDIDATE_STATUS" == "BRACKETED" ]]; then
+    # The transition indices, derived from the same sequence that classified it.
+    for (( sidx = 1; sidx <= STEP_IDX; sidx++ )); do
+      if [[ "${STEP_CLASS[$sidx]:-}" == "SAFE" ]]; then STEP_SAFE="$sidx"
+      elif [[ "${STEP_CLASS[$sidx]:-}" == "UNSAFE" && -z "$STEP_UNSAFE" ]]; then STEP_UNSAFE="$sidx"; fi
+    done
+    KNEE_BRACKETED=true
+    KNEE_GAS="$(awk -F, -v s="$STEP_SAFE" 'NR > 1 && $1 == s { print $14; exit }' "$STEPS_CSV")"
+    if C="$(candidate_from_knee "$KNEE_GAS" "$CAL_GAS_SAFETY_BPS")"; then
+      CANDIDATE="$C"
+    else
+      KNEE_GAS="null"; KNEE_BRACKETED=false; CANDIDATE_STATUS="NO_GAS_AT_SAFE_STEP"
+    fi
   fi
 fi
 
-# The permanent-state guard. The tool does not invent policy: without an explicit
-# limit it reports the candidate as performance-derived and says so.
-STATE_GUARD="UNRATIFIED"
-WORST_ACCT_PER_BLOCK="NA"
-if [[ "$ACCOUNT_AXIS" == "AVAILABLE" || "$ACCOUNT_AXIS" == "PARTIAL" ]]; then
-  WORST_ACCT_PER_BLOCK="$(awk -F, 'NR > 1 && $3 == "ACTIVE" && $11 ~ /^[0-9]+$/ { if ($11 + 0 > m) m = $11 + 0 } END { print m + 0 }' "$BLOCKS_CSV")"
-  if [[ "$CAL_MAX_ACCOUNTS_PER_BLOCK" =~ ^[0-9]+$ ]]; then
-    if (( WORST_ACCT_PER_BLOCK <= CAL_MAX_ACCOUNTS_PER_BLOCK )); then STATE_GUARD="WITHIN_POLICY"
-    else STATE_GUARD="EXCEEDS_POLICY"; fi
-  fi
-else
-  STATE_GUARD="UNAVAILABLE"
+# The permanent-state guards, one per axis and then combined. The tool does not
+# invent policy: an axis with no supplied limit stays UNRATIFIED.
+#
+# Each axis is qualified on DELTA coverage, not on how many blocks were sampled. A
+# single missing delta may be the worst-growth block, so partial coverage can
+# characterise what was observed but can never certify a maximum — it reports
+# INCOMPLETE rather than passing.
+#
+# The observed worst delta is computed over ACTIVE blocks only, and remains NA when
+# no delta was formed at all.
+WORST_ACCT_PER_BLOCK="NA"; WORST_APPDB_PER_BLOCK="NA"
+if (( ACCT_DELTA_SEEN > 0 )); then
+  WORST_ACCT_PER_BLOCK="$(awk -F, 'NR > 1 && $3 == "ACTIVE" && $11 ~ /^-?[0-9]+$/ { if (n == 0 || $11 + 0 > m) { m = $11 + 0; n = 1 } } END { if (n) print m; else print "NA" }' "$BLOCKS_CSV")"
 fi
+if (( APPDB_DELTA_SEEN > 0 )); then
+  WORST_APPDB_PER_BLOCK="$(awk -F, 'NR > 1 && $3 == "ACTIVE" && $13 ~ /^-?[0-9]+$/ { if (n == 0 || $13 + 0 > m) { m = $13 + 0; n = 1 } } END { if (n) print m; else print "NA" }' "$BLOCKS_CSV")"
+fi
+ACCOUNT_GUARD="$(growth_guard_for_axis "$CAL_MAX_ACCOUNTS_PER_BLOCK" "$ACCOUNT_AXIS" "$ACCT_DELTA_COVERAGE" "$WORST_ACCT_PER_BLOCK")"
+APPDB_GUARD="$(growth_guard_for_axis "$CAL_MAX_APPDB_KB_PER_BLOCK" "$APPDB_AXIS" "$APPDB_DELTA_COVERAGE" "$WORST_APPDB_PER_BLOCK")"
+STATE_GUARD="$(combine_growth_guards "$ACCOUNT_GUARD" "$APPDB_GUARD")"
 
 # The legitimate lower bound (#107). A ceiling below the protocol's own heaviest
 # legitimate block would break the chain, so a candidate cannot be called shippable
@@ -905,17 +995,22 @@ if [[ "$CAL_LEGITIMATE_GAS_FLOOR" =~ ^[0-9]+$ ]]; then
   else FLOOR_CLASS="NO_CANDIDATE"; fi
 fi
 
-MEASUREMENT_VALID=YES
+MEASUREMENT_VALID="$MEASUREMENT_VALID_PRECHECK"
 [[ -z "$INVALID_REASONS" ]] || MEASUREMENT_VALID=NO
 # A candidate is never emitted from an invalid experiment.
-if [[ "$MEASUREMENT_VALID" != "YES" ]]; then CANDIDATE="null"; KNEE_GAS="null"; fi
+if [[ "$MEASUREMENT_VALID" != "YES" ]]; then CANDIDATE="null"; KNEE_GAS="null"; KNEE_BRACKETED=false; fi
 
+# Readiness requires that every SUPPLIED policy was actually evaluated and passed. A
+# declared limit that quietly drops out of qualification is a false safety signal —
+# worse than no limit, because it reads as a checked constraint.
 if [[ "$MEASUREMENT_VALID" != "YES" ]]; then PRODUCTION_STATUS="MEASUREMENT_INVALID"
 elif [[ ! "$CANDIDATE" =~ ^[0-9]+$ ]]; then PRODUCTION_STATUS="$CANDIDATE_STATUS"
 elif [[ "$FLOOR_CLASS" == "CONFLICT" ]]; then PRODUCTION_STATUS="CONFLICTS_WITH_LEGITIMATE_FLOOR"
-elif [[ "$FLOOR_CLASS" == "NOT_SUPPLIED" ]]; then PRODUCTION_STATUS="AWAITING_LEGITIMATE_FLOOR"
 elif [[ "$STATE_GUARD" == "EXCEEDS_POLICY" ]]; then PRODUCTION_STATUS="EXCEEDS_STATE_GROWTH_POLICY"
-elif [[ "$STATE_GUARD" == "UNRATIFIED" || "$STATE_GUARD" == "UNAVAILABLE" ]]; then PRODUCTION_STATUS="AWAITING_STATE_GROWTH_POLICY"
+elif [[ "$STATE_GUARD" == "INCOMPLETE" ]]; then PRODUCTION_STATUS="INCOMPLETE_STATE_GROWTH_EVIDENCE"
+elif [[ "$STATE_GUARD" == "UNAVAILABLE" ]]; then PRODUCTION_STATUS="STATE_GROWTH_AXIS_UNAVAILABLE"
+elif [[ "$FLOOR_CLASS" == "NOT_SUPPLIED" ]]; then PRODUCTION_STATUS="AWAITING_LEGITIMATE_FLOOR"
+elif [[ "$STATE_GUARD" == "UNRATIFIED" ]]; then PRODUCTION_STATUS="AWAITING_STATE_GROWTH_POLICY"
 else PRODUCTION_STATUS="CANDIDATE_READY_FOR_REVIEW"; fi
 
 # ---- 9. provenance ----------------------------------------------------------------------
@@ -957,6 +1052,7 @@ jq -n \
   --arg txgas "$CAL_TX_GAS" --arg txgasms "$CAL_TX_GAS_MULTISEND" --arg amt "$CAL_SEND_AMOUNT" \
   --arg fund "$CAL_FUND_PER_SENDER" --arg fb "$CAL_FUND_BATCH" \
   --arg target "$CAL_TARGET_BLOCK_MS" --arg quiet "$CAL_QUIET_BLOCKS" --arg drain "$CAL_DRAIN_TIMEOUT_S" \
+  --arg minblocks "$CAL_MIN_ACTIVE_BLOCKS_PER_STEP" --arg trunc "$RUN_TRUNCATED" \
   --arg maxsec "$CAL_MAX_SECONDS" --arg lag "$CAL_ENDPOINT_LAG_BLOCKS" --arg bps "$CAL_GAS_SAFETY_BPS" \
   --arg accs "$CAL_ACCOUNT_SAMPLING" --arg nodehome "$(jqs "$CAL_NODE_HOME")" \
   --arg acctaxis "$ACCOUNT_AXIS" --arg dbaxis "$APPDB_AXIS" \
@@ -982,11 +1078,13 @@ jq -n \
      policy: { target_block_ms: ($target|tonumber), quiet_blocks: ($quiet|tonumber),
                drain_timeout_s: ($drain|tonumber), max_seconds: ($maxsec|tonumber),
                endpoint_lag_blocks: ($lag|tonumber), gas_safety_bps: ($bps|tonumber),
+               min_active_blocks_per_step: ($minblocks|tonumber),
                max_accounts_per_block: ($accpolicy | nul), max_appdb_kb_per_block: ($dbpolicy | nul),
                legitimate_gas_floor: ($floor | nul) },
      sampling: { account_sampling_requested: ($accs|tonumber), account_axis: $acctaxis,
                  node_home: ($nodehome | nul), appdb_axis: $dbaxis, clock_source: $clock },
      recipients: { namespace_nonce: $nonce, namespace_verified_fresh: $fresh },
+     run: { truncated_by_deadline: ($trunc == "1") },
      host: { os: ($os | nul), arch: ($arch | nul), cpu_model: ($cpu | nul),
              cpu_count: ($cpun | nul), ram_bytes: ($ram | nul) }
    }' >"$MANIFEST" || abort "could not write $MANIFEST"
@@ -1000,6 +1098,10 @@ jq -n \
   --arg target "$CAL_TARGET_BLOCK_MS" --arg knee "$KNEE_GAS" --arg cand "$CANDIDATE" \
   --arg bps "$CAL_GAS_SAFETY_BPS" --arg cstatus "$CANDIDATE_STATUS" \
   --arg guard "$STATE_GUARD" --arg worst "$WORST_ACCT_PER_BLOCK" \
+  --arg aguard "$ACCOUNT_GUARD" --arg dguard "$APPDB_GUARD" --arg dworst "$WORST_APPDB_PER_BLOCK" \
+  --arg acov "$ACCT_DELTA_COVERAGE" --arg dcov "$APPDB_DELTA_COVERAGE" \
+  --arg acovn "$ACCT_DELTA_SEEN" --arg dcovn "$APPDB_DELTA_SEEN" --arg covd "$ACCOUNT_EXPECTED" \
+  --arg minblocks "$CAL_MIN_ACTIVE_BLOCKS_PER_STEP" --arg trunc "$RUN_TRUNCATED" \
   --arg acctaxis "$ACCOUNT_AXIS" --arg dbaxis "$APPDB_AXIS" \
   --arg floor "$(jqs "$CAL_LEGITIMATE_GAS_FLOOR")" --arg fclass "$FLOOR_CLASS" \
   --arg pstatus "$PRODUCTION_STATUS" --arg run_id "$RUN_ID" \
@@ -1016,8 +1118,19 @@ jq -n \
      performance_candidate_max_gas: (if $cand == "null" then null else ($cand|tonumber) end),
      candidate_status: $cstatus,
      interpolation: "NOT_ATTEMPTED_GEOMETRIC_RAMP_TOO_COARSE",
-     state_growth: { guard: $guard, account_axis: $acctaxis, appdb_axis: $dbaxis,
-                     worst_accounts_per_active_block: (if $worst == "NA" then null else ($worst|tonumber) end) },
+     run_truncated_by_deadline: ($trunc == "1"),
+     min_active_blocks_per_step: ($minblocks|tonumber),
+     state_growth: {
+       account_guard: $aguard,
+       appdb_guard: $dguard,
+       combined_guard: $guard,
+       account_axis: $acctaxis,
+       appdb_axis: $dbaxis,
+       account_delta_coverage: { class: $acov, seen: ($acovn|tonumber), expected: ($covd|tonumber) },
+       appdb_delta_coverage:   { class: $dcov, seen: ($dcovn|tonumber), expected: ($covd|tonumber) },
+       worst_accounts_per_active_block: (if $worst == "NA" then null else ($worst|tonumber) end),
+       worst_appdb_kb_per_active_block: (if $dworst == "NA" then null else ($dworst|tonumber) end)
+     },
      legitimate_gas_floor: (if $floor == "null" then null else ($floor|tonumber) end),
      legitimate_floor_comparison: $fclass,
      production_candidate_status: $pstatus,
@@ -1049,7 +1162,9 @@ printf '  %-22s %s\n' delivered_failed "$TOTAL_FAILED"
 printf '  %-22s %s\n' unresolved_timeout "$TOTAL_TIMEOUT"
 say ""
 say "measured heights $RAMP_MIN_HEIGHT..$RAMP_MAX_HEIGHT ($UNREADABLE_BLOCKS unreadable)"
+(( RUN_TRUNCATED )) && warn "the ramp was truncated by CAL_MAX_SECONDS; no candidate may be derived from it"
 say "state-growth axes: accounts=$ACCOUNT_AXIS ($ACCOUNT_SAMPLES of $ACCOUNT_EXPECTED active blocks sampled), appdb=$APPDB_AXIS"
+say "state-growth delta coverage: accounts=$ACCT_DELTA_COVERAGE ($ACCT_DELTA_SEEN/$ACCOUNT_EXPECTED), appdb=$APPDB_DELTA_COVERAGE ($APPDB_DELTA_SEEN/$ACCOUNT_EXPECTED)"
 [[ "$ACCOUNT_AXIS" == "AVAILABLE" ]] || warn "account growth is $ACCOUNT_AXIS — the columns below read NA, which is NOT zero growth"
 say "starting block.max_gas: $START_MAX_GAS (finite: $START_MAX_GAS_FINITE)"
 say "endpoint agreement: $AGREE_OK of $AGREE_SAMPLES sampled heights; final heights:$FINAL_HEIGHTS"
@@ -1058,6 +1173,12 @@ say "per step (ACTIVE blocks only; QUIET drain blocks excluded):"
 column -s, -t "$STEPS_CSV" 2>/dev/null || cat "$STEPS_CSV"
 say ""
 say "knee: p95 active block interval against a ${CAL_TARGET_BLOCK_MS}ms target"
+say "  minimum active blocks per contributing step: $CAL_MIN_ACTIVE_BLOCKS_PER_STEP"
+STEP_RESPONSE=""
+for (( i = 1; i <= STEP_IDX; i++ )); do
+  STEP_RESPONSE="$STEP_RESPONSE $i:${STEP_CLASS[$i]:-?}/${STEP_ELIG[$i]:-?}"
+done
+say "  step response:     $STEP_RESPONSE"
 say "  highest safe step:  ${STEP_SAFE:-none}"
 say "  first unsafe step:  ${STEP_UNSAFE:-none}"
 say "  bracketed:          $KNEE_BRACKETED"
@@ -1073,11 +1194,27 @@ else
       say "  the top step is a floor on capacity, not a measurement of the knee." ;;
     BELOW_TEST_RANGE_REDUCE_LOAD)
       say "  no candidate: the first loaded step was already unsafe. Lower CAL_STEPS and re-run." ;;
+    NON_MONOTONIC_RESPONSE_RETRY)
+      say "  no candidate: the load response is not monotonic — a step recovered above an"
+      say "  unsafe one. That is a confounded experiment, not a knee. Re-run on a quiet host." ;;
+    INSUFFICIENT_ACTIVE_BLOCKS_NO_CANDIDATE)
+      say "  no candidate: a contributing step carried fewer than $CAL_MIN_ACTIVE_BLOCKS_PER_STEP active"
+      say "  blocks, so its p95 is not a tail measurement. Lengthen the steps, or lower"
+      say "  CAL_MIN_ACTIVE_BLOCKS_PER_STEP deliberately to exercise the mechanics." ;;
+    TRUNCATED_RUN_NO_COMPLETE_BRACKET)
+      say "  no candidate: the ramp was cut short by CAL_MAX_SECONDS, so at least one step"
+      say "  never ran its configured waves. Raise CAL_MAX_SECONDS or shorten the ramp." ;;
+    INCOMPLETE_STEPS_NO_CANDIDATE)
+      say "  no candidate: a step did not complete its configured waves with a full workload." ;;
+    MEASUREMENT_INVALID)
+      say "  no candidate: the measurement itself was not trustworthy (see reasons above)." ;;
     *) say "  no candidate: $CANDIDATE_STATUS" ;;
   esac
 fi
 say ""
-say "state-growth guard:   $STATE_GUARD (worst accounts/active block: $WORST_ACCT_PER_BLOCK)"
+say "state-growth guards:  account=$ACCOUNT_GUARD appdb=$APPDB_GUARD combined=$STATE_GUARD"
+say "  worst per active block: accounts=$WORST_ACCT_PER_BLOCK appdb_kb=$WORST_APPDB_PER_BLOCK"
+say "  policies supplied:      accounts=${CAL_MAX_ACCOUNTS_PER_BLOCK:-none} appdb_kb=${CAL_MAX_APPDB_KB_PER_BLOCK:-none}"
 say "legitimate floor:     ${CAL_LEGITIMATE_GAS_FLOOR:-not supplied} -> $FLOOR_CLASS"
 say "production status:    $PRODUCTION_STATUS"
 say ""

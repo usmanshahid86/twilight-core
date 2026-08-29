@@ -476,19 +476,193 @@ attribution_overlaps() {
   awk '{ if ($1 == prevh && $2 != prevs) c++; prevh = $1; prevs = $2 } END { print c + 0 }' "$f"
 }
 
-# knee_classify <safe-step> <unsafe-step> — what the run established about the knee.
+# ---- candidate qualification ------------------------------------------------------
 #
-# A run only establishes a knee if it BRACKETS one. Every other outcome names what to
-# change and yields no number: a rig that extrapolated past its own measurements
-# would be inventing the parameter it was built to measure.
-knee_classify() {
-  local safe="${1:-}" unsafe="${2:-}"
-  if [[ -n "$safe" && -n "$unsafe" ]]; then
-    [[ "$safe" =~ ^[0-9]+$ && "$unsafe" =~ ^[0-9]+$ ]] || { echo "NO_USABLE_STEPS"; return 0; }
-    if (( unsafe > safe )); then echo "BRACKETED"; else echo "NO_USABLE_STEPS"; fi
-  elif [[ -n "$safe" ]]; then echo "UNBOUNDED_BY_RUN_INCREASE_LOAD"
-  elif [[ -n "$unsafe" ]]; then echo "BELOW_TEST_RANGE_REDUCE_LOAD"
-  else echo "NO_USABLE_STEPS"; fi
+# Three layers are kept apart deliberately, and a numeric candidate must never gain
+# more authority than the evidence underneath it:
+#
+#   1. WAVE/WORKLOAD validity  — was the intended workload actually accepted and
+#                                delivered, in full?
+#   2. MEASUREMENT validity    — were lifecycle accounting, block reads, attribution,
+#                                endpoint agreement and sampling trustworthy?
+#   3. CANDIDATE qualification — did COMPLETE, MONOTONIC, adequately-sampled steps
+#                                bracket a knee, and do the supplied policies permit
+#                                review?
+#
+# Collapsing these into one boolean is what lets a defensible-looking number rest on
+# a step that never finished, or on a workload a tenth of which reverted.
+
+# wave_workload_valid <offered> <accepted> <included> <delivered_ok> <failed> <unresolved>
+#
+# The workload a wave actually completed must be the workload it intended, exactly.
+#
+# A transaction that passes CheckTx, occupies block gas, commits its sequence and then
+# FAILS execution has consumed capacity and produced none of the state the workload
+# was supposed to create. Including such a wave in knee inference measures a
+# different, cheaper workload than the one being characterised — and the sequence
+# check cannot see it, because a failed execution still advances the sequence.
+#
+# A CheckTx rejection is equally disqualifying in the other direction: a step where
+# part of the intended load never entered the mempool is not the offered load.
+wave_workload_valid() {
+  local offered="${1:-}" accepted="${2:-}" included="${3:-}" ok="${4:-}" failed="${5:-}" unresolved="${6:-}"
+  local v
+  for v in "$offered" "$accepted" "$included" "$ok" "$failed" "$unresolved"; do
+    [[ "$v" =~ ^[0-9]+$ ]] || { echo "UNREADABLE"; return 1; }
+  done
+  (( offered > 0 ))            || { echo "EMPTY_WAVE"; return 1; }
+  (( accepted == offered ))    || { echo "CHECK_REJECTED"; return 1; }
+  (( included == offered ))    || { echo "NOT_ALL_INCLUDED"; return 1; }
+  (( ok == offered ))          || { echo "NOT_ALL_DELIVERED_OK"; return 1; }
+  (( failed == 0 ))            || { echo "DELIVERY_FAILURES"; return 1; }
+  (( unresolved == 0 ))        || { echo "UNRESOLVED"; return 1; }
+  echo "OK"
+  return 0
+}
+
+# step_eligibility <completed-waves> <expected-waves> <active-blocks> <min-active-blocks>
+#
+# A step may inform the knee only if it ran to completion and carries enough blocks to
+# support the tail statistic taken from it.
+#
+# The deadline case is the dangerous one: `break 2` on CAL_MAX_SECONDS leaves a
+# partially executed step in the data, and one unsafe wave out of three configured is
+# enough to make that step look UNSAFE and complete a bracket that the full step might
+# never have produced.
+#
+# The sample-size case is quieter. A p95 over one or two active blocks is defined but
+# is not a tail measurement; it is the maximum wearing a percentile's name.
+step_eligibility() {
+  local done_waves="${1:-}" want_waves="${2:-}" blocks="${3:-}" min_blocks="${4:-}"
+  local v
+  for v in "$done_waves" "$want_waves" "$blocks" "$min_blocks"; do
+    [[ "$v" =~ ^[0-9]+$ ]] || { echo "UNREADABLE"; return 1; }
+  done
+  (( want_waves > 0 ))          || { echo "NO_WAVES_CONFIGURED"; return 1; }
+  (( done_waves >= want_waves )) || { echo "INCOMPLETE_STEP"; return 1; }
+  (( blocks >= min_blocks ))     || { echo "INSUFFICIENT_ACTIVE_BLOCKS"; return 1; }
+  echo "ELIGIBLE"
+  return 0
+}
+
+# candidate_precheck <measurement-valid> <truncated> <ineligible-reason>
+#
+# The disqualification order, in one place, so a candidate can never be reached by
+# satisfying a later test while failing an earlier one. Prints PROCEED when the run
+# has earned the right to be classified, or the blocking status otherwise.
+#
+# The truncation rule is deliberate and pinned: ANY deadline truncation blocks
+# candidate emission. Salvaging a bracket established before the cut would require
+# proving the unrun waves could not have changed the monotonicity classification, and
+# a run that stopped early cannot supply that proof.
+candidate_precheck() {
+  local valid="${1:-}" truncated="${2:-}" reason="${3:-}"
+  [[ "$valid" == "YES" ]] || { echo "MEASUREMENT_INVALID"; return 0; }
+  if [[ "$truncated" == "1" ]]; then echo "TRUNCATED_RUN_NO_COMPLETE_BRACKET"; return 0; fi
+  case "$reason" in
+    "")                         echo "PROCEED" ;;
+    INSUFFICIENT_ACTIVE_BLOCKS) echo "INSUFFICIENT_ACTIVE_BLOCKS_NO_CANDIDATE" ;;
+    INCOMPLETE_STEP)            echo "INCOMPLETE_STEPS_NO_CANDIDATE" ;;
+    *)                          echo "NO_USABLE_STEPS" ;;
+  esac
+}
+
+# knee_classify_sequence <class>... — classify the WHOLE ordered load response.
+#
+# The only defensible bracket is a single monotonic transition:
+#
+#     SAFE ... SAFE, UNSAFE ... UNSAFE
+#
+# Anything else is a measurement to distrust rather than a knee. The predecessor of
+# this function took only the first safe step and the first unsafe step, so
+# SAFE, UNSAFE, SAFE reported a clean bracket at (1,2) while the chain had in fact
+# recovered as load increased — which is either noise or a confounded experiment, and
+# in neither case a value to ship.
+#
+# Every configured step must be represented. A caller that has excluded ineligible
+# steps must say so through its own status rather than by silently shortening this
+# list, or a truncated run would look like a complete monotonic one.
+knee_classify_sequence() {
+  (( $# > 0 )) || { echo "NO_USABLE_STEPS"; return 0; }
+  local c safe=0 unsafe=0 transitions=0 prev=""
+  for c in "$@"; do
+    case "$c" in
+      SAFE)   safe=$(( safe + 1 )) ;;
+      UNSAFE) unsafe=$(( unsafe + 1 )) ;;
+      *) echo "NO_USABLE_STEPS"; return 0 ;;
+    esac
+    if [[ -n "$prev" && "$c" != "$prev" ]]; then transitions=$(( transitions + 1 )); fi
+    prev="$c"
+  done
+  if (( unsafe == 0 )); then echo "UNBOUNDED_BY_RUN_INCREASE_LOAD"; return 0; fi
+  if (( safe == 0 )); then echo "BELOW_TEST_RANGE_REDUCE_LOAD"; return 0; fi
+  # One transition, and it must run SAFE -> UNSAFE rather than the other way.
+  if (( transitions == 1 )) && [[ "$1" == "SAFE" ]]; then echo "BRACKETED"; return 0; fi
+  echo "NON_MONOTONIC_RESPONSE_RETRY"
+}
+
+# delta_coverage_class <seen> <expected> — how completely a growth axis was measured.
+#
+# Deliberately about DELTAS, not samples. A policy is a statement about growth, and a
+# block whose account count was read but whose delta could not be formed contributes
+# no growth evidence. Treating the two as the same is how partial coverage would be
+# allowed to certify a maximum.
+delta_coverage_class() {
+  local seen="${1:-}" expected="${2:-}"
+  [[ "$seen" =~ ^[0-9]+$ && "$expected" =~ ^[0-9]+$ ]] || { echo "NONE"; return 0; }
+  (( expected > 0 )) || { echo "NONE"; return 0; }
+  (( seen > 0 )) || { echo "NONE"; return 0; }
+  if (( seen >= expected )); then echo "COMPLETE"; else echo "PARTIAL"; fi
+}
+
+# growth_guard_for_axis <policy> <axis-availability> <coverage-class> <worst-delta>
+#
+# One axis, one verdict:
+#
+#   UNRATIFIED     no policy supplied — nothing to certify
+#   UNAVAILABLE    a policy was supplied and the axis was never measured
+#   INCOMPLETE     a policy was supplied and coverage has holes
+#   WITHIN_POLICY  full coverage, observed maximum at or under the policy
+#   EXCEEDS_POLICY full coverage, observed maximum over the policy
+#
+# INCOMPLETE is the one that matters. The missing block may be the worst block, so
+# partial coverage can characterise what was seen but can never certify a maximum. A
+# supplied policy must never silently vanish from qualification.
+growth_guard_for_axis() {
+  local policy="${1:-}" axis="${2:-}" coverage="${3:-}" worst="${4:-}"
+  [[ "$policy" =~ ^[0-9]+$ ]] || { echo "UNRATIFIED"; return 0; }
+  case "$axis" in
+    AVAILABLE|PARTIAL) ;;
+    *) echo "UNAVAILABLE"; return 0 ;;
+  esac
+  [[ "$coverage" == "COMPLETE" ]] || { echo "INCOMPLETE"; return 0; }
+  [[ "$worst" =~ ^-?[0-9]+$ ]] || { echo "INCOMPLETE"; return 0; }
+  if (( worst <= policy )); then echo "WITHIN_POLICY"; else echo "EXCEEDS_POLICY"; fi
+}
+
+# combine_growth_guards <guard>... — the state-growth verdict across every axis.
+#
+# Worst-wins, in the order that matters for shipping a parameter: an exceeded policy
+# outranks a missing axis, which outranks incomplete coverage, which outranks a clean
+# pass. Two unrated axes stay unrated — that is an absent policy, not a failure.
+combine_growth_guards() {
+  local g exceeds=0 unavailable=0 incomplete=0 within=0 unrated=0
+  (( $# > 0 )) || { echo "UNRATIFIED"; return 0; }
+  for g in "$@"; do
+    case "$g" in
+      EXCEEDS_POLICY) exceeds=1 ;;
+      UNAVAILABLE)    unavailable=1 ;;
+      INCOMPLETE)     incomplete=1 ;;
+      WITHIN_POLICY)  within=1 ;;
+      UNRATIFIED)     unrated=1 ;;
+      *) echo "UNRATIFIED"; return 0 ;;
+    esac
+  done
+  (( exceeds ))     && { echo "EXCEEDS_POLICY"; return 0; }
+  (( unavailable )) && { echo "UNAVAILABLE"; return 0; }
+  (( incomplete ))  && { echo "INCOMPLETE"; return 0; }
+  (( within ))      && { echo "WITHIN_POLICY"; return 0; }
+  echo "UNRATIFIED"
 }
 
 # candidate_from_knee <knee-gas> <safety-bps> — the safety-adjusted candidate.
