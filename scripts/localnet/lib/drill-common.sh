@@ -459,3 +459,32 @@ version_map_from_json() {
       else ($pairs | sort | join(",")) end
   ' <<<"$j" 2>/dev/null || return 1
 }
+
+# offline_app_height <binary> <home> — the application height a STOPPED node has
+# committed, read without RPC.
+#
+# Needed because a node restarted into an upgrade it cannot perform EXITS: it
+# never binds RPC, so /abci_info is unreachable and every height reader that
+# depends on it fails. That is not the same as the halt of an already-running
+# node, which keeps its process and usually keeps serving.
+#
+# `export` reports initial_height as one past the last committed block, so the
+# committed application height is that minus one.
+#
+# Note the export document is written to STDERR, with an informational NOTICE
+# line alongside it — so the JSON is selected by shape rather than by stream.
+offline_app_height() {
+  local bin="$1" home="$2" ih
+  ih="$("$bin" export --home "$home" 2>&1 | sed -n '/^{/p' | head -1 | jq -er '.initial_height' 2>/dev/null)" || return 1
+  [[ "$ih" =~ ^[0-9]+$ ]] || return 1
+  (( ih >= 1 )) || return 1
+  echo $((ih - 1))
+}
+
+# coreslot_export_at <binary> <home> <height> — the complete canonical CoreSlot
+# module state at a height, as the module's own export renders it.
+coreslot_export_at() {
+  local bin="$1" home="$2" height="$3"
+  "$bin" export --home "$home" --height "$height" 2>&1 \
+    | sed -n '/^{/p' | head -1 | jq -eS '.app_state.coreslot' 2>/dev/null || return 1
+}

@@ -132,25 +132,6 @@ active_slot_count_a() { "$BIN_A" coreslot-query active --node "$(rpc_url "$1")" 
 plan_name_a()   { "$BIN_A" query upgrade plan --node "$(rpc_url "$1")" --output json | jq -er '.plan.name // .name'; }
 plan_height_a() { "$BIN_A" query upgrade plan --node "$(rpc_url "$1")" --output json | jq -er '.plan.height // .height'; }
 
-# coreslot_snapshot <binary> <node-home> <height> <out> — the COMPLETE canonical
-# CoreSlot module state at a height, taken through the module's own export.
-#
-# Not params+slots. The 1->2 migration is a deliberate state no-op, so the claim
-# under test is that NOTHING in the module moved — which means comparing every
-# canonical collection it persists, including the ones a hand-written inventory
-# would forget: pending key rotations, pending authority transfers, reserved
-# consensus addresses, reward weights, last-applied validators and the selection
-# policy history.
-#
-# Only the coreslot section is compared. The whole-application export legitimately
-# differs across the boundary, because the version map is exactly what changed.
-coreslot_snapshot() {
-  local bin="$1" home="$2" height="$3" out="$4"
-  "$bin" export --home "$home" --height "$height" 2>/dev/null \
-    | jq -eS '.app_state.coreslot' >"$out" 2>/dev/null || return 1
-  [[ -s "$out" ]] || return 1
-}
-
 # ---- 0. preflight --------------------------------------------------------------
 
 [[ -e "$DRILL_EVID_DIR" ]] && { echo "rehearsal: $DRILL_EVID_DIR exists; use a fresh RUN_ID" >&2; exit 2; }
@@ -351,34 +332,41 @@ phase_begin
 STALE_OFFSET="$(log_size "$STALE")"
 eval "export NODE_BIN_$STALE=\"$BIN_A\""
 start_node "$STALE"
-sleep 20
 
-if read_required_str EXE node_exe_sha "$STALE"; then expect "stale_runs_binary_a" "$SHA_A" "$EXE" "$STALE"
-else fail "node$STALE: could not read the running executable" "$STALE"; fi
-# The refusal must belong to THIS restart. Grepping the whole log would find the
-# original halt and pass on a node that never came back at all.
-expect "stale_refusal_is_fresh" "yes" \
-  "$(fresh_marker_after "$STALE" "$STALE_OFFSET" 'wrong app version|UPGRADE .* NEEDED')" "$STALE"
-if read_required_uint SAH app_height "$STALE"; then
-  expect "stale_did_not_commit_h" "$((UPGRADE_HEIGHT - 1))" "$SAH" "$STALE"
-else fail "node$STALE: could not read the application height" "$STALE"; fi
+# Poll the LOG, not RPC. A node restarted into an upgrade it cannot perform never
+# binds RPC — it refuses during replay and the process exits — so every
+# height reader that goes through /abci_info is unreachable here. That differs
+# from the halt of an already-running node, which keeps its process up.
+STALE_REFUSED=no
+for _ in $(seq 1 40); do
+  STALE_REFUSED="$(fresh_marker_after "$STALE" "$STALE_OFFSET" 'wrong app version|UPGRADE .* NEEDED')"
+  [[ "$STALE_REFUSED" == "yes" ]] && break
+  sleep 2
+done
+expect "stale_refusal_is_fresh" "yes" "$STALE_REFUSED" "$STALE"
 
-sleep 12
-if read_required_uint SAH2 app_height "$STALE"; then
-  expect "stale_makes_no_progress" "$((UPGRADE_HEIGHT - 1))" "$SAH2" "$STALE"
-else fail "node$STALE: could not re-read the application height" "$STALE"; fi
-
-# Characterization, kept separate from correctness: a halted node usually keeps
-# serving RPC, which is what makes liveness monitoring lie (#154). If a future
-# CometBFT exits cleanly instead, that is an improvement and must not fail a
-# release — so this is recorded, not gated.
-record_assert "$STALE" "stale_rpc_survives_characterization" "observed" \
+# Characterization only, deliberately not a correctness gate. #154 recorded that a
+# halted node often keeps serving RPC; on THIS path it exits instead. Both are
+# acceptable, and a future CometBFT that always exits cleanly must not fail a
+# release — so the observation is recorded and not asserted.
+record_assert "$STALE" "stale_process_after_refusal_characterization" "observed" \
+  "$(node_alive "$STALE" && echo alive || echo exited)" PASS
+record_assert "$STALE" "stale_rpc_after_refusal_characterization" "observed" \
   "$(rpc_get "$STALE" /status >/dev/null 2>&1 && echo serving || echo closed)" PASS
+
+# The correctness claim, proven offline: it committed H-1 and never applied H.
+stop_node "$STALE"; sleep 4
+if read_required_uint SAH offline_app_height "$BIN_A" "$(node_home "$STALE")"; then
+  expect "stale_did_not_commit_h" "$((UPGRADE_HEIGHT - 1))" "$SAH" "$STALE"
+else
+  fail "node$STALE: could not read the offline application height" "$STALE"
+  SAH=-1
+fi
 
 # The quorum is unaffected: three of four is still above two-thirds.
 for n in "${UPGRADED[@]}"; do
   if read_required_uint QH app_height "$n"; then
-    expect "quorum_still_ahead_of_stale" "true" "$([[ "$QH" -gt "$SAH2" ]] && echo true || echo false)" "$n"
+    expect "quorum_still_ahead_of_stale" "true" "$([[ "$QH" -gt "$((UPGRADE_HEIGHT - 1))" ]] && echo true || echo false)" "$n"
   else fail "node$n: could not read the application height" "$n"; fi
 done
 phase_end "stale" "node $STALE held at $((UPGRADE_HEIGHT - 1)) on A while the quorum advanced"
@@ -391,9 +379,12 @@ phase_begin
 # snapshots, so the schema representation is identical on each side and a
 # difference can only mean the state differs.
 stop_node 0; sleep 4
+# Sequentially, never concurrently: two exports against one home contend for the
+# same LevelDB lock and one of them silently produces nothing.
 SNAP_OK=1
-coreslot_snapshot "$BIN_B" "$(node_home 0)" "$((UPGRADE_HEIGHT - 1))" "$DRILL_EVID_DIR/coreslot-at-H-1.json" || SNAP_OK=0
-coreslot_snapshot "$BIN_B" "$(node_home 0)" "$UPGRADE_HEIGHT" "$DRILL_EVID_DIR/coreslot-at-H.json" || SNAP_OK=0
+coreslot_export_at "$BIN_B" "$(node_home 0)" "$((UPGRADE_HEIGHT - 1))" >"$DRILL_EVID_DIR/coreslot-at-H-1.json" || SNAP_OK=0
+coreslot_export_at "$BIN_B" "$(node_home 0)" "$UPGRADE_HEIGHT"        >"$DRILL_EVID_DIR/coreslot-at-H.json"   || SNAP_OK=0
+[[ -s "$DRILL_EVID_DIR/coreslot-at-H-1.json" && -s "$DRILL_EVID_DIR/coreslot-at-H.json" ]] || SNAP_OK=0
 expect "coreslot_snapshots_taken" "1" "$SNAP_OK"
 if (( SNAP_OK )); then
   expect "coreslot_state_unchanged_across_boundary" \
