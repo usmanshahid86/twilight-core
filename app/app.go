@@ -216,6 +216,17 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 	// declaration, and the bank module's own blocked-destination set. It is
 	// injected into both custom modules as a plain value, so neither gains a
 	// keeper edge and neither has to import this package.
+	// The second TW-006 control, alongside the funding minimum above. It bounds
+	// the fan-out one TRANSACTION may require of consensus, which the send
+	// restriction cannot: bank invokes a SendRestriction once per output and
+	// never learns how many there are.
+	//
+	// The chain the tx module installs through depinject is wrapped rather than
+	// rebuilt, so no decorator can be dropped or reordered, and the cap runs
+	// before it — an oversized transaction is refused without a validator first
+	// paying for signature verification.
+	runtimeApp.SetAnteHandler(newMultiSendOutputCap(runtimeApp.AnteHandler()))
+
 	economicAddresses, err := economicaddress.New(
 		accountKeeper.AddressCodec(),
 		ModuleAccountNames(),
