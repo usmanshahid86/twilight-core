@@ -26,12 +26,24 @@ func TestUnresolvableCallSitesAreRefused(t *testing.T) {
 		{"unknown_alias", "a qualifier matching no import cannot be resolved"},
 		{"external_package", "a module outside this repository cannot be attributed"},
 		{"too_few_args", "a call without a sender argument cannot be read"},
+		{"method_value", "a callee stored in a variable separates the call from its module"},
+		{"method_value_as_arg", "a method value handed elsewhere cannot be followed"},
 	} {
 		t.Run(tc.dir, func(t *testing.T) {
 			_, _, err := payoutledger.SendingModules("testdata/" + tc.dir)
 			require.Error(t, err, "must fail closed: %s", tc.because)
 		})
 	}
+}
+
+// A parenthesized callee is the same direct call and must RESOLVE, not be
+// skipped. Matching only a bare SelectorExpr missed it silently, which was a
+// concrete false-pass path for the exemption inventory.
+func TestParenthesizedCalleesAreStillCalls(t *testing.T) {
+	modules, sites, err := payoutledger.SendingModules("testdata/paren_callee")
+	require.NoError(t, err, "(x.Method)(...) is a direct call and must resolve")
+	require.Equal(t, []string{"rewards"}, modules)
+	require.Len(t, sites, 1)
 }
 
 // The two shapes it does accept must actually resolve, or the inventory would
@@ -48,7 +60,7 @@ func TestAcceptedShapesResolve(t *testing.T) {
 // added in a shape the parser cannot read — which is a reason to widen the
 // parser deliberately, not to loosen it.
 func TestTheRealTreeResolvesCompletely(t *testing.T) {
-	modules, sites, err := payoutledger.SendingModules("../../x", "../../app")
+	modules, sites, err := payoutledger.SendingModulesInRepo("../..")
 	require.NoError(t, err, "every module payout call site must be resolvable")
 	require.NotEmpty(t, sites, "the parser found no payout call sites at all, which cannot be right")
 	require.Equal(t, []string{"rewards"}, modules,

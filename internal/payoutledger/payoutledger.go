@@ -25,6 +25,27 @@
 // an unlisted payout path reach production. That discipline is the whole value:
 // this repository has previously shipped an inventory built from a grep whose
 // expected count came from the same grep.
+//
+// Concretely, the parser refuses rather than skips when: the callee is taken as
+// a value instead of called; the sender is a variable, a nested selector, a
+// non-ModuleName constant, an unknown qualifier, or an external package; the
+// argument list is too short; a package is dot-imported; or a package declares
+// conflicting ModuleName values across build variants. Parenthesized callees are
+// unwrapped rather than missed, and the scan covers the whole production module
+// rather than named subtrees.
+//
+// # What it does not establish
+//
+// It matches on the METHOD NAME, without type information, so it cannot confirm
+// the receiver is the bank keeper. A same-named method on an unrelated type is
+// therefore reported as a payout. That direction is deliberate and safe: an
+// extra entry makes the exemption-set equality FAIL, forcing a human decision,
+// whereas a missed entry would let an unexempted payout path pass unnoticed.
+// Over-reporting is the failure this package prefers.
+//
+// It also cannot see a payout made through an interface that never names the
+// method in this module's source. No name-based analysis can, and type
+// information would not help either, since the dispatch is dynamic.
 package payoutledger
 
 import (
@@ -95,6 +116,20 @@ func SendingModules(roots ...string) ([]string, []Payout, error) {
 	return modules, found, nil
 }
 
+// SendingModulesInRepo locates the Go module containing dir and scans its
+// ENTIRE production tree.
+//
+// Scanning named subtrees was a false-pass path: a payout added under internal/
+// or cmd/ simply fell outside the roots and the inventory reported a smaller
+// set, which is the answer that makes a stale exemption list look correct.
+func SendingModulesInRepo(dir string) ([]string, []Payout, error) {
+	root, _, err := moduleRoot(filepath.Join(dir, "x.go"))
+	if err != nil {
+		return nil, nil, err
+	}
+	return SendingModules(root)
+}
+
 func payoutsInFile(filename string) ([]Payout, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, filename, nil, 0)
@@ -107,8 +142,12 @@ func payoutsInFile(filename string) ([]Payout, error) {
 		return nil, fmt.Errorf("%s: %w", filename, err)
 	}
 
+	// Pass 1 records every DIRECT call, unwrapping parentheses: a callee written
+	// (k.SendCoinsFromModuleToAccount)(...) is an ast.ParenExpr, and matching only
+	// a bare SelectorExpr would skip it silently.
 	var payouts []Payout
 	var walkErr error
+	called := map[*ast.SelectorExpr]struct{}{}
 	ast.Inspect(file, func(node ast.Node) bool {
 		if walkErr != nil {
 			return false
@@ -117,10 +156,11 @@ func payoutsInFile(filename string) ([]Payout, error) {
 		if !ok {
 			return true
 		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
+		selector, ok := calleeSelector(call.Fun)
 		if !ok || selector.Sel.Name != payoutMethod {
 			return true
 		}
+		called[selector] = struct{}{}
 		position := fset.Position(call.Pos()).String()
 		if len(call.Args) < 2 {
 			walkErr = fmt.Errorf(
@@ -139,7 +179,52 @@ func payoutsInFile(filename string) ([]Payout, error) {
 	if walkErr != nil {
 		return nil, walkErr
 	}
+
+	// Pass 2 refuses every OTHER mention of the method. Taking it as a value —
+	//
+	//	send := k.SendCoinsFromModuleToAccount
+	//	send(ctx, someModule, to, amt)
+	//
+	// separates the call from its module argument, so the sender can no longer be
+	// attributed. Such a reference is an ERROR, never a node to skip: skipping is
+	// exactly what lets an unexempted payout path reach production while the
+	// inventory still reports the old set.
+	ast.Inspect(file, func(node ast.Node) bool {
+		if walkErr != nil {
+			return false
+		}
+		selector, ok := node.(*ast.SelectorExpr)
+		if !ok || selector.Sel.Name != payoutMethod {
+			return true
+		}
+		if _, isDirectCall := called[selector]; isDirectCall {
+			return true
+		}
+		walkErr = fmt.Errorf(
+			"%s: %s is taken as a value rather than called directly; a payout made "+
+				"through it cannot be attributed to a module",
+			fset.Position(selector.Pos()), payoutMethod)
+		return false
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
 	return payouts, nil
+}
+
+// calleeSelector unwraps any number of parentheses around a callee and returns
+// the selector underneath, if there is one.
+func calleeSelector(fun ast.Expr) (*ast.SelectorExpr, bool) {
+	for {
+		switch expr := fun.(type) {
+		case *ast.ParenExpr:
+			fun = expr.X
+		case *ast.SelectorExpr:
+			return expr, true
+		default:
+			return nil, false
+		}
+	}
 }
 
 // resolveModule follows the sender argument to a concrete module name, or
@@ -205,9 +290,16 @@ func moduleNameConst(importPath, fromFile string) (string, error) {
 	}
 
 	// Read the directory directly rather than through parser.ParseDir, which is
-	// deprecated for not honoring build tags. Every non-test file is parsed, and
-	// a file that will not parse is an error rather than a file to skip.
+	// deprecated for not honoring build tags. Every non-test file is parsed, and a
+	// file that will not parse is an error rather than a file to skip.
+	//
+	// Build tags are not evaluated, so mutually exclusive variants could each
+	// declare ModuleName. Returning the first one found would attribute a payout
+	// to a module the built binary may not use, so every declaration found must
+	// AGREE; disagreement is refused rather than resolved by guessing which
+	// variant is built.
 	fset := token.NewFileSet()
+	found := map[string]string{} // value -> file that declared it
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -236,10 +328,31 @@ func moduleNameConst(importPath, fromFile string) (string, error) {
 						return "", fmt.Errorf(
 							"%s declares ModuleName as a non-literal; it cannot be pinned", importPath)
 					}
-					return strconv.Unquote(lit.Value)
+					unquoted, err := strconv.Unquote(lit.Value)
+					if err != nil {
+						return "", fmt.Errorf("%s declares an unparseable ModuleName: %w", importPath, err)
+					}
+					found[unquoted] = name
 				}
 			}
 		}
+	}
+	switch len(found) {
+	case 0:
+	case 1:
+		for value := range found {
+			return value, nil
+		}
+	default:
+		declarations := make([]string, 0, len(found))
+		for value, file := range found {
+			declarations = append(declarations, fmt.Sprintf("%q in %s", value, file))
+		}
+		sort.Strings(declarations)
+		return "", fmt.Errorf(
+			"%s declares conflicting ModuleName values across build variants (%s); "+
+				"the sending module cannot be attributed without evaluating build tags",
+			importPath, strings.Join(declarations, ", "))
 	}
 	return "", fmt.Errorf("%s declares no ModuleName constant", importPath)
 }

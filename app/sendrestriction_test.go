@@ -361,7 +361,10 @@ func TestModuleTransfersAreUnaffected(t *testing.T) {
 //
 // So both directions are proven at once, by comparing canonical sets.
 func TestTheExemptionListMatchesTheSendingModulesExactly(t *testing.T) {
-	sending, sites, err := payoutledger.SendingModules("../x", "../app")
+	// The WHOLE production module, not named subtrees: a payout added under
+	// internal/ or cmd/ would otherwise fall outside the scan and shrink the
+	// inventory, which is the answer that makes a stale allow-list look correct.
+	sending, sites, err := payoutledger.SendingModulesInRepo("..")
 	require.NoError(t, err,
 		"every module payout call site must be resolvable; an unreadable one is a "+
 			"reason to widen the parser deliberately, not to skip it")
