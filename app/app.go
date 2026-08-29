@@ -196,6 +196,21 @@ func New(logger log.Logger, db dbm.DB, traceStore io.Writer, loadLatest bool, ap
 	}
 	runtimeApp := builder.Build(db, traceStore, baseAppOptions...)
 
+	// A new account is permanent, non-reclaimable state, and with free transactions
+	// there was nothing to stop it being created in bulk — about 340,000 accounts
+	// per 21 MB block, roughly 40 MB of IAVL growth that never comes back (TW-006).
+	//
+	// Appended here rather than inside a module: it is a bank rule, and neither
+	// custom module owns it. The restriction runs on both SendCoins and
+	// InputOutputCoins, so MsgSend and MsgMultiSend are covered by one function
+	// without either handler being touched.
+	//
+	// It bounds fan-out WITHIN a transaction, not cumulative growth — the amount
+	// is transferred rather than consumed, so it recycles across transactions.
+	// See MinimumAccountFunding for the scope this does and does not cover.
+	bankKeeper.AppendSendRestriction(
+		newAccountFundingRestriction(accountKeeper, protocolPayoutAddresses()))
+
 	// The one canonical economic-address rule (§25), derived here from the two
 	// authorities that own the answer: the auth configuration's module-account
 	// declaration, and the bank module's own blocked-destination set. It is
