@@ -1,4 +1,4 @@
-.PHONY: build build-release check-release-stamping check-cli-surface check-vulncheck-pin test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
+.PHONY: build build-release check-release-stamping check-cli-surface check-vulncheck-pin release-upgrade-faults release-upgrade-rehearsal test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 # Version and commit are stamped at link time; the chain and binary names are
@@ -86,6 +86,17 @@ check-cli-surface:
 # runner has already selected that same toolchain.
 check-vulncheck-pin:
 	./scripts/check-vulncheck-pin.sh
+
+# Fast, stubbed coverage for the release-upgrade rehearsal's proof primitives.
+# The rehearsal itself is slow and needs the network; these are the readers whose
+# silent failure would make a broken run report success.
+release-upgrade-faults:
+	./scripts/localnet/release-upgrade-rehearsal-faults.sh
+
+# The full qualification: a published release upgraded to the candidate across a
+# four-validator partial rollout. Slow, needs gh and free ports.
+release-upgrade-rehearsal:
+	./scripts/localnet/release-upgrade-rehearsal.sh
 
 test:
 	go test ./...

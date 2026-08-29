@@ -97,6 +97,16 @@ node_alive() {
 # See #155 for making the base ports configurable, which this does not do.
 require_free_ports() {
   local n port busy=()
+  # An inspector that is ABSENT must not read as "every port is free". lsof
+  # returning non-zero is how a free port looks, and a missing lsof returns
+  # non-zero for every port — so without this the guard would report a clean
+  # bill of health on exactly the machine where it could not look.
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "refusing to start: lsof is required to check that the localnet ports are free" >&2
+    echo "  without it this guard cannot distinguish a free port from an uninspectable one," >&2
+    echo "  and these ports are fixed (see #155), so a collision would hit a live node." >&2
+    return 1
+  fi
   for ((n = 0; n < NODE_COUNT; n++)); do
     for port in $((26657 + n * 100)) $((26656 + n * 100)) $((9090 + n * 100)); do
       if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -346,4 +356,106 @@ record_row() {
   echo "$1,$2,$3,$4,$5,$6,$7,$8,$9,$checked_slot_id,$checked_slot_status,$checked_slot_power" >>"$SUMMARY"
   printf '  [%s] %s  tx=%s code=%s  h:%s->%s active=%s num_val_updates=%s agree=%s\n' \
     "$9" "$1" "${3:0:10}" "$4" "$2" "$5" "$6" "$7" "$8"
+}
+
+# ---- upgrade-boundary readers ------------------------------------------------
+#
+# These are the proof primitives an upgrade rehearsal needs, factored here so a
+# second harness does not have to reinvent them. upgrade-drill.sh carries its own
+# frozen copies; converging the two is deliberate follow-up work, not something to
+# do while that drill's evidence is pinned to its exact bytes.
+#
+# Every reader here FAILS rather than returning a value on a malformed, empty or
+# unreachable response. None of them has a `// 0` fallback: at an upgrade boundary
+# a zero is indistinguishable from "the node stopped answering", and that
+# confusion is precisely what a boundary proof cannot afford.
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  else shasum -a 256 "$1" | awk '{print $1}'; fi
+}
+
+# app_height <node> — the height the APPLICATION has committed.
+#
+# Not the block-store height, and the difference is the entire point at a halt.
+# CometBFT stores a block once consensus agrees on it, and only then asks the
+# application to apply it. When x/upgrade refuses, the block exists in the store
+# while the application never advanced — so the store reads H and the application
+# reads H-1. Proving a node did NOT apply the upgrade block means reading this
+# one.
+app_height() { rpc_get "$1" /abci_info | jq -er '.result.response.last_block_height'; }
+
+# store_height <node> — the height CometBFT has a block for, applied or not.
+store_height() { rpc_get "$1" /status | jq -er '.result.sync_info.latest_block_height'; }
+
+# node_exe_sha <node> — the hash of the executable the node's PROCESS is running.
+#
+# Not the path a shell variable asked for. A binary swap that silently failed, or
+# a stale process that outlived its restart, both leave $NODE_BIN_n saying one
+# thing while the running code is another — and every assertion downstream would
+# then describe a binary that is not under test.
+node_exe_sha() {
+  local pidfile="$NET/node$1.pid" pid exe
+  [[ -f "$pidfile" ]] || return 1
+  pid="$(cat "$pidfile" 2>/dev/null)"; [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  exe="$(ps -o command= -p "$pid" 2>/dev/null | awk '{print $1}')"
+  [[ -n "$exe" && -f "$exe" ]] || return 1
+  sha256_of "$exe"
+}
+
+# upgrade_info_field <node> <name|height> — a field of the node's on-disk
+# upgrade-info.json, which is what the halting node leaves for its successor.
+upgrade_info_field() {
+  local f="$(node_home "$1")/data/upgrade-info.json"
+  [[ -s "$f" ]] || return 1
+  case "$2" in
+    name)   jq -er '.name'   <"$f" ;;
+    height) jq -er '.height' <"$f" ;;
+    *) return 1 ;;
+  esac
+}
+
+upgrade_info_path() { echo "$(node_home "$1")/data/upgrade-info.json"; }
+
+# hash_at <node> <height> <header-field> — a consensus hash at an exact height.
+hash_at() { rpc_get "$1" "/block?height=$2" | jq -er ".result.block.header.$3"; }
+
+validator_count()     { rpc_get "$1" /validators | jq -er '.result.total'; }
+min_validator_power() { rpc_get "$1" /validators | jq -er '[.result.validators[].voting_power | tonumber] | min'; }
+max_validator_power() { rpc_get "$1" /validators | jq -er '[.result.validators[].voting_power | tonumber] | max'; }
+
+# version_map_from_json <json> — canonical "name:version,..." or non-zero.
+#
+# No fallback. An ABSENT version renders as the token `omitted-zero`, never as 0:
+# autocli marshals with EmitUnpopulated false, so runtime — whose consensus
+# version is genuinely zero — arrives with no version field at all. Rendering that
+# as 0 would make "the field was omitted" and "the value is zero" the same string
+# for every module, and the one module whose absence could hide is the one it
+# would hide behind.
+version_map_from_json() {
+  local j="$1"
+  [[ -n "$j" ]] || return 1
+  jq -er '
+    if type != "object" then error("response is not an object") else . end
+    | if has("module_versions") | not then error("no module_versions") else . end
+    | .module_versions
+    | if type != "array" then error("module_versions is not an array") else . end
+    | if length == 0 then error("module_versions is empty") else . end
+    | [ .[]
+        | if type != "object" then error("entry is not an object") else . end
+        | if (.name | type) != "string" or (.name | length) == 0 then error("bad name") else . end
+        | (if (has("version") | not) then "omitted-zero"
+           elif .version == null then error("version null")
+           elif (.version | type) == "string" then
+             (if (.version | test("^[0-9]+$")) then .version else error("version not digits") end)
+           elif (.version | type) == "number" then
+             (if .version >= 0 and (.version | floor) == .version
+              then (.version | tostring) else error("version not a non-negative integer") end)
+           else error("version is the wrong type") end) as $v
+        | "\(.name):\($v)" ]
+    | . as $pairs
+    | ($pairs | map(split(":")[0])) as $names
+    | if ($names | unique | length) != ($names | length) then error("duplicate module name")
+      else ($pairs | sort | join(",")) end
+  ' <<<"$j" 2>/dev/null || return 1
 }
