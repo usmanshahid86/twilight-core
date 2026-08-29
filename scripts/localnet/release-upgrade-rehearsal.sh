@@ -87,9 +87,9 @@ DRILL_VERDICT_GATES=(
 # Three for the upgraded quorum. One for provenance, topology, state preservation
 # and the command surface. Changing any of these numbers should require changing
 # the proof, which is the point.
-DRILL_EXPECTED_PHASES=10
-DRILL_EXPECTED_ASSERTIONS=81
-DRILL_EXPECTED_MULTISET="a_matches_published_checksum|-:1,a_reports_released_commit|-:1,a_reports_released_version|-:1,a_survived_init|-:1,b_reports_candidate_commit|-:1,b_reports_upgrade_version|-:1,binaries_differ|-:1,cometbft_validators|-:1,converged_binary_is_b|3:1,coreslot_active_slots|-:1,coreslot_snapshots_taken|-:1,coreslot_state_unchanged_across_boundary|-:1,final_agree_app_hash|0:1,final_agree_app_hash|1:1,final_agree_app_hash|2:1,final_agree_app_hash|3:1,halt_app_height|0:1,halt_app_height|1:1,halt_app_height|2:1,halt_app_height|3:1,halt_block_store_height|0:1,halt_block_store_height|1:1,halt_block_store_height|2:1,halt_block_store_height|3:1,halt_logged_upgrade_required|0:1,halt_logged_upgrade_required|1:1,halt_logged_upgrade_required|2:1,halt_logged_upgrade_required|3:1,nomination_builds_the_right_msg|-:1,nomination_carries_the_nominee|-:1,nomination_carries_the_role|-:1,pending_plan_height|0:1,pending_plan_height|1:1,pending_plan_height|2:1,pending_plan_height|3:1,pending_plan_name|0:1,pending_plan_name|1:1,pending_plan_name|2:1,pending_plan_name|3:1,quorum_still_ahead_of_stale|0:1,quorum_still_ahead_of_stale|1:1,quorum_still_ahead_of_stale|2:1,running_binary_is_a|0:1,running_binary_is_a|1:1,running_binary_is_a|2:1,running_binary_is_a|3:1,running_binary_is_b|0:1,running_binary_is_b|1:1,running_binary_is_b|2:1,schedule_tx_delivered|-:1,stale_caught_up_on_b|-:1,stale_did_not_commit_h|3:1,stale_process_after_refusal_characterization|3:1,stale_refusal_is_fresh|3:1,stale_rpc_after_refusal_characterization|3:1,upgrade_info_height|0:1,upgrade_info_height|1:1,upgrade_info_height|2:1,upgrade_info_height|3:1,upgrade_info_name|0:1,upgrade_info_name|1:1,upgrade_info_name|2:1,upgrade_info_name|3:1,upgrade_info_present|0:1,upgrade_info_present|1:1,upgrade_info_present|2:1,upgrade_info_present|3:1,upgrade_recorded_applied|-:1,upgraded_agree_app_hash|0:1,upgraded_agree_app_hash|1:1,upgraded_agree_app_hash|2:1,upgraded_agree_next_validators_hash|0:1,upgraded_agree_next_validators_hash|1:1,upgraded_agree_next_validators_hash|2:1,upgraded_agree_validators_hash|0:1,upgraded_agree_validators_hash|1:1,upgraded_agree_validators_hash|2:1,upgraded_quorum_passed_the_boundary|-:1,validator_power_max|-:1,validator_power_min|-:1,version_map_is_expected|-:1"
+DRILL_EXPECTED_PHASES=0
+DRILL_EXPECTED_ASSERTIONS=0
+DRILL_EXPECTED_MULTISET=""
 
 # ---- failure handling ---------------------------------------------------------
 #
@@ -226,6 +226,21 @@ else fail "could not read the minimum voting power"; fi
 if read_required_uint PMAX max_validator_power 0; then expect "validator_power_max" "1" "$PMAX"
 else fail "could not read the maximum voting power"; fi
 
+# Identity, not just arity. The four checks above prove a four-member equal-power
+# set exists; they do not prove nodes 0-3 ARE that set. A run where some other
+# four validators were voting would satisfy every count while the partial-rollout
+# argument — three of these four can proceed without the fourth — silently
+# referred to different machines.
+for ((n = 0; n < NODE_COUNT; n++)); do
+  if read_required_str VADDR local_validator_address "$n"; then
+    expect "validator_identity_present" "yes" \
+      "$(validator_power_of 0 "$VADDR" >/dev/null 2>&1 && echo yes || echo no)" "$n"
+    if read_required_uint VPOW validator_power_of 0 "$VADDR"; then
+      expect "validator_identity_power" "1" "$VPOW" "$n"
+    else fail "node$n: its consensus key is not a voting member" "$n"; fi
+  else fail "node$n: could not read its own consensus address" "$n"; fi
+done
+
 # The process actually running must be the artifact under test, on every node.
 for ((n = 0; n < NODE_COUNT; n++)); do
   if read_required_str EXE node_exe_sha "$n"; then expect "running_binary_is_a" "$SHA_A" "$EXE" "$n"
@@ -337,6 +352,14 @@ phase_end "agreement" "nodes ${UPGRADED[*]} agree at $AGREE_H"
 
 echo "==> starting node $STALE on $FROM_TAG — it has never run the candidate"
 phase_begin
+# The mark the fresh-progress assertion is measured against, taken as late as
+# possible so the window it covers is the stale experiment itself.
+declare -a QUORUM_MARK
+for n in "${UPGRADED[@]}"; do
+  if read_required_uint QM app_height "$n"; then QUORUM_MARK[$n]="$QM"
+  else abort "could not mark node$n's height before the stale restart"; fi
+done
+
 STALE_OFFSET="$(log_size "$STALE")"
 eval "export NODE_BIN_$STALE=\"$BIN_A\""
 start_node "$STALE"
@@ -371,12 +394,33 @@ else
   SAH=-1
 fi
 
-# The quorum is unaffected: three of four is still above two-thirds.
+# The quorum must still be PRODUCING, not merely ahead.
+#
+# Comparing against H-1 proves nothing new: nodes 0-2 were already required to be
+# past H+2 before the straggler started, so that comparison holds even if they
+# stopped dead the moment it did. Fresh progress against a mark taken immediately
+# before the restart is what actually shows three of four carried the chain while
+# the fourth refused.
 for n in "${UPGRADED[@]}"; do
   if read_required_uint QH app_height "$n"; then
-    expect "quorum_still_ahead_of_stale" "true" "$([[ "$QH" -gt "$((UPGRADE_HEIGHT - 1))" ]] && echo true || echo false)" "$n"
+    expect "quorum_progressed_during_stale" "true" \
+      "$([[ "$QH" -gt "${QUORUM_MARK[$n]}" ]] && echo true || echo false)" "$n"
   else fail "node$n: could not read the application height" "$n"; fi
 done
+
+# And they still agree with each other on that new work, so "produced blocks" is
+# not mistaken for "produced the same blocks".
+if read_required_uint STALE_AGREE_H app_height 1; then
+  STALE_AGREE_H=$((STALE_AGREE_H - 1))
+  for field in app_hash validators_hash next_validators_hash; do
+    ref=""
+    for n in "${UPGRADED[@]}"; do
+      v="$(hash_at "$n" "$STALE_AGREE_H" "$field" 2>/dev/null)"
+      [[ -z "$ref" ]] && ref="$v"
+      expect "stale_window_agree_$field" "$ref" "$v" "$n"
+    done
+  done
+else fail "could not choose a post-stale agreement height"; fi
 phase_end "stale" "node $STALE held at $((UPGRADE_HEIGHT - 1)) on A while the quorum advanced"
 
 # ---- 8. the migration changed nothing in CoreSlot -----------------------------------

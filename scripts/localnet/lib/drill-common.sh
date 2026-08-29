@@ -488,3 +488,23 @@ coreslot_export_at() {
   "$bin" export --home "$home" --height "$height" 2>&1 \
     | sed -n '/^{/p' | head -1 | jq -eS '.app_state.coreslot' 2>/dev/null || return 1
 }
+
+# local_validator_address <node> — the consensus address of the key this node
+# actually signs with, taken from its own priv_validator_key.json.
+#
+# This is what turns "there are four equal-power validators" into "these four are
+# nodes 0-3". Counting the set proves a set of the right size exists; it does not
+# prove the nodes under test are its members, and a partial-rollout argument that
+# three of four can proceed depends on the fourth genuinely being one of them.
+local_validator_address() {
+  local f="$(node_home "$1")/config/priv_validator_key.json"
+  [[ -s "$f" ]] || return 1
+  jq -er '.address' <"$f"
+}
+
+# validator_power_of <node> <consensus-address> — the voting power of one exact
+# validator in the live set, or non-zero when that address is not a member.
+validator_power_of() {
+  rpc_get "$1" /validators \
+    | jq -er --arg a "$2" '.result.validators[] | select(.address == $a) | .voting_power'
+}
