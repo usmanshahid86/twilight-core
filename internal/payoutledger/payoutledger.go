@@ -320,8 +320,29 @@ func moduleNameConst(importPath, fromFile string) (string, error) {
 					continue
 				}
 				for i, ident := range value.Names {
-					if ident.Name != "ModuleName" || i >= len(value.Values) {
+					if ident.Name != "ModuleName" {
 						continue
+					}
+					// Go repeats the preceding expression list when a const spec
+					// inside a parenthesized declaration omits its own:
+					//
+					//	const (
+					//		sender = "coreslot"
+					//		ModuleName
+					//	)
+					//
+					// declares ModuleName as "coreslot", yet its ValueSpec carries
+					// no Values entry. Skipping that identifier let the declaration
+					// go unseen, so a build variant declaring ModuleName implicitly
+					// could be missed entirely while another variant's explicit
+					// value was reported as the answer. Refuse instead: pinning it
+					// would mean evaluating const declaration inheritance, and the
+					// security property here is refusal, not interpretation.
+					if i >= len(value.Values) {
+						return "", fmt.Errorf(
+							"%s declares ModuleName using an implicit repeated const "+
+								"expression; it cannot be pinned without evaluating const "+
+								"declaration inheritance", importPath)
 					}
 					lit, ok := value.Values[i].(*ast.BasicLit)
 					if !ok || lit.Kind != token.STRING {

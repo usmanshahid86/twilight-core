@@ -36,6 +36,31 @@ func TestUnresolvableCallSitesAreRefused(t *testing.T) {
 	}
 }
 
+// Go repeats the preceding expression list when a const spec omits its own, so
+//
+//	const (
+//		sender = "coreslot"
+//		ModuleName
+//	)
+//
+// declares ModuleName as "coreslot" while its ValueSpec carries no Values entry.
+// Skipping that identifier was a concrete false-PASS: a build variant declaring
+// ModuleName implicitly went unseen, and another variant's explicit value was
+// reported as the package's answer. A payout from that package was then
+// attributed to the wrong module, and the exemption-set equality compared
+// successfully against a set that did not describe the built binary.
+//
+// Exercised through a real SendCoinsFromModuleToAccount call site, so this
+// covers the load-bearing inventory path rather than a standalone const parse.
+func TestImplicitConstModuleNameIsRefused(t *testing.T) {
+	modules, _, err := payoutledger.SendingModules("testdata/implicit_const")
+	require.Error(t, err,
+		"an implicitly declared ModuleName must be refused, not skipped")
+	require.Contains(t, err.Error(), "implicit repeated const expression")
+	require.Empty(t, modules,
+		"the package must never resolve to the other variant's explicit value")
+}
+
 // A parenthesized callee is the same direct call and must RESOLVE, not be
 // skipped. Matching only a bare SelectorExpr missed it silently, which was a
 // concrete false-pass path for the exemption inventory.
