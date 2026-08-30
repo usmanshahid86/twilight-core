@@ -138,9 +138,19 @@ const MempoolBacklogBlocks = 4
 //
 // The mempool byte bound is derived from the same default block size that
 // `twilightd init` writes into the genesis consensus params, so the two cannot
-// silently drift apart at the default. They CAN drift after genesis: block
-// max_bytes is a consensus parameter the authority may change through
-// x/consensus, and a node's config.toml does not follow it.
+// silently drift apart at the default.
+//
+// They CAN drift when a network launches with a block max_bytes other than the
+// default, because a node's config.toml is written once and does not follow
+// genesis. That is the case to watch: applying a ratified block parameter means
+// launching a network with it, which leaves every carried-over config.toml
+// describing the previous one.
+//
+// It cannot drift by a live parameter change, because this chain has no way to
+// make one. x/consensus is configured with the authority module account, which
+// is keyless, and no module proxies its MsgUpdateParams the way x/coreslot
+// proxies x/upgrade — so no transaction can reach it on a running chain. That
+// gap is recorded in #167 and is not addressed here.
 func nodeConfig() *cmtcfg.Config {
 	cfg := cmtcfg.DefaultConfig()
 	cfg.Mempool.MaxTxsBytes = MempoolBacklogBlocks * cmttypes.DefaultConsensusParams().Block.MaxBytes
