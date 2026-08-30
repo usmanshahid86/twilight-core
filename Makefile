@@ -213,7 +213,7 @@ block-gas-faults:
 # infer them, because a file checked against itself proves nothing.
 #
 #   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 make check-genesis GENESIS=path/to/genesis.json
-check-genesis:
+check-genesis: build
 	@test -n "$(GENESIS)" || { echo "set GENESIS=<path to genesis.json>" >&2; exit 2; }
 	./scripts/check-genesis.sh "$(GENESIS)" --bin build/twilightd
 

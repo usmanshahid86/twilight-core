@@ -17,6 +17,12 @@
 # Every one of those fails toward a confident wrong answer. So each check gets a
 # fault that must make it fire.
 #
+# THE COVERAGE CLAIM IS ENFORCED, NOT ASSERTED. This file used to say every check
+# had a fault case while 29 of them did not, and nine live checks could be deleted
+# outright with it still reporting "every check fires on its own fault". The list
+# of checks is now DERIVED from what the checker actually printed across every run
+# below, and a check with no matching fault case fails this suite.
+#
 # THE ASSERTION IS SPECIFIC, DELIBERATELY. It is not enough that the checker
 # exited non-zero — a mutation that broke something unrelated would satisfy that
 # while the intended check stayed dead. Each case names the check it must see
@@ -93,11 +99,27 @@ GOOD="$WORK/genesis.good.json"
 jq '.consensus.params.block.max_gas="50000000" | .app_state.coreslot.params.min_active_slots="2"' \
   "$HOME_DIR/config/genesis.json" >"$GOOD" || abort "could not finish the baseline genesis"
 
+# Every label the checker has ever printed, across the baseline and every mutant.
+# This is what the coverage assertion at the end is derived from, so a check added
+# to check-genesis.sh with no fault case here is DETECTED rather than assumed.
+LABELS="$WORK/labels.all"
+WANTS="$WORK/wants.all"
+: >"$LABELS"; : >"$WANTS"
+
+# Strip colour, take the text after PASS/FAIL, drop the " = value" tail that eq()
+# appends, so a label matches the same string a `want` greps for.
+record_labels() {
+  sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" 2>/dev/null \
+    | awk '/^  (PASS|FAIL)  /{ sub(/^  (PASS|FAIL)  /,""); sub(/ = .*$/,""); print }' \
+    >>"$LABELS" || true
+}
+
 run_checker() { # run_checker <genesis> [extra env assignments...] -> writes $WORK/out, returns exit code
   local g="$1"; shift
   local rc=0
   env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 "$@" \
     "$CHECKER" "$g" --bin "$BIN" >"$WORK/out" 2>&1 || rc=$?
+  record_labels
   return $rc
 }
 
@@ -122,6 +144,7 @@ mutate() {
     fail "$label" "the mutation changed nothing — it would pass for the wrong reason"
     return
   fi
+  printf '%s\n' "$want" >>"$WANTS"
   run_checker "$g" "$@" || rc=$?
   if (( rc == 0 )); then
     fail "$label" "checker still exited 0"
@@ -215,6 +238,121 @@ mutate "one key holding both authority roles" \
 mutate "a changed native denom" \
   '.app_state.rewards.params.native_denom="uother"' "rewards native_denom"
 
+echo
+echo "==> fresh-genesis invariants, one fault each"
+mutate "an epoch other than the first" \
+  '.app_state.rewards.state.current_epoch="2"' "rewards.state.current_epoch"
+mutate "a carried remainder at genesis" \
+  '.app_state.rewards.state.carry_forward_remainder="1"' "rewards.state.carry_forward_remainder"
+mutate "reward-enabled blocks already accrued" \
+  '.app_state.rewards.open_reward_enabled_blocks="5"' "rewards.open_reward_enabled_blocks"
+mutate "outstanding entitlement liability at genesis" \
+  '.app_state.rewards.outstanding_entitlement_liability="1"' "rewards.outstanding_entitlement_liability"
+mutate "a params update already queued" \
+  '.app_state.rewards.has_pending_params=true' "rewards.has_pending_params"
+mutate "a pause already scheduled" \
+  '.app_state.rewards.pause_state.has_pending=true' "rewards.pause_state.has_pending"
+mutate "a second epoch config version" \
+  '.app_state.rewards.epoch_config_versions += [.app_state.rewards.epoch_config_versions[0]]' \
+  "rewards.epoch_config_versions count"
+mutate "a second reward config version" \
+  '.app_state.rewards.reward_config_versions += [.app_state.rewards.reward_config_versions[0]]' \
+  "rewards.reward_config_versions count"
+mutate "a non-empty reward schedule" \
+  '.app_state.rewards.scheduled_reward_configs=[{effective_epoch:"5"}]' \
+  "rewards.scheduled_reward_configs is empty"
+mutate "a non-empty settlement schedule" \
+  '.app_state.mining.scheduled_settlement_params=[{effective_epoch:"5"}]' \
+  "mining.scheduled_settlement_params is empty"
+mutate "a non-empty distribution-mode schedule" \
+  '.app_state.mining.scheduled_distribution_modes=[{effective_epoch:"5"}]' \
+  "mining.scheduled_distribution_modes is empty"
+mutate "a non-empty selection-params schedule" \
+  '.app_state.mining.scheduled_selection_params=[{effective_epoch:"5"}]' \
+  "mining.scheduled_selection_params is empty"
+mutate "a finalized epoch at genesis" \
+  '.app_state.rewards.finalized_epochs=[{epoch_number:"1"}]' "rewards.finalized_epochs is empty"
+mutate "an entitlement at genesis" \
+  '.app_state.rewards.slot_entitlements=[{slot_id:"1"}]' "rewards.slot_entitlements is empty"
+mutate "a settlement at genesis" \
+  '.app_state.mining.settlements=[{slot_id:"1"}]' "mining.settlements is empty"
+
+echo
+echo "==> the remaining immutable bounds"
+mutate "a zero settlement window" \
+  '.app_state.mining.settlement_params_versions[0].settlement_window_epochs="0"' \
+  "settlement_window_epochs >= 1"
+mutate "a selection cooldown below the floor" \
+  '.app_state.coreslot.params.selection_policy_update_cooldown_blocks="100"' \
+  "selection_policy_update_cooldown_blocks >= 360"
+
+echo
+echo "==> the third copy: current_epoch_config"
+mutate "snapshot distribution_method drift" \
+  '.app_state.rewards.current_epoch_config.distribution_method="DISTRIBUTION_METHOD_SNAPSHOT_UNIFORM"' \
+  "current_epoch_config.distribution_method mirrors params"
+mutate "snapshot treasury-share drift" \
+  '.app_state.rewards.current_epoch_config.emission_treasury_share_bps="100"' \
+  "current_epoch_config.emission_treasury_share_bps mirrors params"
+mutate "snapshot fee_denom drift" \
+  '.app_state.rewards.current_epoch_config.fee_denom="uother"' \
+  "current_epoch_config.fee_denom mirrors params"
+mutate "snapshot fee-treasury-share drift" \
+  '.app_state.rewards.current_epoch_config.fee_treasury_share_bps="100"' \
+  "current_epoch_config.fee_treasury_share_bps mirrors params"
+mutate "snapshot halving_mode drift" \
+  '.app_state.rewards.current_epoch_config.halving_mode="HALVING_MODE_UNSPECIFIED"' \
+  "current_epoch_config.halving_mode mirrors params"
+mutate "snapshot remainder_policy drift" \
+  '.app_state.rewards.current_epoch_config.remainder_policy="REMAINDER_POLICY_BURN"' \
+  "current_epoch_config.remainder_policy mirrors params"
+mutate "treasury-share drift against the canonical version" \
+  '.app_state.rewards.reward_config_versions[0].emission_treasury_share_bps="100"' \
+  "emission_treasury_share_bps mirrors"
+
+echo
+echo "==> the remaining launch decisions"
+mutate "a different active slot count" \
+  '.app_state.coreslot.slots += [.app_state.coreslot.slots[0] | .slot_id="3"]' "active slots"
+mutate "a min_active_slots other than the one decided" \
+  '.app_state.coreslot.params.min_active_slots="1"' "min_active_slots"
+mutate "an epoch length other than the one decided" \
+  '.app_state.rewards.params.epoch_length_blocks="720"
+   | .app_state.rewards.epoch_config_versions[0].epoch_length_blocks="720"
+   | .app_state.rewards.current_epoch_config.epoch_length_blocks="720"' "epoch_length_blocks"
+mutate "a different max supply" \
+  '.app_state.rewards.params.max_supply="42000000000000"' "max_supply"
+mutate "a subsidy other than the one decided" \
+  '.app_state.rewards.params.initial_block_subsidy="500000"
+   | .app_state.rewards.reward_config_versions[0].initial_block_subsidy="500000"
+   | .app_state.rewards.current_epoch_config.initial_block_subsidy="500000"' "initial_block_subsidy"
+mutate "a distribution method other than the one decided" \
+  '.app_state.rewards.params.distribution_method="DISTRIBUTION_METHOD_WEIGHTED_ACTIVE_BLOCKS"
+   | .app_state.rewards.current_epoch_config.distribution_method="DISTRIBUTION_METHOD_WEIGHTED_ACTIVE_BLOCKS"' \
+  "distribution_method"
+mutate "a treasury share other than the one decided" \
+  '.app_state.rewards.params.emission_treasury_share_bps="200"
+   | .app_state.rewards.reward_config_versions[0].emission_treasury_share_bps="200"
+   | .app_state.rewards.current_epoch_config.emission_treasury_share_bps="200"' \
+  "emission_treasury_share_bps"
+mutate "a treasury address other than the one decided" \
+  '.app_state.rewards.params.treasury_address="twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+   | .app_state.rewards.reward_config_versions[0].treasury_address="twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+   | .app_state.rewards.current_epoch_config.treasury_address="twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"' \
+  "treasury_address"
+mutate "a declared block time that nothing else enforces" \
+  '.app_state.rewards.params.target_block_time_seconds="10"' "target_block_time_seconds"
+mutate "a changed fee denom" \
+  '.app_state.rewards.params.fee_denom="uother"
+   | .app_state.rewards.current_epoch_config.fee_denom="uother"' "rewards fee_denom"
+mutate "a malformed authority address" \
+  '.app_state.coreslot.params.authority="not-an-address"' "authority has a well-formed address"
+mutate "a malformed emergency authority address" \
+  '.app_state.coreslot.params.emergency_authority="not-an-address"' \
+  "emergency_authority has a well-formed address"
+mutate "something only the chain itself rejects" \
+  '.app_state.coreslot.slots[0].slot_id="0"' "twilightd validate"
+
 # ---- the checker must refuse to guess ------------------------------------------------------
 #
 # A decision it invented is a decision nobody made, so an unset required input has
@@ -237,6 +375,39 @@ rc=0
 env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 "$CHECKER" "$GOOD" >"$WORK/out" 2>&1 || rc=$?
 if (( rc != 0 )); then pass "omitting --bin is not a clean pass"
 else fail "omitting --bin is not a clean pass" "checker exited 0 without running twilightd validate"; fi
+
+# ---- coverage: every check must have a fault case ---------------------------------------------
+#
+# The header of this file claims each check gets a fault that makes it fire. That
+# claim was previously false — 29 of 53 checks had no case, and nine live checks
+# could be deleted outright with this suite still reporting "every check fires on
+# its own fault", which is precisely the silent-green failure the checker exists to
+# prevent, one level up.
+#
+# So the claim is now ENFORCED rather than asserted. The check list is derived from
+# what the checker actually printed across every run above, not from a hand-kept
+# list that would drift the moment someone adds a check.
+echo
+echo "==> every check must have a fault case"
+UNCOVERED=0
+while IFS= read -r label; do
+  [[ -n "$label" ]] || continue
+  covered=0
+  while IFS= read -r want; do
+    [[ -n "$want" ]] || continue
+    case "$label" in *"$want"*) covered=1; break ;; esac
+  done <"$WANTS"
+  if (( covered == 0 )); then
+    UNCOVERED=$((UNCOVERED+1))
+    printf '  \033[31mBAD\033[0m   no fault case exercises: %s\n' "$label"
+  fi
+done < <(LC_ALL=C sort -u "$LABELS")
+if (( UNCOVERED == 0 )); then
+  pass "all $(LC_ALL=C sort -u "$LABELS" | grep -c . ) checks have a fault case"
+else
+  CASES=$((CASES+1)); FAILED=$((FAILED+1))
+  printf '  \033[31mBAD\033[0m   %d check(s) have no fault case\n' "$UNCOVERED"
+fi
 
 # ---- summary ---------------------------------------------------------------------------------
 echo

@@ -30,7 +30,9 @@ BIN=""
 shift || true
 while (( $# )); do
   case "$1" in
-    --bin) BIN="${2:-}"; shift 2 ;;
+    --bin)
+      [[ $# -ge 2 ]] || { echo "--bin needs a path to the twilightd binary" >&2; exit 2; }
+      BIN="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -65,7 +67,14 @@ PASS=0; FAIL=0; SECTION=""
 
 section() { SECTION="$1"; printf '\n\033[1m%s\033[0m\n' "$1"; }
 ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
-bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [[ -n "${2:-}" ]] && printf '        %s\n' "$2"; }
+bad()  {
+  FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"
+  # An `x && printf` tail would return 1 whenever the detail is empty, and every
+  # call site is the tail of a compound command, so `set -e` would abort the run
+  # with no message at all. Explicit return.
+  if [[ -n "${2:-}" ]]; then printf '        %s\n' "$2"; fi
+  return 0
+}
 note() { printf '  \033[36mnote\033[0m  %s\n' "$1"; }
 
 # jq read that fails closed: a missing path becomes __MISSING__ rather than an
@@ -86,15 +95,40 @@ j() {
   printf '%s' "$out"
 }
 
+# A value that could not be read is never equal to anything and never numeric.
+# [[ -ge ]] evaluates its operands ARITHMETICALLY, so a non-numeric string is
+# treated as a variable name and `set -u` kills the run mid-way — silently
+# skipping every check below it, including the max_gas check this exists for.
+is_num() { [[ "$1" =~ ^-?[0-9]+$ ]]; }
+
 eq() { # eq <label> <expected> <actual>
-  if [[ "$2" == "$3" ]]; then ok "$1 = $3"
+  if [[ "$3" == "__MISSING__" ]]; then
+    bad "$1" "not present in the genesis file (expected: $2)"
+  elif [[ "$2" == "$3" ]]; then ok "$1 = $3"
   else bad "$1" "expected: $2
         actual:   $3"; fi
+  return 0
 }
 
+# Both sides are read from the file, so two ABSENT values must not agree. A
+# mirror check that passes because neither copy exists is not doing its job.
+mirror() { # mirror <label> <a> <b>
+  if [[ "$2" == "__MISSING__" || "$3" == "__MISSING__" ]]; then
+    bad "$1" "one or both copies are absent: '$2' vs '$3'"
+  elif [[ "$2" == "$3" ]]; then ok "$1 = $3"
+  else bad "$1" "the two copies disagree:
+        params-side:  $2
+        canonical:    $3"; fi
+  return 0
+}
+
+# Compared against `true` EXPLICITLY. `jq -e` exits 0 for any output that is not
+# false or null — including 0, "", [] and {} — so a bound check accidentally
+# reduced to a value-producing expression would pass for every input.
 truthy() { # truthy <label> <jq-boolean-expression> <detail-on-fail>
-  if jq -e "$2" "$GENESIS" >/dev/null 2>&1; then ok "$1"
+  if jq -e "($2) == true" "$GENESIS" >/dev/null 2>&1; then ok "$1"
   else bad "$1" "${3:-}"; fi
+  return 0
 }
 
 printf '\033[1mcheck-genesis\033[0m  %s\n' "$GENESIS"
@@ -106,12 +140,13 @@ printf '\033[1mcheck-genesis\033[0m  %s\n' "$GENESIS"
 section "1. native validation (authoritative)"
 if [[ -n "$BIN" ]]; then
   [[ -x "$BIN" ]] || { echo "binary not executable: $BIN" >&2; exit 2; }
-  if "$BIN" validate "$GENESIS" >/tmp/gc-validate.$$ 2>&1; then
+  VLOG="$(mktemp "${TMPDIR:-/tmp}/check-genesis.XXXXXX")"
+  trap 'rm -f "$VLOG"' EXIT
+  if "$BIN" validate "$GENESIS" >"$VLOG" 2>&1; then
     ok "twilightd validate"
   else
-    bad "twilightd validate" "$(tail -3 /tmp/gc-validate.$$)"
+    bad "twilightd validate" "$(tail -3 "$VLOG")"
   fi
-  rm -f /tmp/gc-validate.$$
 else
   note "no --bin given; the chain's own validator was NOT run. Supply --bin build/twilightd."
 fi
@@ -150,22 +185,35 @@ eq "mining.settlements is empty"        "0" "$(j '.app_state.mining.settlements 
 # places: the params document, and the canonical version-1 history entry that
 # actually governs. Editing one and not the other is the single most likely
 # mistake in a hand-cut genesis, and the version entry is the one that wins.
-section "3. mirror consistency (params vs canonical version 1)"
-eq "epoch_length_blocks mirrors" \
+section "3. mirror consistency (params vs canonical version 1 vs the snapshot)"
+mirror "epoch_length_blocks mirrors" \
    "$(j '.app_state.rewards.params.epoch_length_blocks')" \
    "$(j '.app_state.rewards.epoch_config_versions[0].epoch_length_blocks')"
-eq "initial_block_subsidy mirrors" \
+mirror "initial_block_subsidy mirrors" \
    "$(j '.app_state.rewards.params.initial_block_subsidy')" \
    "$(j '.app_state.rewards.reward_config_versions[0].initial_block_subsidy')"
-eq "emission_treasury_share_bps mirrors" \
+mirror "emission_treasury_share_bps mirrors" \
    "$(j '.app_state.rewards.params.emission_treasury_share_bps')" \
    "$(j '.app_state.rewards.reward_config_versions[0].emission_treasury_share_bps')"
-eq "treasury_address mirrors" \
+mirror "treasury_address mirrors" \
    "$(j '.app_state.rewards.params.treasury_address')" \
    "$(j '.app_state.rewards.reward_config_versions[0].treasury_address')"
-eq "epoch anchor starts at initial_height" \
+mirror "epoch anchor starts at initial_height" \
    "$(j '.initial_height')" \
    "$(j '.app_state.rewards.epoch_config_versions[0].effective_start_height')"
+
+# THE THIRD COPY. current_epoch_config (EpochConfigSnapshot, params.proto:78) is a
+# full snapshot carrying its own epoch_length_blocks, subsidy, treasury address and
+# share, distribution method, halving mode and remainder policy. An operator who
+# edits the two above and stops has a genesis the chain still refuses, and the
+# refusal names none of them. Every field it duplicates is checked here.
+for f in epoch_length_blocks initial_block_subsidy treasury_address \
+         emission_treasury_share_bps distribution_method halving_mode \
+         remainder_policy fee_denom fee_treasury_share_bps; do
+  mirror "current_epoch_config.$f mirrors params" \
+     "$(j ".app_state.rewards.params.${f}")" \
+     "$(j ".app_state.rewards.current_epoch_config.${f}")"
+done
 
 # ---- 4. immutable bounds ---------------------------------------------------------------------
 #
@@ -217,7 +265,10 @@ elif [[ -z "$TREAS_ADDR" ]]; then
   note "treasury_address is EMPTY with zero shares. Legal — but the address and the share are"
   note "both frozen at genesis, so no treasury share can be introduced later without an upgrade."
 else
-  ok "treasury address set ahead of a zero share (keeps the option open)"
+  # A note, not a PASS. Nothing is being verified here — the address is legal
+  # either way at a zero share — and counting a status report as a passing check
+  # both inflates the total and creates a "check" no fault could ever make fire.
+  note "treasury_address is set ahead of a zero share, which keeps the option open."
 fi
 
 # The restart trap. Genesis requires active >= min_active_slots. UpdateParams does
@@ -241,8 +292,11 @@ fi
 ACTIVE="$(jq -r '[.app_state.coreslot.slots[]? | select(.status=="SLOT_STATUS_ACTIVE")] | length' "$GENESIS" 2>/dev/null || echo 0)"
 MINA="$(j '.app_state.coreslot.params.min_active_slots')"
 MAXA="$(j '.app_state.coreslot.params.max_active_slots')"
-if [[ "$ACTIVE" -ge "$MINA" && "$ACTIVE" -le "$MAXA" ]]; then
-  ok "active slot count $ACTIVE within [$MINA,$MAXA]"
+if ! is_num "$ACTIVE" || ! is_num "$MINA" || ! is_num "$MAXA"; then
+  bad "active slot count within [min,max]" \
+      "unreadable bound — active=$ACTIVE min=$MINA max=$MAXA (a missing or non-numeric params entry)"
+elif (( ACTIVE >= MINA && ACTIVE <= MAXA )); then
+  ok "active slot count within [min,max] ($ACTIVE in [$MINA,$MAXA])"
 else
   bad "active slot count within [min,max]" "active=$ACTIVE min=$MINA max=$MAXA — this genesis will be REFUSED at start-up"
 fi
@@ -275,6 +329,13 @@ eq "distribution_method"         "$GC_DISTRIBUTION_METHOD"         "$(j '.app_st
 eq "emission_treasury_share_bps" "$GC_EMISSION_TREASURY_SHARE_BPS" "$EMIS_BPS"
 eq "treasury_address"            "$GC_TREASURY_ADDRESS"            "$TREAS_ADDR"
 eq "allow_self_registration"     "false"                           "$(j '.app_state.coreslot.params.allow_self_registration')"
+# target_block_time_seconds drives NO computation — it is validated non-zero and
+# then unused — so nothing in the chain notices when it disagrees with the pacing
+# operators actually run. The node's own default is derived from the Go constant,
+# not from this genesis field, so a genesis declaring 10 while nodes pace at 5
+# passes every other check ever written. It is compared here because this is the
+# only place the two can be brought together.
+eq "target_block_time_seconds"   "$GC_BLOCK_TIME_SECONDS"          "$(j '.app_state.rewards.params.target_block_time_seconds')"
 
 AUTH="$(j '.app_state.coreslot.params.authority')"
 EAUTH="$(j '.app_state.coreslot.params.emergency_authority')"
@@ -291,16 +352,27 @@ note "Run with --bin so the chain's own validator does."
 section "7. emission projection — NOT a genesis value"
 SUBSIDY="$(j '.app_state.rewards.params.initial_block_subsidy')"
 SUPPLY="$(j '.app_state.rewards.params.max_supply')"
-awk -v s="$SUBSIDY" -v m="$SUPPLY" -v bt="$GC_BLOCK_TIME_SECONDS" 'BEGIN {
-  spy = 31557600; bpy = spy / bt; y1 = s * bpy;
-  printf "  at %s-second blocks:\n", bt;
-  printf "    year-one emission   %.0f utwlt  (%.2f%% of max supply)\n", y1, 100*y1/m;
-  printf "    first halving       %.2f years  (at 50%% of max supply)\n", ((m/2)/s)*bt/spy;
-}'
-awk -v e="$(j '.app_state.rewards.params.epoch_length_blocks')" -v bt="$GC_BLOCK_TIME_SECONDS" \
-  'BEGIN { printf "    epoch length        %.1f minutes\n", e*bt/60 }'
-note "Block time is timeout_commit in each node's config.toml. It is NOT in genesis, and"
-note "CometBFT's default is 1s. If the nodes run 1s blocks, every number above is 5x off."
+EPOCHLEN="$(j '.app_state.rewards.params.epoch_length_blocks')"
+# A projection, not a check — and it must never be able to abort the run. A
+# missing max_supply previously reached awk as 0 and killed the script with
+# "division by zero" AFTER its own FAIL was recorded, so the summary and the
+# verdict were never printed and a real verification failure exited 2, the code
+# this script otherwise reserves for usage errors.
+if is_num "$SUBSIDY" && is_num "$SUPPLY" && (( SUPPLY > 0 )) && is_num "$GC_BLOCK_TIME_SECONDS" && (( GC_BLOCK_TIME_SECONDS > 0 )); then
+  awk -v s="$SUBSIDY" -v m="$SUPPLY" -v bt="$GC_BLOCK_TIME_SECONDS" 'BEGIN {
+    spy = 31557600; bpy = spy / bt; y1 = s * bpy;
+    printf "  at %s-second blocks:\n", bt;
+    printf "    year-one emission   %.0f utwlt  (%.2f%% of max supply)\n", y1, 100*y1/m;
+    printf "    first halving       %.2f years  (at 50%% of max supply)\n", ((m/2)/s)*bt/spy;
+  }'
+  if is_num "$EPOCHLEN"; then
+    awk -v e="$EPOCHLEN" -v bt="$GC_BLOCK_TIME_SECONDS" \
+      'BEGIN { printf "    epoch length        %.1f minutes\n", e*bt/60 }'
+  fi
+else
+  note "projection skipped: subsidy='$SUBSIDY' max_supply='$SUPPLY' block_time='$GC_BLOCK_TIME_SECONDS'"
+fi
+note "Block time is timeout_commit in each node's config.toml. It is NOT in genesis."
 
 # ---- summary ---------------------------------------------------------------------------------
 printf '\n\033[1msummary\033[0m  %d passed, %d failed\n' "$PASS" "$FAIL"
