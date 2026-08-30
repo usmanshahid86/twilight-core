@@ -19,8 +19,30 @@ import (
 // GetQueryCmd returns the read-only rewards query command tree, mirroring the
 // repository's coreslot CLI convention (a top-level `rewards-query` command).
 func GetQueryCmd() *cobra.Command {
+	cmd, _ := buildQueryCmd()
+	return cmd
+}
+
+// querySpec pairs a registered command with the request it builds.
+type querySpec struct {
+	name  string
+	build func(*cobra.Command, []string) (interface{}, error)
+}
+
+// buildQueryCmd returns the command tree AND the command/request pairs it
+// registered.
+//
+// The pairs exist so the pinned contract test can assert WHICH REQUEST each
+// command builds without standing up a node. Without them a test can only compare
+// the set of registered commands against the set of dispatch cases, and that
+// comparison passes when a command is wired to the wrong request — which is the
+// same class of defect as the missing cases this file just fixed, one step
+// earlier in the path.
+func buildQueryCmd() (*cobra.Command, []querySpec) {
+	var specs []querySpec
 	cmd := &cobra.Command{Use: "rewards-query", Short: "Query rewards module state", DisableFlagParsing: true, SuggestionsMinimumDistance: 2}
 	add := func(use string, args cobra.PositionalArgs, paginated bool, request func(*cobra.Command, []string) (interface{}, error)) *cobra.Command {
+		specs = append(specs, querySpec{name: strings.Fields(use)[0], build: request})
 		q := &cobra.Command{Use: use, Args: args, RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientQueryContext(cmd)
 			if err != nil {
@@ -79,7 +101,7 @@ func GetQueryCmd() *cobra.Command {
 			return buildRewardConfigVersionRequest(a)
 		}),
 	)
-	return cmd
+	return cmd, specs
 }
 
 // dispatchQuery routes a typed request to the generated query client.
@@ -109,6 +131,15 @@ func dispatchQuery(ctx context.Context, qc types.QueryClient, req interface{}) (
 		return qc.CurrentEpochActiveBlocks(ctx, v)
 	case *types.QueryModuleBalancesRequest:
 		return qc.ModuleBalances(ctx, v)
+	// These three were registered as commands but had no case here, so every
+	// invocation fell through to the error below. `rewards-query pause-state`
+	// printed usage and has never returned data.
+	case *types.QueryEpochConfigVersionsRequest:
+		return qc.EpochConfigVersions(ctx, v)
+	case *types.QueryEpochBoundariesRequest:
+		return qc.EpochBoundaries(ctx, v)
+	case *types.QueryRewardsPauseStateRequest:
+		return qc.RewardsPauseState(ctx, v)
 	}
 	return nil, fmt.Errorf("unsupported query request %T", req)
 }

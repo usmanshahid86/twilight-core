@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"context"
+	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -12,9 +15,67 @@ import (
 	"github.com/twilight-project/twilight-core/x/coreslot/types"
 )
 
+// dispatchQuery routes a typed request to the generated query client.
+//
+// Extracted from an inline switch inside the command body, which had NO default
+// branch. A request with no case left `response` as a nil interface, `err` nil,
+// and the code then reached `response.(gogoproto.Message)` — a type assertion on
+// nil, which panics. So the failure mode for a missing case was a stack trace in
+// an operator's terminal rather than a message naming the problem.
+//
+// Nothing reached that path today: every registered command had a case. But the
+// same gap in x/rewards shipped three commands that never worked (#136), and the
+// difference between the two modules was only that rewards failed politely. The
+// explicit error below makes coreslot fail the same way.
+func dispatchQuery(ctx context.Context, qc types.QueryClient, req interface{}) (gogoproto.Message, error) {
+	switch v := req.(type) {
+	case *types.QueryParamsRequest:
+		return qc.Params(ctx, v)
+	case *types.QueryCoreSlotRequest:
+		return qc.CoreSlot(ctx, v)
+	case *types.QueryCoreSlotsRequest:
+		return qc.CoreSlots(ctx, v)
+	case *types.QueryActiveCoreSlotsRequest:
+		return qc.ActiveCoreSlots(ctx, v)
+	case *types.QueryCoreSlotByOperatorRequest:
+		return qc.CoreSlotByOperator(ctx, v)
+	case *types.QueryCoreSlotByConsensusAddressRequest:
+		return qc.CoreSlotByConsensusAddress(ctx, v)
+	case *types.QueryPendingKeyRotationsRequest:
+		return qc.PendingKeyRotations(ctx, v)
+	case *types.QueryLastAppliedValidatorsRequest:
+		return qc.LastAppliedValidators(ctx, v)
+	case *types.QueryReservedConsensusAddressRequest:
+		return qc.ReservedConsensusAddress(ctx, v)
+	case *types.QueryRewardWeightRequest:
+		return qc.RewardWeight(ctx, v)
+	case *types.QuerySelectionPolicyRequest:
+		return qc.SelectionPolicy(ctx, v)
+	case *types.QuerySelectionPolicyVersionRequest:
+		return qc.SelectionPolicyVersion(ctx, v)
+	case *types.QuerySelectionPolicyAtHeightRequest:
+		return qc.SelectionPolicyAtHeight(ctx, v)
+	}
+	return nil, fmt.Errorf("unsupported query request %T", req)
+}
+
 func GetQueryCmd() *cobra.Command {
+	cmd, _ := buildQueryCmd()
+	return cmd
+}
+
+// querySpec pairs a registered command with the request it builds; see the
+// equivalent in x/rewards for why the pairs are exposed.
+type querySpec struct {
+	name  string
+	build func([]string) (interface{}, error)
+}
+
+func buildQueryCmd() (*cobra.Command, []querySpec) {
+	var specs []querySpec
 	cmd := &cobra.Command{Use: "coreslot-query", Short: "Query core slots", DisableFlagParsing: true, SuggestionsMinimumDistance: 2}
 	add := func(use string, args cobra.PositionalArgs, request func([]string) (interface{}, error)) *cobra.Command {
+		specs = append(specs, querySpec{name: strings.Fields(use)[0], build: request})
 		q := &cobra.Command{Use: use, Args: args, RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientQueryContext(cmd)
 			if err != nil {
@@ -24,40 +85,11 @@ func GetQueryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			query := types.NewQueryClient(clientCtx)
-			var response interface{}
-			switch v := req.(type) {
-			case *types.QueryParamsRequest:
-				response, err = query.Params(cmd.Context(), v)
-			case *types.QueryCoreSlotRequest:
-				response, err = query.CoreSlot(cmd.Context(), v)
-			case *types.QueryCoreSlotsRequest:
-				response, err = query.CoreSlots(cmd.Context(), v)
-			case *types.QueryActiveCoreSlotsRequest:
-				response, err = query.ActiveCoreSlots(cmd.Context(), v)
-			case *types.QueryCoreSlotByOperatorRequest:
-				response, err = query.CoreSlotByOperator(cmd.Context(), v)
-			case *types.QueryCoreSlotByConsensusAddressRequest:
-				response, err = query.CoreSlotByConsensusAddress(cmd.Context(), v)
-			case *types.QueryPendingKeyRotationsRequest:
-				response, err = query.PendingKeyRotations(cmd.Context(), v)
-			case *types.QueryLastAppliedValidatorsRequest:
-				response, err = query.LastAppliedValidators(cmd.Context(), v)
-			case *types.QueryReservedConsensusAddressRequest:
-				response, err = query.ReservedConsensusAddress(cmd.Context(), v)
-			case *types.QueryRewardWeightRequest:
-				response, err = query.RewardWeight(cmd.Context(), v)
-			case *types.QuerySelectionPolicyRequest:
-				response, err = query.SelectionPolicy(cmd.Context(), v)
-			case *types.QuerySelectionPolicyVersionRequest:
-				response, err = query.SelectionPolicyVersion(cmd.Context(), v)
-			case *types.QuerySelectionPolicyAtHeightRequest:
-				response, err = query.SelectionPolicyAtHeight(cmd.Context(), v)
-			}
+			resp, err := dispatchQuery(cmd.Context(), types.NewQueryClient(clientCtx), req)
 			if err != nil {
 				return err
 			}
-			return clientCtx.PrintProto(response.(gogoproto.Message))
+			return clientCtx.PrintProto(resp)
 		}}
 		flags.AddQueryFlagsToCmd(q)
 		return q
@@ -107,5 +139,5 @@ func GetQueryCmd() *cobra.Command {
 			return &types.QuerySelectionPolicyAtHeightRequest{SlotId: id, AtHeight: height}, e
 		}),
 	)
-	return cmd
+	return cmd, specs
 }
