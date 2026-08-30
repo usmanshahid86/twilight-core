@@ -94,7 +94,13 @@ func (c *recordingQueryClient) SelectionPolicyAtHeight(_ context.Context, _ *typ
 // Three assertions, because any two of them can pass while the surface is broken:
 //
 //	commands  the pinned set equals the registered cobra children BOTH ways, so
-//	          deleting a command and its contract row does not cancel out
+//	          removing a registration is caught while its pinned row remains. It is
+//	          NOT a claim that deleting the row as well is caught — nothing could
+//	          catch that. The point is that the row lives in a separate,
+//	          hand-maintained file, so removing it is a deliberate edit rather than
+//	          a side effect of touching this one
+//	runnable  the pinned child actually has a RunE, so the builder and dispatch
+//	          asserted below are on a path the command can still reach
 //	request   each command builds the request the contract names, so a command
 //	          wired to the wrong request is caught before dispatch
 //	rpc       each request reaches the RPC the contract names, recorded from a
@@ -137,6 +143,16 @@ func TestQuerySurfaceMatchesPinnedContract(t *testing.T) {
 				}
 			}
 			require.NotNil(t, sub, "no cobra child named %q", e.Command)
+
+			// Without this the two assertions below prove only that the captured
+			// builder and dispatchQuery work when called DIRECTLY — which they do
+			// even if the command can no longer call them. Renaming RunE to PreRunE
+			// leaves the command registered, leaves its builder captured, leaves
+			// every assertion below green, and makes the command a no-op that
+			// returns success having issued no query at all. That is the same
+			// presence-versus-function gap this whole file exists for, one level up.
+			require.NotNil(t, sub.RunE,
+				"the command is registered but has no RunE, so nothing on the real execution path reaches the builder and dispatch asserted below")
 
 			req, err := sp.build(e.Args)
 			require.NoError(t, err, "the command could not build its request from the contract's sample arguments")
