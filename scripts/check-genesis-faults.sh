@@ -17,6 +17,20 @@
 # Every one of those fails toward a confident wrong answer. So each check gets a
 # fault that must make it fire.
 #
+# THE CONTRACT IS AN EXACT SET COMPARISON over stable check IDs:
+#
+#     declared  ==  exercised  ==  targeted
+#
+# Prose is matched nowhere. Substring matching on labels previously let one
+# check's pattern be satisfied by ANOTHER check's output — three snapshot mirror
+# checks looked covered while no fault targeted them, and exact ids surfaced that
+# the moment they were introduced.
+#
+# `declared` is a STATIC list in check-genesis.sh rather than something derived
+# from a run, because a coverage mechanism built only from what executed cannot
+# distinguish "no fault triggers this" from "this can no longer fire at all", and
+# the second is the dangerous one.
+#
 # THE COVERAGE CLAIM IS ENFORCED, NOT ASSERTED. This file used to say every check
 # had a fault case while 29 of them did not, and nine live checks could be deleted
 # outright with it still reporting "every check fires on its own fault". The list
@@ -106,18 +120,19 @@ LABELS="$WORK/labels.all"
 WANTS="$WORK/wants.all"
 : >"$LABELS"; : >"$WANTS"
 
-# Strip colour, take the text after PASS/FAIL, drop the " = value" tail that eq()
-# appends, so a label matches the same string a `want` greps for.
+# Collect the stable IDs the checker emitted, not its prose. Prose is reworded;
+# ids are the contract.
 record_labels() {
   sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" 2>/dev/null \
-    | awk '/^  (PASS|FAIL)  /{ sub(/^  (PASS|FAIL)  /,""); sub(/ = .*$/,""); print }' \
+    | awk '/^  (PASS|FAIL)  \[/{ sub(/^  (PASS|FAIL)  \[/,""); sub(/\].*$/,""); print }' \
     >>"$LABELS" || true
 }
 
 run_checker() { # run_checker <genesis> [extra env assignments...] -> writes $WORK/out, returns exit code
   local g="$1"; shift
   local rc=0
-  env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 GC_MAX_GAS=50000000 GC_MIN_ACTIVE_SLOTS=2 "$@" \
+  env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 GC_MAX_GAS=50000000 GC_MIN_ACTIVE_SLOTS=2 \
+      GC_DISTRIBUTION_METHOD=DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS "$@" \
     "$CHECKER" "$g" --bin "$BIN" >"$WORK/out" 2>&1 || rc=$?
   record_labels
   return $rc
@@ -150,208 +165,223 @@ mutate() {
     fail "$label" "checker still exited 0"
     return
   fi
-  if grep -q "FAIL.*${want}" "$WORK/out"; then
+  # EXACT id match, anchored. Substring matching on prose previously let a short
+  # pattern be satisfied by a different check's output, so a mutation could look
+  # proven while the check it named stayed dead.
+  if sed -e 's/\x1b\[[0-9;]*m//g' "$WORK/out" | grep -q "FAIL  \[${want}\]"; then
     pass "$label"
   else
-    fail "$label" "checker failed, but not on '${want}' — the intended check may be dead"
+    fail "$label" "checker failed, but not on [${want}] — the intended check may be dead"
   fi
 }
 
 echo
 echo "==> traps"
 mutate "unlimited block gas is caught" \
-  '.consensus.params.block.max_gas="-1"' "block.max_gas is finite"
+  '.consensus.params.block.max_gas="-1"' trap.max_gas_finite
 mutate "a wrong-but-finite max_gas is caught" \
-  '.consensus.params.block.max_gas="40000000"' "block.max_gas"
+  '.consensus.params.block.max_gas="40000000"' decision.max_gas
 mutate "a display denom in a bank amount is caught" \
-  '.app_state.bank.supply=[{denom:"twlt",amount:"1"}]' "no display denom in any bank amount"
+  '.app_state.bank.supply=[{denom:"twlt",amount:"1"}]' trap.display_denom_leak
 mutate "a treasury share with no address is caught" \
   '.app_state.rewards.params.emission_treasury_share_bps="100"
    | .app_state.rewards.reward_config_versions[0].emission_treasury_share_bps="100"' \
-  "treasury address present for a non-zero share" GC_EMISSION_TREASURY_SHARE_BPS=100
+  trap.treasury_address_for_share GC_EMISSION_TREASURY_SHARE_BPS=100
 mutate "min_active_slots above the active count is caught" \
-  '.app_state.coreslot.params.min_active_slots="3"' "active slot count within" GC_MIN_ACTIVE_SLOTS=3
+  '.app_state.coreslot.params.min_active_slots="3"' trap.active_within_bounds GC_MIN_ACTIVE_SLOTS=3
 
 echo
 echo "==> mirror consistency (params vs the canonical version that governs)"
 mutate "subsidy drift between params and version 1" \
-  '.app_state.rewards.params.initial_block_subsidy="500000"' "initial_block_subsidy mirrors" \
+  '.app_state.rewards.params.initial_block_subsidy="500000"' mirror.subsidy \
   GC_INITIAL_BLOCK_SUBSIDY=500000
 mutate "treasury-address drift" \
   '.app_state.rewards.reward_config_versions[0].treasury_address="twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"' \
-  "treasury_address mirrors"
+  mirror.treasury_address
 mutate "epoch-length drift" \
-  '.app_state.rewards.params.epoch_length_blocks="400"' "epoch_length_blocks mirrors" \
+  '.app_state.rewards.params.epoch_length_blocks="400"' mirror.epoch_length \
   GC_EPOCH_LENGTH_BLOCKS=400
 mutate "epoch anchor not at initial_height" \
   '.app_state.rewards.epoch_config_versions[0].effective_start_height="7"' \
-  "epoch anchor starts at initial_height"
+  mirror.epoch_anchor
 
 echo
 echo "==> immutable bounds"
 mutate "epoch length below the floor" \
   '.app_state.rewards.params.epoch_length_blocks="100"
    | .app_state.rewards.epoch_config_versions[0].epoch_length_blocks="100"' \
-  "epoch_length_blocks within" GC_EPOCH_LENGTH_BLOCKS=100
+  bound.epoch_length GC_EPOCH_LENGTH_BLOCKS=100
 mutate "treasury share above the ceiling" \
   '.app_state.rewards.params.emission_treasury_share_bps="6000"
    | .app_state.rewards.reward_config_versions[0].emission_treasury_share_bps="6000"' \
-  "emission_treasury_share_bps <= 5000" GC_EMISSION_TREASURY_SHARE_BPS=6000
+  bound.emission_share GC_EMISSION_TREASURY_SHARE_BPS=6000
 mutate "recipients per chunk above the ceiling" \
   '.app_state.mining.settlement_params_versions[0].max_recipients_per_chunk="33"' \
-  "max_recipients_per_chunk within"
+  bound.recipients_per_chunk
 mutate "chunks per settlement above the ceiling" \
   '.app_state.mining.settlement_params_versions[0].max_chunks_per_settlement="5"' \
-  "max_chunks_per_settlement within"
+  bound.chunks_per_settlement
 mutate "payout floor below the ratified minimum" \
   '.app_state.mining.settlement_params_versions[0].min_recipient_payout_amount="9999"' \
-  "min_recipient_payout_amount >= 10000"
+  bound.min_payout
 mutate "max_active_slots above the immutable ceiling" \
-  '.app_state.coreslot.params.max_active_slots="101"' "max_active_slots <= 100"
+  '.app_state.coreslot.params.max_active_slots="101"' bound.max_active_slots
 
 echo
 echo "==> fresh-genesis invariants"
 mutate "a chain that has already emitted" \
-  '.app_state.rewards.state.cumulative_emitted="1"' "rewards.state.cumulative_emitted"
+  '.app_state.rewards.state.cumulative_emitted="1"' fresh.cumulative_emitted
 mutate "a non-empty epoch schedule" \
   '.app_state.rewards.scheduled_epoch_configs=[{effective_epoch:"5",epoch_length_blocks:"720"}]' \
-  "rewards.scheduled_epoch_configs is empty"
+  fresh.sched_epoch_empty
 mutate "a second settlement params version" \
   '.app_state.mining.settlement_params_versions += [.app_state.mining.settlement_params_versions[0]]' \
-  "mining.settlement_params_versions count"
+  fresh.settlement_versions_count
 mutate "rewards already paused at genesis" \
-  '.app_state.rewards.pause_state.current_paused=true' "rewards.pause_state.current_paused"
+  '.app_state.rewards.pause_state.current_paused=true' fresh.paused
 
 echo
 echo "==> slot status and decisions"
 mutate "an inactive slot reduces the active count" \
-  '.app_state.coreslot.slots[0].status="SLOT_STATUS_INACTIVE"' "active slot count within"
+  '.app_state.coreslot.slots[0].status="SLOT_STATUS_INACTIVE"' trap.active_within_bounds
 mutate "an unrecognised slot status is refused, not ignored" \
   '.app_state.coreslot.slots[0].status="SLOT_STATUS_SOMETHING_NEW"' \
-  "every slot status is a known SlotStatus value"
-mutate "the wrong chain-id" '.chain_id="twilight-wrong-1"' "chain_id"
+  trap.slot_status_known
+mutate "the wrong chain-id" '.chain_id="twilight-wrong-1"' decision.chain_id
 mutate "self-registration enabled" \
-  '.app_state.coreslot.params.allow_self_registration=true' "allow_self_registration"
+  '.app_state.coreslot.params.allow_self_registration=true' decision.allow_self_registration
 mutate "one key holding both authority roles" \
   '.app_state.coreslot.params.emergency_authority=.app_state.coreslot.params.authority' \
-  "authority and emergency_authority are distinct"
+  decision.authorities_distinct
 mutate "a changed native denom" \
-  '.app_state.rewards.params.native_denom="uother"' "rewards native_denom"
+  '.app_state.rewards.params.native_denom="uother"' trap.native_denom
 
 echo
 echo "==> fresh-genesis invariants, one fault each"
 mutate "an epoch other than the first" \
-  '.app_state.rewards.state.current_epoch="2"' "rewards.state.current_epoch"
+  '.app_state.rewards.state.current_epoch="2"' fresh.current_epoch
 mutate "a carried remainder at genesis" \
-  '.app_state.rewards.state.carry_forward_remainder="1"' "rewards.state.carry_forward_remainder"
+  '.app_state.rewards.state.carry_forward_remainder="1"' fresh.carry_forward_remainder
 mutate "reward-enabled blocks already accrued" \
-  '.app_state.rewards.open_reward_enabled_blocks="5"' "rewards.open_reward_enabled_blocks"
+  '.app_state.rewards.open_reward_enabled_blocks="5"' fresh.open_reward_blocks
 mutate "outstanding entitlement liability at genesis" \
-  '.app_state.rewards.outstanding_entitlement_liability="1"' "rewards.outstanding_entitlement_liability"
+  '.app_state.rewards.outstanding_entitlement_liability="1"' fresh.entitlement_liability
 mutate "a params update already queued" \
-  '.app_state.rewards.has_pending_params=true' "rewards.has_pending_params"
+  '.app_state.rewards.has_pending_params=true' fresh.has_pending_params
 mutate "a pause already scheduled" \
-  '.app_state.rewards.pause_state.has_pending=true' "rewards.pause_state.has_pending"
+  '.app_state.rewards.pause_state.has_pending=true' fresh.pause_pending
 mutate "a second epoch config version" \
   '.app_state.rewards.epoch_config_versions += [.app_state.rewards.epoch_config_versions[0]]' \
-  "rewards.epoch_config_versions count"
+  fresh.epoch_versions_count
 mutate "a second reward config version" \
   '.app_state.rewards.reward_config_versions += [.app_state.rewards.reward_config_versions[0]]' \
-  "rewards.reward_config_versions count"
+  fresh.reward_versions_count
 mutate "a non-empty reward schedule" \
   '.app_state.rewards.scheduled_reward_configs=[{effective_epoch:"5"}]' \
-  "rewards.scheduled_reward_configs is empty"
+  fresh.sched_reward_empty
 mutate "a non-empty settlement schedule" \
   '.app_state.mining.scheduled_settlement_params=[{effective_epoch:"5"}]' \
-  "mining.scheduled_settlement_params is empty"
+  fresh.sched_settlement_empty
 mutate "a non-empty distribution-mode schedule" \
   '.app_state.mining.scheduled_distribution_modes=[{effective_epoch:"5"}]' \
-  "mining.scheduled_distribution_modes is empty"
+  fresh.sched_distmode_empty
 mutate "a non-empty selection-params schedule" \
   '.app_state.mining.scheduled_selection_params=[{effective_epoch:"5"}]' \
-  "mining.scheduled_selection_params is empty"
+  fresh.sched_selection_empty
 mutate "a finalized epoch at genesis" \
-  '.app_state.rewards.finalized_epochs=[{epoch_number:"1"}]' "rewards.finalized_epochs is empty"
+  '.app_state.rewards.finalized_epochs=[{epoch_number:"1"}]' fresh.finalized_epochs_empty
 mutate "an entitlement at genesis" \
-  '.app_state.rewards.slot_entitlements=[{slot_id:"1"}]' "rewards.slot_entitlements is empty"
+  '.app_state.rewards.slot_entitlements=[{slot_id:"1"}]' fresh.slot_entitlements_empty
 mutate "a settlement at genesis" \
-  '.app_state.mining.settlements=[{slot_id:"1"}]' "mining.settlements is empty"
+  '.app_state.mining.settlements=[{slot_id:"1"}]' fresh.settlements_empty
 
 echo
 echo "==> the remaining immutable bounds"
 mutate "a zero settlement window" \
   '.app_state.mining.settlement_params_versions[0].settlement_window_epochs="0"' \
-  "settlement_window_epochs >= 1"
+  bound.settlement_window
 mutate "a selection cooldown below the floor" \
   '.app_state.coreslot.params.selection_policy_update_cooldown_blocks="100"' \
-  "selection_policy_update_cooldown_blocks >= 360"
+  bound.selection_cooldown
 
 echo
 echo "==> the third copy: current_epoch_config"
+# These three were previously masked: under substring matching, the params-vs-version
+# mirror's pattern also matched the snapshot label, so they looked covered while no
+# fault targeted them. Exact ids surfaced it.
+mutate "snapshot epoch_length drift" \
+  '.app_state.rewards.current_epoch_config.epoch_length_blocks="720"' \
+  snapshot.epoch_length_blocks
+mutate "snapshot subsidy drift" \
+  '.app_state.rewards.current_epoch_config.initial_block_subsidy="500000"' \
+  snapshot.initial_block_subsidy
+mutate "snapshot treasury-address drift" \
+  '.app_state.rewards.current_epoch_config.treasury_address="twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"' \
+  snapshot.treasury_address
 mutate "snapshot distribution_method drift" \
   '.app_state.rewards.current_epoch_config.distribution_method="DISTRIBUTION_METHOD_SNAPSHOT_UNIFORM"' \
-  "current_epoch_config.distribution_method mirrors params"
+  snapshot.distribution_method
 mutate "snapshot treasury-share drift" \
   '.app_state.rewards.current_epoch_config.emission_treasury_share_bps="100"' \
-  "current_epoch_config.emission_treasury_share_bps mirrors params"
+  snapshot.emission_treasury_share_bps
 mutate "snapshot fee_denom drift" \
   '.app_state.rewards.current_epoch_config.fee_denom="uother"' \
-  "current_epoch_config.fee_denom mirrors params"
+  snapshot.fee_denom
 mutate "snapshot fee-treasury-share drift" \
   '.app_state.rewards.current_epoch_config.fee_treasury_share_bps="100"' \
-  "current_epoch_config.fee_treasury_share_bps mirrors params"
+  snapshot.fee_treasury_share_bps
 mutate "snapshot halving_mode drift" \
   '.app_state.rewards.current_epoch_config.halving_mode="HALVING_MODE_UNSPECIFIED"' \
-  "current_epoch_config.halving_mode mirrors params"
+  snapshot.halving_mode
 mutate "snapshot remainder_policy drift" \
   '.app_state.rewards.current_epoch_config.remainder_policy="REMAINDER_POLICY_BURN"' \
-  "current_epoch_config.remainder_policy mirrors params"
+  snapshot.remainder_policy
 mutate "treasury-share drift against the canonical version" \
   '.app_state.rewards.reward_config_versions[0].emission_treasury_share_bps="100"' \
-  "emission_treasury_share_bps mirrors"
+  mirror.emission_share
 
 echo
 echo "==> the remaining launch decisions"
 mutate "a different active slot count" \
-  '.app_state.coreslot.slots += [.app_state.coreslot.slots[0] | .slot_id="3"]' "active slots"
+  '.app_state.coreslot.slots += [.app_state.coreslot.slots[0] | .slot_id="3"]' decision.active_slots
 mutate "a min_active_slots other than the one decided" \
-  '.app_state.coreslot.params.min_active_slots="1"' "min_active_slots"
+  '.app_state.coreslot.params.min_active_slots="1"' decision.min_active_slots
 mutate "an epoch length other than the one decided" \
   '.app_state.rewards.params.epoch_length_blocks="720"
    | .app_state.rewards.epoch_config_versions[0].epoch_length_blocks="720"
-   | .app_state.rewards.current_epoch_config.epoch_length_blocks="720"' "epoch_length_blocks"
+   | .app_state.rewards.current_epoch_config.epoch_length_blocks="720"' decision.epoch_length
 mutate "a different max supply" \
-  '.app_state.rewards.params.max_supply="42000000000000"' "max_supply"
+  '.app_state.rewards.params.max_supply="42000000000000"' decision.max_supply
 mutate "a subsidy other than the one decided" \
   '.app_state.rewards.params.initial_block_subsidy="500000"
    | .app_state.rewards.reward_config_versions[0].initial_block_subsidy="500000"
-   | .app_state.rewards.current_epoch_config.initial_block_subsidy="500000"' "initial_block_subsidy"
+   | .app_state.rewards.current_epoch_config.initial_block_subsidy="500000"' decision.subsidy
 mutate "a distribution method other than the one decided" \
   '.app_state.rewards.params.distribution_method="DISTRIBUTION_METHOD_WEIGHTED_ACTIVE_BLOCKS"
    | .app_state.rewards.current_epoch_config.distribution_method="DISTRIBUTION_METHOD_WEIGHTED_ACTIVE_BLOCKS"' \
-  "distribution_method"
+  decision.distribution_method
 mutate "a treasury share other than the one decided" \
   '.app_state.rewards.params.emission_treasury_share_bps="200"
    | .app_state.rewards.reward_config_versions[0].emission_treasury_share_bps="200"
    | .app_state.rewards.current_epoch_config.emission_treasury_share_bps="200"' \
-  "emission_treasury_share_bps"
+  decision.emission_share
 mutate "a treasury address other than the one decided" \
   '.app_state.rewards.params.treasury_address="twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
    | .app_state.rewards.reward_config_versions[0].treasury_address="twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
    | .app_state.rewards.current_epoch_config.treasury_address="twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"' \
-  "treasury_address"
+  decision.treasury_address
 mutate "a declared block time that nothing else enforces" \
-  '.app_state.rewards.params.target_block_time_seconds="10"' "target_block_time_seconds"
+  '.app_state.rewards.params.target_block_time_seconds="10"' decision.target_block_time
 mutate "a changed fee denom" \
   '.app_state.rewards.params.fee_denom="uother"
-   | .app_state.rewards.current_epoch_config.fee_denom="uother"' "rewards fee_denom"
+   | .app_state.rewards.current_epoch_config.fee_denom="uother"' trap.fee_denom
 mutate "a malformed authority address" \
-  '.app_state.coreslot.params.authority="not-an-address"' "authority has a well-formed address"
+  '.app_state.coreslot.params.authority="not-an-address"' decision.authority_shape
 mutate "a malformed emergency authority address" \
   '.app_state.coreslot.params.emergency_authority="not-an-address"' \
-  "emergency_authority has a well-formed address"
+  decision.emergency_authority_shape
 mutate "something only the chain itself rejects" \
-  '.app_state.coreslot.slots[0].slot_id="0"' "twilightd validate"
+  '.app_state.coreslot.slots[0].slot_id="0"' native.validate
 
 # ---- the checker must refuse to guess ------------------------------------------------------
 #
@@ -387,37 +417,47 @@ env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 GC_MAX_GAS=50000000 GC_MIN_ACTIVE_
 if (( rc != 0 )); then pass "omitting --bin is not a clean pass"
 else fail "omitting --bin is not a clean pass" "checker exited 0 without running twilightd validate"; fi
 
-# ---- coverage: every check must have a fault case ---------------------------------------------
+# ---- the coverage contract: declared == exercised == targeted -----------------------------
 #
-# The header of this file claims each check gets a fault that makes it fire. That
-# claim was previously false — 29 of 53 checks had no case, and nine live checks
-# could be deleted outright with this suite still reporting "every check fires on
-# its own fault", which is precisely the silent-green failure the checker exists to
-# prevent, one level up.
+# Three sets, compared exactly. Each catches something the others cannot:
 #
-# So the claim is now ENFORCED rather than asserted. The check list is derived from
-# what the checker actually printed across every run above, not from a hand-kept
-# list that would drift the moment someone adds a check.
+#   DECLARED    the static list in check-genesis.sh, via --list-checks.
+#   EXERCISED   ids the checker actually emitted across every run above.
+#   TARGETED    ids named by a fault case here.
+#
+#   declared \ exercised  a check that can no longer fire — UNREACHABLE. A
+#                         coverage mechanism derived only from what ran cannot
+#                         see this at all, which is why declared is static.
+#   exercised \ declared  an id emitted but not declared (the checker also
+#                         aborts on this itself).
+#   declared \ targeted   a check nobody wrote a fault for.
+#   targeted \ declared   a fault case naming a check that no longer exists.
 echo
-echo "==> every check must have a fault case"
-UNCOVERED=0
-while IFS= read -r label; do
-  [[ -n "$label" ]] || continue
-  covered=0
-  while IFS= read -r want; do
-    [[ -n "$want" ]] || continue
-    case "$label" in *"$want"*) covered=1; break ;; esac
-  done <"$WANTS"
-  if (( covered == 0 )); then
-    UNCOVERED=$((UNCOVERED+1))
-    printf '  \033[31mBAD\033[0m   no fault case exercises: %s\n' "$label"
-  fi
-done < <(LC_ALL=C sort -u "$LABELS")
-if (( UNCOVERED == 0 )); then
-  pass "all $(LC_ALL=C sort -u "$LABELS" | grep -c . ) checks have a fault case"
+echo "==> coverage contract: declared == exercised == targeted"
+"$CHECKER" --list-checks | LC_ALL=C sort -u >"$WORK/declared"
+LC_ALL=C sort -u "$LABELS" >"$WORK/exercised"
+LC_ALL=C sort -u "$WANTS"  >"$WORK/targeted"
+
+report_diff() { # report_diff <label> <only-in-A-file> <A> <B>
+  local n; n="$(grep -c . "$2" || true)"
+  if [[ "$n" == "0" ]]; then return 0; fi
+  printf '  \033[31mBAD\033[0m   %s (%s):\n' "$1" "$n"
+  sed 's/^/          /' "$2"
+  return 1
+}
+COVER_OK=1
+comm -23 "$WORK/declared"  "$WORK/exercised" >"$WORK/d_not_e"
+comm -13 "$WORK/declared"  "$WORK/exercised" >"$WORK/e_not_d"
+comm -23 "$WORK/declared"  "$WORK/targeted"  >"$WORK/d_not_t"
+comm -13 "$WORK/declared"  "$WORK/targeted"  >"$WORK/t_not_d"
+report_diff "declared but never exercised — UNREACHABLE check" "$WORK/d_not_e" || COVER_OK=0
+report_diff "emitted but not declared" "$WORK/e_not_d" || COVER_OK=0
+report_diff "declared but no fault case targets it" "$WORK/d_not_t" || COVER_OK=0
+report_diff "fault case targets a check that does not exist" "$WORK/t_not_d" || COVER_OK=0
+if (( COVER_OK )); then
+  pass "all $(grep -c . "$WORK/declared") declared checks are exercised and targeted"
 else
   CASES=$((CASES+1)); FAILED=$((FAILED+1))
-  printf '  \033[31mBAD\033[0m   %d check(s) have no fault case\n' "$UNCOVERED"
 fi
 
 # ---- summary ---------------------------------------------------------------------------------
