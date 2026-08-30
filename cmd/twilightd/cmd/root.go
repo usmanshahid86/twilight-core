@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"time"
 
 	cmtcfg "github.com/cometbft/cometbft/config"
 	cmttypes "github.com/cometbft/cometbft/types"
@@ -41,6 +42,7 @@ import (
 	miningcli "github.com/twilight-project/twilight-core/x/mining/client/cli"
 	"github.com/twilight-project/twilight-core/x/rewards"
 	rewardscli "github.com/twilight-project/twilight-core/x/rewards/client/cli"
+	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
 // BasicManager returns the module basics that `twilightd init` uses to write a
@@ -154,7 +156,87 @@ const MempoolBacklogBlocks = 4
 func nodeConfig() *cmtcfg.Config {
 	cfg := cmtcfg.DefaultConfig()
 	cfg.Mempool.MaxTxsBytes = MempoolBacklogBlocks * cmttypes.DefaultConsensusParams().Block.MaxBytes
+	cfg.Consensus.TimeoutCommit = targetBlockInterval()
 	return cfg
+}
+
+// targetBlockInterval is the commit timeout a node runs with, derived from the
+// block time the reward schedule is written against.
+//
+// # Why block pacing is an economic value
+//
+// Emission is initial_block_subsidy PER BLOCK, and nothing in the state machine
+// reads a clock: rewards params carry target_block_time_seconds, but it is
+// validated non-zero and then used in no computation at all. So the WALL-CLOCK
+// emission rate is decided entirely by how fast blocks are produced, which is
+// node-local configuration rather than a consensus rule.
+//
+// At the shipped max_supply and subsidy, 5-second blocks emit ~12.5% of supply in
+// the first year, with the first halving near four years. 1-second blocks reach
+// that halving in about 9.6 months, so the first year emits roughly 56% — NOT the
+// 62.5% that five times the annualized rate suggests, because the rate halves for
+// the remainder of the year once the threshold is crossed. Any projection that
+// multiplies a per-block subsidy by a year of blocks is a PRE-HALVING rate, and
+// only equals the year's emission while the first halving falls outside it.
+//
+// # This is deliberately NOT a behavior change
+//
+// The SDK already produces 5 seconds. InterceptConfigsPreRunHandler overrides
+// TimeoutCommit to 5s whenever the config it is handed still holds CometBFT's
+// default of 1s — "the SDK is opinionated about those comet values"
+// (server/util.go). A fresh `twilightd init` therefore already wrote 5s before
+// this existed, and removing this line today changes nothing an operator sees.
+//
+// What it changes is WHERE the value comes from. Without it, the block pacing that
+// sets this chain's monetary schedule is an SDK implementation detail that happens
+// to coincide with DefaultTargetBlockTimeSeconds, and a future SDK revising its
+// opinion would move the emission rate with no local signal. Setting it here takes
+// ownership, and the SDK's override no longer applies because the value it guards
+// on is no longer the CometBFT default.
+//
+// # The limit of that coupling, stated precisely
+//
+// This binds the node's pacing to the Go DEFAULT constant, NOT to the chain's
+// configured target_block_time_seconds. It cannot bind to the configured value:
+// this runs in PersistentPreRunE, before any genesis file exists to read. So a
+// network launched with target_block_time_seconds = 10 still paces at 5s, and no
+// consensus rule notices — that field drives no computation anywhere.
+//
+// Nothing here closes the genesis side of that gap: no check in this repository
+// compares a genesis-declared target_block_time_seconds against the pacing nodes
+// actually run. A genesis verifier doing exactly that is proposed in #171 and is
+// not merged, so the gap is open rather than covered.
+//
+// The test asserts the OUTCOME rather than this line. What that detects, precisely:
+// it fails when the pacing a node writes DIVERGES from the reward default — an SDK
+// opinion moving alone, a CometBFT default moving alone, this helper changed alone.
+// It does NOT fail when the reward default itself moves, because helper and
+// expectation both follow it. That case is a deliberate economic change and belongs
+// under review, not under a test that would only restate an identity.
+//
+// # What it is NOT
+//
+// timeout_commit is the dominant term in block interval, not the whole of it: a
+// block also costs the time to propose and vote, so real intervals sit slightly
+// above this. Block time stays an operational property rather than a protocol
+// guarantee — which is exactly why epoch length is denominated in BLOCKS.
+//
+// It is also node-local, and its reach across EXISTING homes is narrower than
+// "fresh nodes only" but not nil — worth stating exactly, because the obvious
+// summary is wrong.
+//
+// The SDK writes a config.toml only when none exists. When one does, it unmarshals
+// that file ONTO the configuration supplied here, so a key the file SETS wins and a
+// key it OMITS inherits this value:
+//
+//	existing file says timeout_commit = "3s"  ->  3s, before and after
+//	existing file omits timeout_commit        ->  1s before, 5s after
+//
+// The second row is a real behavior change on an existing home, and it is the
+// intended direction: 1 second was never the pacing this chain's reward schedule
+// is written against. A node that wants something else states it, and is obeyed.
+func targetBlockInterval() time.Duration {
+	return time.Duration(rewardstypes.DefaultTargetBlockTimeSeconds) * time.Second
 }
 
 func NewRootCmd() *cobra.Command {
