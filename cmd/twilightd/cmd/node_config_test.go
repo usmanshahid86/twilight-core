@@ -117,8 +117,9 @@ func TestInitWritesCustomizedNodeConfig(t *testing.T) {
 		// An ECONOMIC assertion wearing operational clothes. Emission is a
 		// per-block subsidy and nothing in the state machine reads a clock, so the
 		// wall-clock emission rate is decided by block pacing alone: 5-second
-		// blocks give ~12.5% of supply in year one and a first halving near four
-		// years, 1-second blocks ~62% and under ten months.
+		// blocks give ~12.5% of supply in year one with a first halving near four
+		// years; 1-second blocks reach that halving in ~9.6 months, so year one is
+		// ~56% rather than the 62.5% the pre-halving rate alone would suggest.
 		//
 		// THIS ASSERTS THE OUTCOME, NOT THE CALL SITE, and the distinction is worth
 		// stating because it is easy to misread as a stronger proof than it is.

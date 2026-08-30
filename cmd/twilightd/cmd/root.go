@@ -169,10 +169,15 @@ func nodeConfig() *cmtcfg.Config {
 // reads a clock: rewards params carry target_block_time_seconds, but it is
 // validated non-zero and then used in no computation at all. So the WALL-CLOCK
 // emission rate is decided entirely by how fast blocks are produced, which is
-// node-local configuration rather than a consensus rule. At the shipped
-// max_supply and subsidy, 5-second blocks emit ~12.5% of supply in the first year
-// with a first halving near four years; 1-second blocks would emit ~62% and halve
-// inside ten months.
+// node-local configuration rather than a consensus rule.
+//
+// At the shipped max_supply and subsidy, 5-second blocks emit ~12.5% of supply in
+// the first year, with the first halving near four years. 1-second blocks reach
+// that halving in about 9.6 months, so the first year emits roughly 56% — NOT the
+// 62.5% that five times the annualized rate suggests, because the rate halves for
+// the remainder of the year once the threshold is crossed. Any projection that
+// multiplies a per-block subsidy by a year of blocks is a PRE-HALVING rate, and
+// only equals the year's emission while the first halving falls outside it.
 //
 // # This is deliberately NOT a behavior change
 //
@@ -197,12 +202,17 @@ func nodeConfig() *cmtcfg.Config {
 // network launched with target_block_time_seconds = 10 still paces at 5s, and no
 // consensus rule notices — that field drives no computation anywhere.
 //
-// The genesis side of that gap is covered by scripts/check-genesis.sh, which
-// compares the declared target_block_time_seconds against the pacing operators
-// are actually told to run. It is the only place the two values meet.
+// Nothing here closes the genesis side of that gap: no check in this repository
+// compares a genesis-declared target_block_time_seconds against the pacing nodes
+// actually run. A genesis verifier doing exactly that is proposed in #171 and is
+// not merged, so the gap is open rather than covered.
 //
-// The test asserts the OUTCOME rather than this line, and so still fails if either
-// the SDK's opinion or the reward default moves.
+// The test asserts the OUTCOME rather than this line. What that detects, precisely:
+// it fails when the pacing a node writes DIVERGES from the reward default — an SDK
+// opinion moving alone, a CometBFT default moving alone, this helper changed alone.
+// It does NOT fail when the reward default itself moves, because helper and
+// expectation both follow it. That case is a deliberate economic change and belongs
+// under review, not under a test that would only restate an identity.
 //
 // # What it is NOT
 //
@@ -211,8 +221,20 @@ func nodeConfig() *cmtcfg.Config {
 // above this. Block time stays an operational property rather than a protocol
 // guarantee — which is exactly why epoch length is denominated in BLOCKS.
 //
-// It is also node-local, and it reaches only nodes with no config.toml yet. An
-// existing file keeps whatever it was given.
+// It is also node-local, and its reach across EXISTING homes is narrower than
+// "fresh nodes only" but not nil — worth stating exactly, because the obvious
+// summary is wrong.
+//
+// The SDK writes a config.toml only when none exists. When one does, it unmarshals
+// that file ONTO the configuration supplied here, so a key the file SETS wins and a
+// key it OMITS inherits this value:
+//
+//	existing file says timeout_commit = "3s"  ->  3s, before and after
+//	existing file omits timeout_commit        ->  1s before, 5s after
+//
+// The second row is a real behavior change on an existing home, and it is the
+// intended direction: 1 second was never the pacing this chain's reward schedule
+// is written against. A node that wants something else states it, and is obeyed.
 func targetBlockInterval() time.Duration {
 	return time.Duration(rewardstypes.DefaultTargetBlockTimeSeconds) * time.Second
 }
