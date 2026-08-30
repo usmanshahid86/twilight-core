@@ -6,6 +6,7 @@ import (
 	"os"
 
 	cmtcfg "github.com/cometbft/cometbft/config"
+	cmttypes "github.com/cometbft/cometbft/types"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -79,6 +80,83 @@ func BasicManager() module.BasicManager {
 	)
 }
 
+// MempoolBacklogBlocks is the number of blocks' worth of transaction bytes a
+// node will queue in its mempool before it refuses more.
+//
+// # What this bounds
+//
+// The DEPTH OF THE QUEUE a single sender can occupy. Transactions on this chain
+// carry no fee and the mempool is FIFO with no per-sender fairness, so whoever
+// fills the queue first is served first, and the queue's depth is exactly the
+// window during which an honest transaction waits behind somebody else's
+// backlog. Bounding the depth bounds that wait; it does not divide the queue
+// fairly, and nothing here claims it does.
+//
+// CometBFT's default max_txs_bytes is 1 GiB (1073741824 bytes) against a
+// default block max_bytes of 21 MiB (22020096 bytes, from
+// cmttypes.DefaultConsensusParams, which is also what `twilightd init` writes
+// into genesis). That is 48.76 blocks of backlog. A few blocks is enough to
+// absorb a burst that arrives faster than one block drains, including across a
+// proposer change; tens of blocks is a queue an operator would experience as an
+// outage. Four is a judgment inside "a few" rather than a measured optimum, and
+// being configuration it costs nothing to revise.
+//
+// # Why mempool.size is deliberately left at its default
+//
+// The transaction COUNT cap stays at CometBFT's default 5000 because it already
+// binds far tighter than any byte cap for ordinary traffic. A signed
+// single-MsgSend transaction built with this chain's own tx config measures 310
+// bytes, so 5000 of them are 1550000 bytes — about seven hundredths of one
+// block's data budget (22018921 bytes at a four-validator set). Lowering the
+// count would shrink the honest burst a node can hold without touching the case
+// this addresses.
+//
+// The byte cap is what does the work, and it does it in the regime the count
+// cap leaves open: max_tx_bytes permits 1 MiB per transaction, so 5000
+// transactions may be 4.88 GiB. The two caps are complementary — the count
+// bounds small-transaction backlog, the bytes bound large-transaction backlog —
+// which is why only one of them is changed here.
+//
+// # What this does NOT do
+//
+//   - It is NODE-LOCAL configuration. A proposer running different settings is
+//     not bound by it, so this constrains an operator's own node and nothing
+//     else. That is tolerable only because every proposer here is an admitted
+//     CoreSlot operator, which makes a non-conforming proposer an operational
+//     problem rather than an anonymous one.
+//   - It gives NO consensus-enforced per-sender fairness and NO economic bound.
+//     The per-block work ceiling is TW-004's finite max_gas, which is not
+//     ratified here.
+//   - TW-005 is MITIGATED, NOT CLOSED, and #147 stays open.
+//   - It reaches only NEWLY INITIALIZED nodes. The SDK writes config.toml from
+//     this value only when the file is absent; a node whose config.toml already
+//     exists keeps whatever it was given, and needs an operator to edit it.
+const MempoolBacklogBlocks = 4
+
+// nodeConfig is the CometBFT node configuration this binary hands the SDK, which
+// writes it into config.toml when a node has none yet.
+//
+// The mempool byte bound is derived from the same default block size that
+// `twilightd init` writes into the genesis consensus params, so the two cannot
+// silently drift apart at the default.
+//
+// They CAN drift when a network launches with a block max_bytes other than the
+// default, because a node's config.toml is written once and does not follow
+// genesis. That is the case to watch: applying a ratified block parameter means
+// launching a network with it, which leaves every carried-over config.toml
+// describing the previous one.
+//
+// It cannot drift by a live parameter change, because this chain has no way to
+// make one. x/consensus is configured with the authority module account, which
+// is keyless, and no module proxies its MsgUpdateParams the way x/coreslot
+// proxies x/upgrade — so no transaction can reach it on a running chain. That
+// gap is recorded in #167 and is not addressed here.
+func nodeConfig() *cmtcfg.Config {
+	cfg := cmtcfg.DefaultConfig()
+	cfg.Mempool.MaxTxsBytes = MempoolBacklogBlocks * cmttypes.DefaultConsensusParams().Block.MaxBytes
+	return cfg
+}
+
 func NewRootCmd() *cobra.Command {
 	encoding := app.MakeEncodingConfig()
 	clientCtx := client.Context{}.
@@ -113,7 +191,7 @@ func NewRootCmd() *cobra.Command {
 			}
 			srvCfg := serverconfig.DefaultConfig()
 			srvCfg.MinGasPrices = "0" + app.BaseDenom
-			return server.InterceptConfigsPreRunHandler(cmd, serverconfig.DefaultConfigTemplate, srvCfg, cmtcfg.DefaultConfig())
+			return server.InterceptConfigsPreRunHandler(cmd, serverconfig.DefaultConfigTemplate, srvCfg, nodeConfig())
 		},
 	}
 	sdk.GetConfig().Seal()
