@@ -64,9 +64,23 @@ the numbering below is this project's convention for them:
 
 `v0.1.0` is the **first proven upgrade-capable operational baseline** — the first version
 carrying `x/upgrade`, with the upgrade proven end to end across four validators and
-export/restore/join characterized. It is **not** a public-testnet or genesis release: it
-predates the two-step authority rotation added in #130, and the block-gas/anti-spam cluster
-(#147) is still open. Nothing upgrades *to* it, so it registers no handler.
+export/restore/join characterized. It was **not** a public-testnet or genesis release: at that
+point the two-step authority rotation added in #130 did not exist, and none of the anti-spam
+findings had been addressed. Nothing upgrades *to* it, so it registers no handler.
+
+Those findings are now tracked individually rather than as one cluster, because they resolve
+by different mechanisms and on different timelines:
+
+- **TW-006** — permanent account growth. **Closed.** The minimum-funding send restriction and
+  the bank-output cap are merged and registered under the `v0.3.0` boundary.
+- **TW-005** — feeless mempool admission. **Mitigated, not closed.** The backlog a node will
+  queue is bounded by configuration (#164). That bound is node-local: it binds the nodes an
+  operator runs, and it is not consensus-enforced per-sender fairness.
+- **TW-004** — unlimited block gas. **Open.** A finite `block.max_gas` can be set at genesis,
+  but not by transaction: consensus parameters are unreachable from any signable message on
+  this chain (#167), so changing one on a running network requires an upgrade handler.
+  Calibrating a value against representative hardware (#160) and establishing the
+  legitimate-gas floor (#107) both remain open.
 
 Earlier commits carry descriptive tags rather than version numbers, because a chain launched
 from a build without `x/upgrade` can never be upgraded, and numbering such a build would imply
