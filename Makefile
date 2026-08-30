@@ -1,4 +1,4 @@
-.PHONY: build build-release check-release-stamping check-cli-surface check-vulncheck-pin release-upgrade-faults release-upgrade-rehearsal test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-rewards-soak localnet-agree \
+.PHONY: build build-release check-release-stamping check-cli-surface check-vulncheck-pin release-upgrade-faults release-upgrade-rehearsal test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-block-gas-drill block-gas-faults localnet-load-calibration localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 # Version and commit are stamped at link time; the chain and binary names are
@@ -192,6 +192,34 @@ localnet-export-restore-drill:
 localnet-export-restore-faults:
 	./scripts/localnet/lib/drill-assert-selftest.sh
 	./scripts/localnet/export-restore-drill-faults.sh
+
+# #160/TW-004: the block-gas ceiling regression. Launches a localnet whose genesis
+# carries a FINITE block.max_gas, floods it, and proves the ceiling held, that the
+# excess was deferred to later blocks rather than dropped, and that the chain kept
+# producing throughout. The ceiling value it installs is a drill constant chosen so
+# the bound binds in a short run — it is not a production proposal.
+localnet-block-gas-drill:
+	./scripts/localnet/block-gas-drill.sh
+
+# Fast, chain-free coverage for the block-gas tooling's proof primitives. This is
+# the half that runs in CI; the drill above needs a localnet and does not.
+block-gas-faults:
+	./scripts/localnet/block-gas-drill-faults.sh
+
+# #160/TW-004: the measurement instrument a block.max_gas value has to be chosen
+# from. It keeps three things apart — whether the workload completed, whether the
+# MEASUREMENT was trustworthy, and whether the data QUALIFIES a candidate — and
+# reports each. A qualified, monotonic, adequately-sampled bracket yields a
+# performance candidate; anything less yields a named reason and no number.
+#
+# Output is machine-readable: result.json, manifest.json (binary, endpoints, full
+# configuration, recipient seed, host) and per-block/wave/step CSVs.
+#
+# It does NOT ratify or ship max_gas. A candidate is an input to human review, to be
+# read against the heaviest legitimate block (#107) and the permanent-state columns.
+# Targets an existing network; see the header for the CAL_* knobs.
+localnet-load-calibration:
+	./scripts/localnet/load-calibration.sh
 
 # The operational half of the x/upgrade proof: four validators, two binaries, a
 # real coordinated halt and a partial rollout. Deliberately NOT part of `drills`

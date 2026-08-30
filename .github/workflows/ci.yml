@@ -46,6 +46,15 @@ jobs:
         # push — but its proof primitives are exactly the things whose silent
         # failure turns a broken run green, so they are covered here against stubs.
         run: ./scripts/localnet/release-upgrade-rehearsal-faults.sh
+      - name: Block-gas drill faults
+        # Same script as `make block-gas-faults`. The drill itself launches four
+        # validators, funds sixty accounts and floods them, which is far too slow
+        # for every push — but its primitives all have a failure mode that presents
+        # as success: a window of unreadable blocks contains no block over the
+        # ceiling, an empty block and an unreadable one both have no failing
+        # transactions, and `max_gas` of 0 is not -1 and is also not a ceiling.
+        # Those run here, against stubs, with no chain.
+        run: ./scripts/localnet/block-gas-drill-faults.sh
       - name: CLI surface
         # Same script as `make check-cli-surface`. The Go test asserts the
         # assembled cobra tree, which proves a command exists, not that it runs:
