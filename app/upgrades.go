@@ -106,6 +106,42 @@ var Upgrades = []Upgrade{
 		// fabricating state the released chain never had.
 		Name: "v0.2.0",
 	},
+	{
+		// The TW-006 controls merged after v0.2.0: the first-funding minimum in
+		// app/sendrestriction.go (#159) and the per-transaction bank-output cap in
+		// app/antehandler.go (#163). Both change transaction validity — a send the
+		// v0.2.0 binary accepts, a binary built from this source rejects — so they
+		// need a coordinated halt rather than a rolling restart.
+		//
+		// Named for the version it upgrades TO, per CONTRIBUTING.md. Released
+		// entries are append-only and may never be edited.
+		//
+		// This entry carries NOTHING, and unlike v0.2.0 that is not because its
+		// migration happens to be a no-op. v0.2.0 existed because CoreSlot moved
+		// from consensus version 1 to 2, and the boundary was what advanced the
+		// module version map. Nothing here moves a module version at all: coreslot
+		// stays 2, rewards 1, mining 1. RunMigrations will find no deltas and do
+		// nothing.
+		//
+		// That is the point rather than an omission. Both controls live in
+		// application wiring — a bank SendRestriction and an ante decorator — and
+		// take effect the instant the new binary runs. There is no state to move;
+		// what is needed is agreement on WHEN every validator starts enforcing
+		// them. This entry is that agreement: a node reaching the height without
+		// this name compiled in halts instead of accepting a transaction its peers
+		// reject.
+		//
+		// No StoreUpgrades: no store is added, renamed or deleted.
+		//
+		// No Migrate: there is no chain-specific state to transform. A body here
+		// would be fabricating state the released chain never had.
+		//
+		// TestThisReleaseMovesNoModuleConsensusVersion pins the assumption. If a
+		// later change bumps a module version before v0.3.0 ships, that test fails
+		// and this entry must be revisited rather than silently skipping a
+		// migration.
+		Name: "v0.3.0",
+	},
 }
 
 // ValidateUpgrades rejects a registry that cannot be executed unambiguously.
