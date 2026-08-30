@@ -555,25 +555,27 @@ LIVENESS_BASE=$FAILURES
 # The window starts one block before the first inclusion, so a stall that happens
 # exactly at the onset of load is inside what is measured.
 GAP_FROM=$(( H_MIN > 1 ? H_MIN - 1 : 1 ))
+# Timing goes through the SHARED observation helper, the same one the calibration rig
+# uses. It refuses a malformed or calendar-invalid timestamp and any interval that is
+# zero or backwards, and a refusal here does NOT count as a timed block — so
+# flood_window_all_blocks_timed below fails closed on exactly those readings rather
+# than quietly proving liveness over a shorter series than it claims.
 echo "height,unix_ms,gap_ms" >"$DRILL_EVID_DIR/gaps.csv"
 TIMED=0; EXPECTED_TIMED=$(( H_MAX - GAP_FROM + 1 )); MAX_GAP=0; PREV_MS=""
 for (( h = GAP_FROM; h <= H_MAX; h++ )); do
   t="$(block_meta "$PRIMARY_HTTP" "$h" time)" || t=""
-  ms=""
-  [[ -n "$t" ]] && ms="$(rfc3339_to_ms "$t")"
-  if [[ ! "$ms" =~ ^[0-9]+$ ]]; then
+  if [[ -z "$t" ]] || ! observe_block_time OBS_MS OBS_GAP "$PREV_MS" "$t"; then
     printf '%s,-,-\n' "$h" >>"$DRILL_EVID_DIR/gaps.csv"
     continue
   fi
   TIMED=$(( TIMED + 1 ))
-  if [[ -n "$PREV_MS" ]]; then
-    gap=$(( ms - PREV_MS ))
-    (( gap > MAX_GAP )) && MAX_GAP="$gap"
-    printf '%s,%s,%s\n' "$h" "$ms" "$gap" >>"$DRILL_EVID_DIR/gaps.csv"
+  if [[ -n "$OBS_GAP" ]]; then
+    (( OBS_GAP > MAX_GAP )) && MAX_GAP="$OBS_GAP"
+    printf '%s,%s,%s\n' "$h" "$OBS_MS" "$OBS_GAP" >>"$DRILL_EVID_DIR/gaps.csv"
   else
-    printf '%s,%s,-\n' "$h" "$ms" >>"$DRILL_EVID_DIR/gaps.csv"
+    printf '%s,%s,-\n' "$h" "$OBS_MS" >>"$DRILL_EVID_DIR/gaps.csv"
   fi
-  PREV_MS="$ms"
+  PREV_MS="$OBS_MS"
 done
 # Paired with the bound, for the same reason as every other aggregate here: a window
 # where no block could be timed has a maximum gap of zero.

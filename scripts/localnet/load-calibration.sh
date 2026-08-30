@@ -757,17 +757,24 @@ for (( h = COLLECT_FROM; h <= RAMP_MAX_HEIGHT; h++ )); do
     PREV_MS=""
     continue
   fi
-  # A timestamp that is PRESENT but unparseable is a measurement-integrity failure,
-  # not an observation to drop. The load-response signal is block timing, so silently
-  # removing a malformed reading shrinks the timing distribution while the experiment
-  # keeps claiming authority over it — and the step's p95 would then rest on fewer
-  # observations than its own eligibility check believed.
-  ms="$(rfc3339_to_ms "$tm")" || ms=""
-  if [[ ! "$ms" =~ ^[0-9]+$ ]]; then
+  # Timing goes through the SHARED observation helper — the same one the drill's
+  # liveness proof uses, and the same one the fault suite exercises.
+  #
+  # A present-but-unusable timestamp is a measurement-integrity failure, not an
+  # observation to drop: malformed text, an impossible calendar date, or an interval
+  # that is zero or backwards. Silently removing any of them shrinks the timing
+  # distribution while the experiment keeps claiming authority over it, and the step's
+  # p95 would then rest on fewer observations than its own sample gate believed.
+  #
+  # PREV_MS deliberately does NOT advance on failure, so the next block is measured
+  # against the last trustworthy reading rather than against one that was rejected.
+  ms=""; iv="-"
+  if observe_block_time OBS_MS OBS_IV "$PREV_MS" "$tm"; then
+    ms="$OBS_MS"; PREV_MS="$OBS_MS"
+    [[ -n "$OBS_IV" ]] && iv="$OBS_IV"
+  else
     TIMING_UNREADABLE=$(( TIMING_UNREADABLE + 1 ))
-    ms=""
   fi
-  if [[ -n "$ms" && -n "$PREV_MS" ]]; then iv=$(( ms - PREV_MS )); else iv="-"; fi
   acc="-"; dacc="-"
   # Coverage is counted over ACTIVE blocks on both sides. Sampling every block but
   # measuring the ratio against active ones only would report coverage above 100%,
@@ -795,13 +802,12 @@ for (( h = COLLECT_FROM; h <= RAMP_MAX_HEIGHT; h++ )); do
   fi
   printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
     "$h" "$st" "$cls" "${ms:--}" "$iv" "$nt" "$bs" "$gw" "$gu" "$acc" "$dacc" "$db" "$ddb" >>"$BLOCKS_CSV"
-  [[ -n "$ms" ]] && PREV_MS="$ms"
 done
 if (( UNREADABLE_BLOCKS > 0 )); then
   invalidate "$UNREADABLE_BLOCKS blocks in the measured range could not be read"
 fi
 if (( TIMING_UNREADABLE > 0 )); then
-  invalidate "$TIMING_UNREADABLE blocks reported a timestamp that could not be parsed; the timing distribution is incomplete"
+  invalidate "$TIMING_UNREADABLE blocks failed timing observation (unparseable, calendar-invalid, or a zero/backwards interval); the timing distribution is not trustworthy"
 fi
 
 # Availability is tracked SEPARATELY from the numbers. An axis that was not measured
@@ -885,7 +891,9 @@ for (( sidx = 1; sidx <= STEP_IDX; sidx++ )); do
   while IFS=, read -r bh bstep bclass bms biv bnt bbs bgw bgu bacc bdacc bdb bddb; do
     [[ "$bstep" == "$sidx" && "$bclass" == "ACTIVE" ]] || continue
     ACTIVE_BLOCKS=$(( ACTIVE_BLOCKS + 1 ))
-    [[ "$biv" =~ ^[0-9]+$ ]] && { INTERVALS+=("$biv"); (( biv > MAXIV )) && MAXIV="$biv"; }
+    # Strictly positive. The observation helper already refuses zero and backwards, so
+    # this is defence in depth at the point the tail statistic is actually assembled.
+    [[ "$biv" =~ ^[0-9]+$ ]] && (( biv > 0 )) && { INTERVALS+=("$biv"); (( biv > MAXIV )) && MAXIV="$biv"; }
     [[ "$bgw" =~ ^[0-9]+$ ]] && { GASES+=("$bgw"); (( bgw > MAXGW )) && MAXGW="$bgw"; }
     [[ "$bgu" =~ ^[0-9]+$ ]] && { (( bgu > MAXGU )) && MAXGU="$bgu"; }
     [[ "$bnt" =~ ^[0-9]+$ ]] && { (( bnt > MAXTX )) && MAXTX="$bnt"; }
@@ -1024,21 +1032,15 @@ fi
 
 MEASUREMENT_VALID="$MEASUREMENT_VALID_PRECHECK"
 [[ -z "$INVALID_REASONS" ]] || MEASUREMENT_VALID=NO
-# A candidate is never emitted from an invalid experiment.
-if [[ "$MEASUREMENT_VALID" != "YES" ]]; then CANDIDATE="null"; KNEE_GAS="null"; KNEE_BRACKETED=false; fi
 
-# Readiness requires that every SUPPLIED policy was actually evaluated and passed. A
-# declared limit that quietly drops out of qualification is a false safety signal —
-# worse than no limit, because it reads as a checked constraint.
-if [[ "$MEASUREMENT_VALID" != "YES" ]]; then PRODUCTION_STATUS="MEASUREMENT_INVALID"
-elif [[ ! "$CANDIDATE" =~ ^[0-9]+$ ]]; then PRODUCTION_STATUS="$CANDIDATE_STATUS"
-elif [[ "$FLOOR_CLASS" == "CONFLICT" ]]; then PRODUCTION_STATUS="CONFLICTS_WITH_LEGITIMATE_FLOOR"
-elif [[ "$STATE_GUARD" == "EXCEEDS_POLICY" ]]; then PRODUCTION_STATUS="EXCEEDS_STATE_GROWTH_POLICY"
-elif [[ "$STATE_GUARD" == "INCOMPLETE" ]]; then PRODUCTION_STATUS="INCOMPLETE_STATE_GROWTH_EVIDENCE"
-elif [[ "$STATE_GUARD" == "UNAVAILABLE" ]]; then PRODUCTION_STATUS="STATE_GROWTH_AXIS_UNAVAILABLE"
-elif [[ "$FLOOR_CLASS" == "NOT_SUPPLIED" ]]; then PRODUCTION_STATUS="AWAITING_LEGITIMATE_FLOOR"
-elif [[ "$STATE_GUARD" == "UNRATIFIED" ]]; then PRODUCTION_STATUS="AWAITING_STATE_GROWTH_POLICY"
-else PRODUCTION_STATUS="CANDIDATE_READY_FOR_REVIEW"; fi
+# The final authority rule lives in candidate_authority, so the consequence of an
+# invalid measurement — candidate, knee estimate and bracket flag all nulled together
+# — is exercised directly by the chain-free suite rather than being an untested branch
+# chain here.
+AUTHORITY="$(candidate_authority "$MEASUREMENT_VALID" "$CANDIDATE_STATUS" "$CANDIDATE" \
+             "$KNEE_GAS" "$KNEE_BRACKETED" "$FLOOR_CLASS" "$STATE_GUARD")"
+set -- $AUTHORITY
+CANDIDATE="$1"; KNEE_GAS="$2"; KNEE_BRACKETED="$3"; PRODUCTION_STATUS="$4"
 
 # ---- 9. provenance ----------------------------------------------------------------------
 #

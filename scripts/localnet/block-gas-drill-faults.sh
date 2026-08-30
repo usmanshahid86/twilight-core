@@ -473,16 +473,11 @@ check "  and never passes ACTIVE_BLOCKS"         "0" \
 
 # A timestamp that is present but unparseable must fail the measurement, not quietly
 # shrink the timing distribution while the experiment keeps claiming authority.
-check "a valid timestamp is usable"              "1788004800000" "$(rfc3339_to_ms 2026-08-29T12:00:00Z)"
-rfc3339_to_ms "29/08/2026 12:00:00" >/dev/null 2>&1
-check "a present-but-malformed timestamp fails"  "nonzero" "$(rc_of $?)"
-rfc3339_to_ms "2026-08-29T12:00:00" >/dev/null 2>&1
-check "  a missing zone also fails"              "nonzero" "$(rc_of $?)"
-check "the rig counts unparseable timestamps"    "1" \
-  "$(grep -c 'TIMING_UNREADABLE=\$(( TIMING_UNREADABLE + 1 ))' "$CAL")"
-check "  and invalidates the run on any"         "1" \
-  "$(grep -c 'blocks reported a timestamp that could not be parsed' "$CAL")"
-check "  rather than dropping the observation"   "1" \
+# Timing integrity has its own behavioural group below; these two only pin that the
+# rig still routes through the shared helper and still invalidates on a failure.
+check "the rig observes through the shared helper" "1" \
+  "$(grep -c 'if observe_block_time OBS_MS OBS_IV "\$PREV_MS" "\$tm"; then' "$CAL")"
+check "  and invalidates on any timing failure"    "1" \
   "$(grep -c 'if (( TIMING_UNREADABLE > 0 )); then' "$CAL")"
 step_eligibility x 3 20 20 >/dev/null 2>&1
 check "unreadable counters refuse"               "nonzero" "$(rc_of $?)"
@@ -541,8 +536,8 @@ check "the rig emits no candidate when unbracketed" "1" \
   "$(grep -c 'the ramp never became unsafe' "$CAL")"
 check "  and none when the first step is unsafe"    "1" \
   "$(grep -c 'the first loaded step was already unsafe' "$CAL")"
-check "  and none from an invalid measurement"      "1" \
-  "$(grep -c 'A candidate is never emitted from an invalid experiment' "$CAL")"
+check "  and none from an invalid measurement"      "null" \
+  "$(candidate_authority NO BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY | awk '{print $1}')"
 check "  and none from a non-monotonic response"    "1" \
   "$(grep -c 'the load response is not monotonic' "$CAL")"
 check "the knee uses a tail metric, not a majority" "0" \
@@ -597,10 +592,110 @@ check "the rig evaluates the DB policy"           "1" \
   "$(grep -c 'APPDB_GUARD="\$(growth_guard_for_axis "\$CAL_MAX_APPDB_KB_PER_BLOCK"' "$CAL")"
 check "  and combines both axes"                  "1" \
   "$(grep -c 'STATE_GUARD="\$(combine_growth_guards' "$CAL")"
-check "readiness requires a clean combined guard" "1" \
-  "$(grep -c 'INCOMPLETE_STATE_GROWTH_EVIDENCE' "$CAL")"
-check "  and blocks on an unavailable axis"       "1" \
-  "$(grep -c 'STATE_GROWTH_AXIS_UNAVAILABLE' "$CAL")"
+check "readiness requires a clean combined guard" "INCOMPLETE_STATE_GROWTH_EVIDENCE" \
+  "$(candidate_authority YES BRACKETED 8512000 10640000 true COMPATIBLE INCOMPLETE | awk '{print $4}')"
+check "  and blocks on an unavailable axis"       "STATE_GROWTH_AXIS_UNAVAILABLE" \
+  "$(candidate_authority YES BRACKETED 8512000 10640000 true COMPATIBLE UNAVAILABLE | awk '{print $4}')"
+
+# ---------------------------------------------------------------------------------
+group timing "the shared timing observation, exercised directly"
+
+# Every check here runs the REAL helper both consumers use. A range check is not a
+# calendar: 2026-02-31 satisfies every bound and is not a date, and the civil-from-days
+# arithmetic would normalise it into a plausible instant — 2100-02-29 lands on exactly
+# the same epoch as 2100-03-01. Twenty such timestamps would have produced twenty
+# positive-looking intervals, satisfied a minimum of twenty, and fed a numeric candidate.
+check "a valid ordinary date"                    "1788004800000" "$(rfc3339_to_ms 2026-08-29T12:00:00Z)"
+check "a leap day in a leap year"                "1709164800000" "$(rfc3339_to_ms 2024-02-29T00:00:00Z)"
+check "a leap day in a 400-year century"         "951782400000"  "$(rfc3339_to_ms 2000-02-29T00:00:00Z)"
+for bad in 2026-02-29 2026-02-30 2026-02-31 2100-02-29 2026-04-31 2026-06-31 \
+           2026-09-31 2026-11-31 2026-13-01 2026-00-01 2026-01-00 2026-01-32; do
+  rfc3339_to_ms "${bad}T00:00:00Z" >/dev/null 2>&1
+  check "calendar-invalid $bad refused"          "nonzero" "$(rc_of $?)"
+done
+# Second 60 is refused rather than half-supported.
+rfc3339_to_ms "2026-12-31T23:59:60Z" >/dev/null 2>&1
+check "second 60 refused"                        "nonzero" "$(rc_of $?)"
+check "  while second 59 is accepted"            "1798761599000" "$(rfc3339_to_ms 2026-12-31T23:59:59Z)"
+# The aliasing the calendar check prevents: an impossible date and a real one must
+# never resolve to the same instant.
+check "2100-03-01 is a real date"                "4107542400000" "$(rfc3339_to_ms 2100-03-01T00:00:00Z)"
+rfc3339_to_ms "2100-02-29T00:00:00Z" >/dev/null 2>&1
+check "  and 2100-02-29 cannot alias to it"      "nonzero" "$(rc_of $?)"
+
+# --- observation semantics ---
+obs() { # <prev> <ts> -> "<ms>|<interval>" or REFUSED
+  local ms iv
+  if observe_block_time ms iv "$1" "$2"; then echo "${ms}|${iv}"; else echo "REFUSED"; fi
+}
+check "first sample: value, no interval"         "1788004800000|" "$(obs "" 2026-08-29T12:00:00Z)"
+check "later sample: positive interval"          "1788004801000|1000" "$(obs 1788004800000 2026-08-29T12:00:01Z)"
+check "an equal timestamp is refused"            "REFUSED" "$(obs 1788004800000 2026-08-29T12:00:00Z)"
+check "a backwards timestamp is refused"         "REFUSED" "$(obs 1788004801000 2026-08-29T12:00:00Z)"
+check "a calendar-invalid sample is refused"     "REFUSED" "$(obs 1788004800000 2026-02-31T00:00:00Z)"
+check "a malformed textual sample is refused"    "REFUSED" "$(obs 1788004800000 "29/08/2026 12:00:00")"
+check "an unreadable predecessor is refused"     "REFUSED" "$(obs "not-a-number" 2026-08-29T12:00:01Z)"
+# Failure must not be convertible into zero by an inattentive caller.
+( set -u; observe_block_time M I 1788004801000 2026-08-29T12:00:00Z || true; echo "${M:-unset}" ) >"$TMP/unset.txt" 2>&1
+check "outputs stay unset on refusal"            "unset" "$(cat "$TMP/unset.txt")"
+
+# --- fixture-driven consumer semantics ---
+#
+# A sequence containing a bad reading must be classified as a timing-integrity
+# FAILURE, not merely yield fewer samples. This drives the same helper the production
+# collection path calls.
+observe_series() { # <ts>... -> "<usable-intervals> <failures>"
+  local prev="" ms iv usable=0 failed=0 t
+  for t in "$@"; do
+    if observe_block_time ms iv "$prev" "$t"; then
+      [[ -n "$iv" ]] && usable=$(( usable + 1 ))
+      prev="$ms"
+    else
+      failed=$(( failed + 1 ))
+    fi
+  done
+  echo "$usable $failed"
+}
+check "a clean series yields intervals, no faults" "3 0" \
+  "$(observe_series 2026-02-28T00:00:00Z 2026-02-28T00:00:01Z 2026-02-28T00:00:02Z 2026-02-28T00:00:03Z)"
+check "a calendar-invalid member is a FAILURE"     "2 1" \
+  "$(observe_series 2026-02-28T00:00:00Z 2026-02-28T00:00:01Z 2026-02-31T00:00:02Z 2026-02-28T00:00:03Z)"
+check "  not simply three usable samples"          "different" \
+  "$([[ "$(observe_series 2026-02-28T00:00:00Z 2026-02-28T00:00:01Z 2026-02-31T00:00:02Z 2026-02-28T00:00:03Z)" != "3 0" ]] && echo different || echo SAME)"
+check "a repeated timestamp is a FAILURE"          "2 1" \
+  "$(observe_series 2026-02-28T00:00:00Z 2026-02-28T00:00:01Z 2026-02-28T00:00:01Z 2026-02-28T00:00:02Z)"
+check "a backwards timestamp is a FAILURE"         "0 1" \
+  "$(observe_series 2026-02-28T00:00:02Z 2026-02-28T00:00:01Z)"
+
+# --- the authority consequence ---
+#
+# An invalid measurement nulls the candidate, the knee estimate AND the bracket
+# together: leaving any one populated lets a reader reconstruct a number the run did
+# not earn.
+check "invalid measurement nulls everything"     "null null false MEASUREMENT_INVALID" \
+  "$(candidate_authority NO BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
+check "a valid bracket keeps its number"         "8512000 10640000 true CANDIDATE_READY_FOR_REVIEW" \
+  "$(candidate_authority YES BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
+check "no floor supplied blocks readiness"       "AWAITING_LEGITIMATE_FLOOR" \
+  "$(candidate_authority YES BRACKETED 8512000 10640000 true NOT_SUPPLIED WITHIN_POLICY | awk '{print $4}')"
+check "an unavailable growth axis blocks it"     "STATE_GROWTH_AXIS_UNAVAILABLE" \
+  "$(candidate_authority YES BRACKETED 8512000 10640000 true COMPATIBLE UNAVAILABLE | awk '{print $4}')"
+check "no candidate nulls the knee too"          "null null false UNBOUNDED_BY_RUN_INCREASE_LOAD" \
+  "$(candidate_authority YES UNBOUNDED_BY_RUN_INCREASE_LOAD null null false NOT_SUPPLIED UNRATIFIED)"
+check "the rig applies it"                       "1" \
+  "$(grep -c 'AUTHORITY="\$(candidate_authority' "$CAL")"
+check "  and no longer nulls inline"             "0" \
+  "$(grep -c 'then CANDIDATE="null"; KNEE_GAS="null"' "$CAL")"
+# The WIRING, not just the semantics: dropping the else-branch leaves the helper call
+# and the invalidation guard both intact while no refusal is ever counted, so the run
+# stays valid over a series that lost readings. Scoped to the lines that follow the
+# call rather than a free-floating grep.
+check "a refusal is counted where it happens"    "yes" \
+  "$(awk '/if observe_block_time OBS_MS OBS_IV/ { w = 8 } w-- > 0 && /TIMING_UNREADABLE=\$\(\( TIMING_UNREADABLE \+ 1 \)\)/ { f = 1 } END { print (f ? "yes" : "no") }' "$CAL")"
+check "the drill observes through the same helper" "1" \
+  "$(grep -c 'observe_block_time OBS_MS OBS_GAP' "$DRILL_FILE")"
+check "  and no longer parses timestamps itself"   "0" \
+  "$(grep -c 'rfc3339_to_ms' "$DRILL_FILE")"
 
 # ---------------------------------------------------------------------------------
 group percentile "the tail statistic itself"
@@ -786,8 +881,8 @@ check "  and records PASS"                       "overall=PASS" "$(grep '^overal
 # them decoration.
 GROUP_NAMES=(gasreaders ceiling meta params delivery saturation stall drain concurrency
              attribution na namespace endpoints waits workload steps knee growthpolicy
-             dbpolicy percentile deferral cardinality time address genesis contract verdict)
-PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 31 23 12 16 8 6 5 11 7 5 9 7)
+             dbpolicy timing percentile deferral cardinality time address genesis contract verdict)
+PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 27 23 12 16 42 8 6 5 11 7 5 9 7)
 
 EXPECTED_CHECKS=0
 for e in "${PER_GROUP_EXPECTED[@]}"; do EXPECTED_CHECKS=$(( EXPECTED_CHECKS + e )); done

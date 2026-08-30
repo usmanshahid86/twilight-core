@@ -144,12 +144,37 @@ max_gas_is_finite() {
 # special case, because the naive version is wrong on century boundaries and the
 # error is a silent one-day shift in every block-time delta.
 rfc3339_to_ms() { # <timestamp> -> epoch milliseconds
-  local ts="${1:-}" y m d hh mm ss frac ms era yoe doy doe days
+  local ts="${1:-}" y m d hh mm ss frac ms era yoe doy doe days dim leap
   [[ "$ts" =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]+)?Z$ ]] || return 1
   y=$((10#${BASH_REMATCH[1]})); m=$((10#${BASH_REMATCH[2]})); d=$((10#${BASH_REMATCH[3]}))
   hh=$((10#${BASH_REMATCH[4]})); mm=$((10#${BASH_REMATCH[5]})); ss=$((10#${BASH_REMATCH[6]}))
   frac="${BASH_REMATCH[7]:-}"
-  (( m >= 1 && m <= 12 && d >= 1 && d <= 31 && hh < 24 && mm < 60 && ss < 61 )) || return 1
+
+  # Range checks first, then the CALENDAR. Range alone is not validity: 2026-02-31
+  # passes every bound below and is not a date. The civil-from-days arithmetic that
+  # follows will happily normalise it into a real instant — 2100-02-29 lands on
+  # exactly the same epoch as 2100-03-01 — so an impossible timestamp becomes a
+  # plausible one and a run built on it looks perfectly measured.
+  (( m >= 1 && m <= 12 )) || return 1
+  (( d >= 1 )) || return 1
+  (( hh <= 23 && mm <= 59 )) || return 1
+  # Second 60 is refused rather than half-supported. RFC 3339 permits it only at an
+  # announced leap-second instant, and honouring that would mean carrying a leap
+  # table; accepting it anywhere else would let 12:34:60 pass on any day. CometBFT
+  # block times do not carry leap seconds, so refusing is both correct here and the
+  # conservative direction.
+  (( ss <= 59 )) || return 1
+
+  leap=0
+  if (( y % 4 == 0 )) && { (( y % 100 != 0 )) || (( y % 400 == 0 )); }; then leap=1; fi
+  case "$m" in
+    1|3|5|7|8|10|12) dim=31 ;;
+    4|6|9|11)        dim=30 ;;
+    2)               dim=$(( leap ? 29 : 28 )) ;;
+    *) return 1 ;;
+  esac
+  (( d <= dim )) || return 1
+
   # Milliseconds from the first three fractional digits, right-padded so ".5" is
   # 500ms and not 5ms.
   frac="${frac#.}"; frac="${frac}000"; ms=$((10#${frac:0:3}))
@@ -161,6 +186,45 @@ rfc3339_to_ms() { # <timestamp> -> epoch milliseconds
   doe=$(( yoe * 365 + yoe / 4 - yoe / 100 + doy ))
   days=$(( era * 146097 + doe - 719468 ))
   echo $(( (days * 86400 + hh * 3600 + mm * 60 + ss) * 1000 + ms ))
+}
+
+# ---- the timing observation both consumers share ----------------------------------
+#
+# observe_block_time <ms-var> <interval-var> <previous-ms> <timestamp>
+#
+# ONE definition of what a usable block-time observation is, used by the calibration
+# rig's load response and by the drill's flood-window liveness proof. Two copies of
+# this rule would drift, and the half that drifted would be the half that quietly
+# accepted a bad sample.
+#
+# Success (returns 0):
+#   first sample     — <ms-var> set, <interval-var> set to the empty string
+#   later sample     — <ms-var> set, <interval-var> set to a STRICTLY POSITIVE delta
+#
+# Failure (returns non-zero) for a malformed or calendar-invalid timestamp, an
+# unreadable predecessor, or an interval that is zero or backwards. Neither output
+# variable is assigned on failure, so a caller that ignores the status trips over an
+# unbound variable rather than continuing with an invented zero.
+#
+# Zero and backwards are failures, not omissions. Dropping them would silently shrink
+# the timing distribution while the step's own sample-count gate still believed it had
+# a full one — and consensus already guarantees strictly increasing block times, so
+# either is evidence the reading is wrong rather than the chain.
+observe_block_time() {
+  local __ms="$1" __iv="$2" prev="${3:-}" ts="${4:-}" now delta
+  now="$(rfc3339_to_ms "$ts")" || return 1
+  [[ "$now" =~ ^[0-9]+$ ]] || return 1
+  if [[ -z "$prev" ]]; then
+    printf -v "$__ms" '%s' "$now"
+    printf -v "$__iv" '%s' ""
+    return 0
+  fi
+  [[ "$prev" =~ ^[0-9]+$ ]] || return 1
+  delta=$(( now - prev ))
+  (( delta > 0 )) || return 1
+  printf -v "$__ms" '%s' "$now"
+  printf -v "$__iv" '%s' "$delta"
+  return 0
 }
 
 # ---- bech32 ---------------------------------------------------------------------
@@ -550,6 +614,43 @@ step_eligibility() {
   (( intervals >= min_intervals ))    || { echo "INSUFFICIENT_ACTIVE_INTERVALS"; return 1; }
   echo "ELIGIBLE"
   return 0
+}
+
+# candidate_authority <valid> <candidate-status> <candidate> <knee-gas> <bracketed> \
+#                     <floor-class> <state-guard>
+#
+# The final authority rule, in one place: prints
+#
+#     <candidate> <knee-gas> <bracketed> <production-status>
+#
+# after applying every consequence the evidence permits. A numeric candidate must
+# never outlive the measurement that produced it, so an invalid measurement nulls the
+# candidate, the knee estimate AND the bracket flag together — leaving any one of them
+# populated would let a reader reconstruct a number the run did not earn.
+#
+# Readiness additionally requires that every SUPPLIED policy was evaluated and passed.
+# Order matters and is most-disqualifying first, so a run cannot reach readiness by
+# satisfying a later test while failing an earlier one.
+candidate_authority() {
+  local valid="${1:-}" cstatus="${2:-}" cand="${3:-}" knee="${4:-}" brack="${5:-}"
+  local floor="${6:-}" guard="${7:-}"
+  if [[ "$valid" != "YES" ]]; then
+    echo "null null false MEASUREMENT_INVALID"; return 0
+  fi
+  if [[ ! "$cand" =~ ^[0-9]+$ ]]; then
+    echo "null null false $cstatus"; return 0
+  fi
+  local status
+  case "1" in
+    *) if   [[ "$floor" == "CONFLICT" ]];        then status="CONFLICTS_WITH_LEGITIMATE_FLOOR"
+       elif [[ "$guard" == "EXCEEDS_POLICY" ]];  then status="EXCEEDS_STATE_GROWTH_POLICY"
+       elif [[ "$guard" == "INCOMPLETE" ]];      then status="INCOMPLETE_STATE_GROWTH_EVIDENCE"
+       elif [[ "$guard" == "UNAVAILABLE" ]];     then status="STATE_GROWTH_AXIS_UNAVAILABLE"
+       elif [[ "$floor" == "NOT_SUPPLIED" ]];    then status="AWAITING_LEGITIMATE_FLOOR"
+       elif [[ "$guard" == "UNRATIFIED" ]];      then status="AWAITING_STATE_GROWTH_POLICY"
+       else status="CANDIDATE_READY_FOR_REVIEW"; fi ;;
+  esac
+  echo "$cand $knee $brack $status"
 }
 
 # candidate_precheck <measurement-valid> <truncated> <ineligible-reason>
