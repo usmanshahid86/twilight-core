@@ -460,6 +460,100 @@ timing_integrity_ok() {
   (( n == 0 ))
 }
 
+# collect_block_metrics <from-height> <to-height>
+#
+# The calibration collection pass, as a function, so the fault suite can DRIVE it
+# instead of reading it.
+#
+# It lives here rather than inline in the rig because an inline loop can be
+# neutralised in ways no pattern can enumerate — a call-site `|| VAR=0`, a reset on the
+# next line, or an `if false` wrapper that leaves every anchored assertion satisfied
+# while the code never runs. A test that executes this function sees the resulting
+# counters, so every one of those shapes produces the same visible failure.
+#
+# Operates on the calibration script's collection state by name, which is what lets a
+# test set that state up, run the real pass, and inspect it afterwards:
+#
+#   in   PRIMARY, BLOCKS_CSV, CAL_ACCOUNT_SAMPLING
+#   in   block_gas / block_meta / class_of_height / step_of_height / accounts_at /
+#        appdb_at  (readers the caller provides)
+#   out  PREV_MS, PREV_ACC, PREV_DB
+#   out  UNREADABLE_BLOCKS, TIMING_UNREADABLE
+#   out  ACCOUNT_EXPECTED, ACCOUNT_SAMPLES, ACCT_DELTA_SEEN
+#   out  APPDB_SAMPLES, APPDB_DELTA_SEEN
+#
+# Timing specifically goes through apply_timing_observation, whose refusal semantics
+# are proven separately; this function's job is to call it for every block and let the
+# failure count reach the integrity predicate untouched.
+collect_block_metrics() {
+  local __cbm_from="$1" __cbm_to="$2"
+  local h gw gu nt bs tm cls st ms iv acc dacc db ddb a d
+  [[ "$__cbm_from" =~ ^[0-9]+$ && "$__cbm_to" =~ ^[0-9]+$ ]] || return 1
+  for (( h = __cbm_from; h <= __cbm_to; h++ )); do
+    gw="$(block_gas "$PRIMARY" "$h" gas_wanted)"  || gw=""
+    gu="$(block_gas "$PRIMARY" "$h" gas_used)"    || gu=""
+    nt="$(block_meta "$PRIMARY" "$h" num_txs)"    || nt=""
+    bs="$(block_meta "$PRIMARY" "$h" block_size)" || bs=""
+    tm="$(block_meta "$PRIMARY" "$h" time)"       || tm=""
+    cls="$(class_of_height "$h")"
+    st="$(step_of_height "$h")"; [[ -n "$st" ]] || st="-"
+    if [[ -z "$gw" || -z "$nt" || -z "$tm" ]]; then
+      UNREADABLE_BLOCKS=$(( UNREADABLE_BLOCKS + 1 ))
+      printf '%s,%s,%s,-,-,-,-,-,-,-,-,-,-\n' "$h" "$st" "$cls" >>"$BLOCKS_CSV"
+      PREV_MS=""
+      continue
+    fi
+    # Timing goes through the SHARED observation helper — the same one the drill's
+    # liveness proof uses, and the same one the fault suite exercises.
+    #
+    # A present-but-unusable timestamp is a measurement-integrity failure, not an
+    # observation to drop: malformed text, an impossible calendar date, or an interval
+    # that is zero or backwards. Silently removing any of them shrinks the timing
+    # distribution while the experiment keeps claiming authority over it, and the step's
+    # p95 would then rest on fewer observations than its own sample gate believed.
+    #
+    # PREV_MS deliberately does NOT advance on failure, so the next block is measured
+    # against the last trustworthy reading rather than against one that was rejected.
+    #
+    # This is ONE CALL rather than an inline if/else on purpose. As an inline branch the
+    # refusal arm was unreachable-able: rewriting `else` to `elif (( 0 ))` left the real
+    # observation call and the counter line both present in the file while no rejected
+    # reading was ever counted, and every test still passed because none of them
+    # executed that arm. The fault suite now runs this exact function.
+    # `|| true` so a refused reading — a DATA-QUALITY failure — is recorded and the run
+    # still finishes writing its evidence and result before exiting invalid.
+    apply_timing_observation PREV_MS TIMING_UNREADABLE ms iv "$tm" || true
+    acc="-"; dacc="-"
+    # Coverage is counted over ACTIVE blocks on both sides. Sampling every block but
+    # measuring the ratio against active ones only would report coverage above 100%,
+    # which is not a coverage figure at all — and the axis classification it feeds
+    # decides whether the state-growth column may be trusted.
+    [[ "$cls" == "ACTIVE" ]] && ACCOUNT_EXPECTED=$(( ACCOUNT_EXPECTED + 1 ))
+    if a="$(accounts_at "$h")" && [[ "$a" =~ ^[0-9]+$ ]]; then
+      acc="$a"
+      [[ "$cls" == "ACTIVE" ]] && ACCOUNT_SAMPLES=$(( ACCOUNT_SAMPLES + 1 ))
+      if [[ -n "$PREV_ACC" ]]; then
+        dacc=$(( a - PREV_ACC ))
+        [[ "$cls" == "ACTIVE" ]] && ACCT_DELTA_SEEN=$(( ACCT_DELTA_SEEN + 1 ))
+      fi
+      PREV_ACC="$a"
+    fi
+    db="-"; ddb="-"
+    if d="$(appdb_at "$h")" && [[ "$d" =~ ^[0-9]+$ ]]; then
+      db="$d"
+      [[ "$cls" == "ACTIVE" ]] && APPDB_SAMPLES=$(( APPDB_SAMPLES + 1 ))
+      if [[ -n "$PREV_DB" ]]; then
+        ddb=$(( d - PREV_DB ))
+        [[ "$cls" == "ACTIVE" ]] && APPDB_DELTA_SEEN=$(( APPDB_DELTA_SEEN + 1 ))
+      fi
+      PREV_DB="$d"
+    fi
+    printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+      "$h" "$st" "$cls" "${ms:--}" "$iv" "$nt" "$bs" "$gw" "$gu" "$acc" "$dacc" "$db" "$ddb" >>"$BLOCKS_CSV"
+  done
+  return 0
+}
+
 # ---- statistics -------------------------------------------------------------------
 #
 # A knee taken from a median hides exactly the behaviour that matters: a step where

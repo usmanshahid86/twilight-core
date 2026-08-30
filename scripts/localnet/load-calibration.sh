@@ -743,68 +743,18 @@ TIMING_UNREADABLE=0
 # read but whose delta could not be formed contributes no growth evidence at all —
 # and one missing delta may be the worst-growth block.
 ACCT_DELTA_SEEN=0; APPDB_DELTA_SEEN=0
-for (( h = COLLECT_FROM; h <= RAMP_MAX_HEIGHT; h++ )); do
-  gw="$(block_gas "$PRIMARY" "$h" gas_wanted)"  || gw=""
-  gu="$(block_gas "$PRIMARY" "$h" gas_used)"    || gu=""
-  nt="$(block_meta "$PRIMARY" "$h" num_txs)"    || nt=""
-  bs="$(block_meta "$PRIMARY" "$h" block_size)" || bs=""
-  tm="$(block_meta "$PRIMARY" "$h" time)"       || tm=""
-  cls="$(class_of_height "$h")"
-  st="$(step_of_height "$h")"; [[ -n "$st" ]] || st="-"
-  if [[ -z "$gw" || -z "$nt" || -z "$tm" ]]; then
-    UNREADABLE_BLOCKS=$(( UNREADABLE_BLOCKS + 1 ))
-    printf '%s,%s,%s,-,-,-,-,-,-,-,-,-,-\n' "$h" "$st" "$cls" >>"$BLOCKS_CSV"
-    PREV_MS=""
-    continue
-  fi
-  # Timing goes through the SHARED observation helper — the same one the drill's
-  # liveness proof uses, and the same one the fault suite exercises.
-  #
-  # A present-but-unusable timestamp is a measurement-integrity failure, not an
-  # observation to drop: malformed text, an impossible calendar date, or an interval
-  # that is zero or backwards. Silently removing any of them shrinks the timing
-  # distribution while the experiment keeps claiming authority over it, and the step's
-  # p95 would then rest on fewer observations than its own sample gate believed.
-  #
-  # PREV_MS deliberately does NOT advance on failure, so the next block is measured
-  # against the last trustworthy reading rather than against one that was rejected.
-  #
-  # This is ONE CALL rather than an inline if/else on purpose. As an inline branch the
-  # refusal arm was unreachable-able: rewriting `else` to `elif (( 0 ))` left the real
-  # observation call and the counter line both present in the file while no rejected
-  # reading was ever counted, and every test still passed because none of them
-  # executed that arm. The fault suite now runs this exact function.
-  # `|| true` so a refused reading — a DATA-QUALITY failure — is recorded and the run
-  # still finishes writing its evidence and result before exiting invalid.
-  apply_timing_observation PREV_MS TIMING_UNREADABLE ms iv "$tm" || true
-  acc="-"; dacc="-"
-  # Coverage is counted over ACTIVE blocks on both sides. Sampling every block but
-  # measuring the ratio against active ones only would report coverage above 100%,
-  # which is not a coverage figure at all — and the axis classification it feeds
-  # decides whether the state-growth column may be trusted.
-  [[ "$cls" == "ACTIVE" ]] && ACCOUNT_EXPECTED=$(( ACCOUNT_EXPECTED + 1 ))
-  if a="$(accounts_at "$h")" && [[ "$a" =~ ^[0-9]+$ ]]; then
-    acc="$a"
-    [[ "$cls" == "ACTIVE" ]] && ACCOUNT_SAMPLES=$(( ACCOUNT_SAMPLES + 1 ))
-    if [[ -n "$PREV_ACC" ]]; then
-      dacc=$(( a - PREV_ACC ))
-      [[ "$cls" == "ACTIVE" ]] && ACCT_DELTA_SEEN=$(( ACCT_DELTA_SEEN + 1 ))
-    fi
-    PREV_ACC="$a"
-  fi
-  db="-"; ddb="-"
-  if d="$(appdb_at "$h")" && [[ "$d" =~ ^[0-9]+$ ]]; then
-    db="$d"
-    [[ "$cls" == "ACTIVE" ]] && APPDB_SAMPLES=$(( APPDB_SAMPLES + 1 ))
-    if [[ -n "$PREV_DB" ]]; then
-      ddb=$(( d - PREV_DB ))
-      [[ "$cls" == "ACTIVE" ]] && APPDB_DELTA_SEEN=$(( APPDB_DELTA_SEEN + 1 ))
-    fi
-    PREV_DB="$d"
-  fi
-  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
-    "$h" "$st" "$cls" "${ms:--}" "$iv" "$nt" "$bs" "$gw" "$gu" "$acc" "$dacc" "$db" "$ddb" >>"$BLOCKS_CSV"
-done
+# The whole per-block collection pass is ONE FUNCTION, and the fault suite drives that
+# function over a synthetic block sequence rather than reading this file.
+#
+# Three rounds of pinning source text were each defeated by the next textual shape: a
+# call-site `|| TIMING_UNREADABLE=0`, a later reset, and finally an `if false` wrapper
+# that left every anchored pattern intact while the timing call never executed. You
+# cannot enumerate by pattern the ways a shell script can neutralise a value. Running
+# the code closes all of them at once, because a neutralised counter is then simply
+# the wrong number in the test's hands.
+#
+# Reads and updates the calibration collection state declared just above.
+collect_block_metrics "$COLLECT_FROM" "$RAMP_MAX_HEIGHT"
 if (( UNREADABLE_BLOCKS > 0 )); then
   invalidate "$UNREADABLE_BLOCKS blocks in the measured range could not be read"
 fi

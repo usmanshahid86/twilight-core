@@ -46,6 +46,7 @@ blockgas_get() { [[ -n "$FIXTURE" ]] || return 1; printf '%s' "$FIXTURE"; }
 rc_of() { [[ $1 -ne 0 ]] && echo nonzero || echo ZERO; }
 CAL="$ROOT/scripts/localnet/load-calibration.sh"
 DRILL_FILE="$ROOT/scripts/localnet/block-gas-drill.sh"
+LIB_FILE="$ROOT/scripts/localnet/lib/blockgas.sh"
 
 # ---------------------------------------------------------------------------------
 group gasreaders "per-block gas: an empty block and an unreadable one are different"
@@ -475,8 +476,8 @@ check "  and never passes ACTIVE_BLOCKS"         "0" \
 # shrink the timing distribution while the experiment keeps claiming authority.
 # Timing integrity has its own behavioural group below; these two only pin that the
 # rig still routes through the shared helper and still invalidates on a failure.
-check "the rig ingests through the tested unit"   "1" \
-  "$(grep -c 'apply_timing_observation PREV_MS TIMING_UNREADABLE ms iv "\$tm"' "$CAL")"
+check "the collection pass ingests through it"   "1" \
+  "$(grep -c 'apply_timing_observation PREV_MS TIMING_UNREADABLE ms iv "\$tm"' "$LIB_FILE")"
 check "  and invalidates on any timing failure"    "1" \
   "$(grep -c 'if ! timing_integrity_ok "\$TIMING_UNREADABLE"; then' "$CAL")"
 step_eligibility x 3 20 20 >/dev/null 2>&1
@@ -778,17 +779,82 @@ check "clean timing keeps validity"              "YES" "$ATO_VALID"
 check "  and keeps the candidate"                "8512000 10640000 true CANDIDATE_READY_FOR_REVIEW" \
   "$(candidate_authority "$ATO_VALID" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
 
+# --- the production collection pass, DRIVEN ---
+#
+# This is the wiring proof, and it is behavioural rather than textual. Three rounds of
+# anchored source assertions were each defeated by the next shape — a call-site
+# `|| TIMING_UNREADABLE=0`, a reset on the following line, and an `if false` wrapper
+# that satisfied every pattern while the timing call never ran. Running the real pass
+# collapses all of those into one visible symptom: the failure count is wrong.
+#
+# The readers are stubs, so the block sequence is exactly what this test chose.
+CBM_BAD_AT=""
+block_gas()   { echo 1000000; }
+block_meta()  {
+  case "$3" in
+    num_txs)    echo 5 ;;
+    block_size) echo 900 ;;
+    time)       if [[ -n "$CBM_BAD_AT" && "$2" == "$CBM_BAD_AT" ]]; then echo "2026-02-31T00:00:0$(( $2 % 10 ))Z"
+                else printf '2026-08-29T12:00:%02dZ\n' "$(( $2 % 60 ))"; fi ;;
+  esac
+}
+class_of_height() { echo ACTIVE; }
+step_of_height()  { echo 1; }
+accounts_at()     { return 1; }
+appdb_at()        { return 1; }
+
+run_collection() { # <bad-height|""> -> "<timing-failures> <unreadable> <validity>"
+  CBM_BAD_AT="$1"
+  PRIMARY="http://stub"; BLOCKS_CSV="$TMP/cbm-blocks.csv"; CAL_ACCOUNT_SAMPLING=0
+  printf 'height,step,class,unix_ms,interval_ms,tx_count,block_bytes,gas_wanted,gas_used,accounts,account_delta,appdb_kb,appdb_delta_kb\n' >"$BLOCKS_CSV"
+  PREV_MS=""; PREV_ACC=""; PREV_DB=""
+  UNREADABLE_BLOCKS=0; TIMING_UNREADABLE=0
+  ACCOUNT_SAMPLES=0; ACCOUNT_EXPECTED=0; APPDB_SAMPLES=0
+  ACCT_DELTA_SEEN=0; APPDB_DELTA_SEEN=0
+  collect_block_metrics 10 14
+  local v=YES; timing_integrity_ok "$TIMING_UNREADABLE" || v=NO
+  echo "$TIMING_UNREADABLE $UNREADABLE_BLOCKS $v"
+}
+
+check "a clean sequence records no timing faults" "0 0 YES" "$(run_collection "")"
+check "  and writes every block"                  "5" \
+  "$(run_collection "" >/dev/null; awk 'NR > 1' "$TMP/cbm-blocks.csv" | grep -c .)"
+check "  with four positive intervals"            "4" \
+  "$(run_collection "" >/dev/null; awk -F, 'NR > 1 && $5 ~ /^[0-9]+$/ && $5 + 0 > 0' "$TMP/cbm-blocks.csv" | grep -c .)"
+# One calendar-invalid timestamp in the middle of an otherwise healthy sequence. The
+# count must reach the integrity predicate, and validity must flip.
+check "one bad timestamp is counted"              "1 0 NO" "$(run_collection 12)"
+check "  and the run loses candidate authority"   "null null false MEASUREMENT_INVALID" \
+  "$(run_collection 12 >/dev/null; V=YES; timing_integrity_ok "$TIMING_UNREADABLE" || V=NO
+     candidate_authority "$V" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
+check "  while a clean run keeps it"              "8512000 10640000 true CANDIDATE_READY_FOR_REVIEW" \
+  "$(run_collection "" >/dev/null; V=YES; timing_integrity_ok "$TIMING_UNREADABLE" || V=NO
+     candidate_authority "$V" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
+# block_gas and block_meta are the LIBRARY's own functions; `unset -f` would delete
+# them outright and every later group would silently lose its reader. Re-source to
+# restore the genuine definitions, then reinstate this suite's transport stub.
+unset -f class_of_height step_of_height accounts_at appdb_at
+# shellcheck source=/dev/null
+. "$LIB_FILE"
+blockgas_get() { [[ -n "$FIXTURE" ]] || return 1; printf '%s' "$FIXTURE"; }
+
 # --- supplemental WIRING coverage ---
 #
-# Deliberately source-level and deliberately narrow. It is not the semantic proof —
-# the checks above are — but it is the only thing that catches production abandoning
-# the tested unit and going back to its own branch.
-check "production calls the tested unit"         "1" \
-  "$(grep -c 'apply_timing_observation PREV_MS TIMING_UNREADABLE ms iv "\$tm"' "$CAL")"
-check "  and keeps no inline counter branch"     "0" \
-  "$(grep -c 'TIMING_UNREADABLE=\$(( TIMING_UNREADABLE + 1 ))' "$CAL")"
-check "  and gates validity on the predicate"    "1" \
-  "$(grep -c 'if ! timing_integrity_ok "\$TIMING_UNREADABLE"; then' "$CAL")"
+# Anchored source assertions, kept as belt and braces. They are NOT the wiring proof —
+# the driven pass above is — but they are cheap and they name the intended shape.
+check "the production call is exactly '|| true'"  "1" \
+  "$(grep -cE '^[[:space:]]*collect_block_metrics "\$COLLECT_FROM" "\$RAMP_MAX_HEIGHT"[[:space:]]*$' "$CAL")"
+check "  the helper call carries no fallback"     "1" \
+  "$(grep -cE '^[[:space:]]*apply_timing_observation PREV_MS TIMING_UNREADABLE ms iv "\$tm"[[:space:]]+\|\|[[:space:]]+true[[:space:]]*$' "$LIB_FILE")"
+# Exactly one direct assignment to the failure counter in the calibration script, and
+# it is the initialisation. Anything else is production rewriting a count the helper
+# owns. References, arguments and comments are not assignments.
+check "one direct assignment, the initialiser"    "1" \
+  "$(grep -cE '^[[:space:]]*TIMING_UNREADABLE=' "$CAL")"
+check "  and it initialises to zero"              "1" \
+  "$(grep -cE '^[[:space:]]*TIMING_UNREADABLE=0[[:space:]]*$' "$CAL")"
+check "  and gates validity on the predicate"     "1" \
+  "$(grep -cE '^[[:space:]]*if ! timing_integrity_ok "\$TIMING_UNREADABLE"; then[[:space:]]*$' "$CAL")"
 
 # ---------------------------------------------------------------------------------
 group percentile "the tail statistic itself"
@@ -976,7 +1042,7 @@ GROUP_NAMES=(gasreaders ceiling meta params delivery saturation stall drain conc
              attribution na namespace endpoints waits workload steps knee growthpolicy
              dbpolicy timing ingestion percentile deferral cardinality time address genesis
              contract verdict)
-PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 27 23 12 16 41 25 8 6 5 11 7 5 9 7)
+PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 27 23 12 16 41 33 8 6 5 11 7 5 9 7)
 
 EXPECTED_CHECKS=0
 for e in "${PER_GROUP_EXPECTED[@]}"; do EXPECTED_CHECKS=$(( EXPECTED_CHECKS + e )); done
