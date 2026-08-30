@@ -27,6 +27,48 @@ jq '.app_state.rewards' ~/.twilightd/config/genesis.json
 jq '.app_state.coreslot' ~/.twilightd/config/genesis.json
 ```
 
+## Mempool bounds
+
+`twilightd init` writes a `config.toml` that holds a smaller mempool than the
+CometBFT default: `max_txs_bytes` is **88080384** bytes — four blocks' worth of
+transaction data — rather than 1 GiB. The transaction count (`mempool.size`,
+5000) and the per-transaction limit (`max_tx_bytes`, 1 MiB) keep their upstream
+values, because at 5000 transactions the count already binds well below one
+block's worth of ordinary traffic.
+
+Transactions on this chain carry no fee, and the mempool is first-in-first-out
+with no per-sender fairness. The depth of the queue is therefore how long a
+transaction can sit behind somebody else's backlog, and 1 GiB against a 21 MiB
+block is roughly forty-eight blocks of it. A few blocks absorbs a burst; tens of
+blocks is a wait an operator would read as an outage.
+
+What this setting does **not** do:
+
+- It is **node-local**. It bounds your node's queue and nothing else. A validator
+  running different settings is unaffected by yours, so this is an operational
+  control over your own node, not a chain-level limit.
+- It is **not per-sender fairness** and **not an economic limit**. A shallower
+  queue shortens the wait; it does not divide the queue between senders.
+- Raising `minimum-gas-prices` in `app.toml` does not substitute for it. That
+  value is applied when your node accepts a transaction into its mempool, not
+  when the chain executes a block, so it changes what your node relays rather
+  than what the chain accepts. It ships as `0utwlt` deliberately.
+
+**Nodes initialized earlier keep their old value.** The setting is written only
+when `config.toml` does not exist yet, so an existing node needs the edit by
+hand:
+
+```bash
+grep max_txs_bytes ~/.twilightd/config/config.toml
+```
+
+```toml
+[mempool]
+max_txs_bytes = 88080384
+```
+
+Restart the node after editing.
+
 ## Start
 
 ```bash
