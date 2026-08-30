@@ -779,16 +779,28 @@ check "clean timing keeps validity"              "YES" "$ATO_VALID"
 check "  and keeps the candidate"                "8512000 10640000 true CANDIDATE_READY_FOR_REVIEW" \
   "$(candidate_authority "$ATO_VALID" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
 
-# --- the production collection pass, DRIVEN ---
+# --- the production collection pass, DRIVEN over its whole classification domain ---
 #
-# This is the wiring proof, and it is behavioural rather than textual. Three rounds of
-# anchored source assertions were each defeated by the next shape — a call-site
-# `|| TIMING_UNREADABLE=0`, a reset on the following line, and an `if false` wrapper
-# that satisfied every pattern while the timing call never ran. Running the real pass
-# collapses all of those into one visible symptom: the failure count is wrong.
+# This is the wiring proof, and it is behavioural rather than textual. Anchored source
+# assertions were outrun three times — a call-site `|| TIMING_UNREADABLE=0`, a later
+# reset, and an `if false` wrapper that satisfied every pattern while the timing call
+# never ran.
 #
-# The readers are stubs, so the block sequence is exactly what this test chose.
-CBM_BAD_AT=""
+# Driving the pass closed those, but driving it over ACTIVE blocks alone left one more
+# shape open, and it is the most plausible of the lot: a class guard. "Don't bother
+# timing quiet blocks" is an optimisation someone writes in good faith and a reviewer
+# waves through —
+#
+#     if [[ "$cls" != "QUIET" ]]; then apply_timing_observation ...; fi
+#
+# — and its consequence is worse than a suppressed counter. The skipped block keeps
+# whatever `ms` and `iv` held from the previous iteration, so the row is written with
+# the PRECEDING block's timestamp and interval: fabricated timing presented as
+# measured.
+#
+# So the pass is driven once per class, and the classes come from production rather
+# than from a list written here.
+CBM_BAD_AT=""; CBM_CLASS="ACTIVE"
 block_gas()   { echo 1000000; }
 block_meta()  {
   case "$3" in
@@ -798,13 +810,37 @@ block_meta()  {
                 else printf '2026-08-29T12:00:%02dZ\n' "$(( $2 % 60 ))"; fi ;;
   esac
 }
-class_of_height() { echo ACTIVE; }
+class_of_height() { echo "$CBM_CLASS"; }
 step_of_height()  { echo 1; }
 accounts_at()     { return 1; }
 appdb_at()        { return 1; }
 
-run_collection() { # <bad-height|""> -> "<timing-failures> <unreadable> <validity>"
-  CBM_BAD_AT="$1"
+# The classification domain, DERIVED from the production function.
+#
+# Hardcoding "ACTIVE QUIET UNATTRIBUTED" would exhaust today's domain and silently
+# under-cover tomorrow's: add a fourth class and this group would keep passing while
+# one class went untested. Parsing the emissions means a fourth class fails the
+# coverage assertion below instead.
+cal_class_body()   { awk '/^class_of_height\(\) \{/,/^\}/' "$CAL"; }
+cal_class_domain() { cal_class_body | grep -oE 'echo "[A-Z_]+"' | sed 's/echo "//; s/"//' | LC_ALL=C sort -u; }
+
+# The parse is only trustworthy while every emission is a literal. A computed class —
+# `echo "$st"` — would make the domain unknowable from the source, and this must go red
+# rather than quietly enumerate a subset.
+check "no class is emitted from a variable"      "0" \
+  "$(cal_class_body | grep -cE 'echo +"?\$')"
+check "  every emission is a literal class"      "$(cal_class_body | grep -cE 'echo "[A-Z_]+"')" \
+  "$(cal_class_domain | grep -c .)"
+CLASS_DOMAIN="$(cal_class_domain | paste -sd, -)"
+check "  and the derived domain is"              "ACTIVE,QUIET,UNATTRIBUTED" "$CLASS_DOMAIN"
+
+# Assigns rather than prints, and is therefore called WITHOUT command substitution.
+# `$(run_collection ...)` would run the whole pass in a subshell and discard every
+# counter it set, leaving the authority checks below reading the parent's stale state —
+# which is exactly the kind of accidental green this group exists to prevent.
+COLLECT_SUMMARY=""
+run_collection() { # <bad-height|""> <class> — sets COLLECT_SUMMARY and the counters
+  CBM_BAD_AT="$1"; CBM_CLASS="$2"
   PRIMARY="http://stub"; BLOCKS_CSV="$TMP/cbm-blocks.csv"; CAL_ACCOUNT_SAMPLING=0
   printf 'height,step,class,unix_ms,interval_ms,tx_count,block_bytes,gas_wanted,gas_used,accounts,account_delta,appdb_kb,appdb_delta_kb\n' >"$BLOCKS_CSV"
   PREV_MS=""; PREV_ACC=""; PREV_DB=""
@@ -813,23 +849,40 @@ run_collection() { # <bad-height|""> -> "<timing-failures> <unreadable> <validit
   ACCT_DELTA_SEEN=0; APPDB_DELTA_SEEN=0
   collect_block_metrics 10 14
   local v=YES; timing_integrity_ok "$TIMING_UNREADABLE" || v=NO
-  echo "$TIMING_UNREADABLE $UNREADABLE_BLOCKS $v"
+  COLLECT_SUMMARY="$TIMING_UNREADABLE $UNREADABLE_BLOCKS $v"
+}
+authority_now() { # authority derived from the counter the run just left behind
+  local v=YES; timing_integrity_ok "$TIMING_UNREADABLE" || v=NO
+  candidate_authority "$v" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY
 }
 
-check "a clean sequence records no timing faults" "0 0 YES" "$(run_collection "")"
+run_collection "" ACTIVE
+check "a clean sequence records no timing faults" "0 0 YES" "$COLLECT_SUMMARY"
 check "  and writes every block"                  "5" \
-  "$(run_collection "" >/dev/null; awk 'NR > 1' "$TMP/cbm-blocks.csv" | grep -c .)"
+  "$(awk 'NR > 1' "$TMP/cbm-blocks.csv" | grep -c .)"
 check "  with four positive intervals"            "4" \
-  "$(run_collection "" >/dev/null; awk -F, 'NR > 1 && $5 ~ /^[0-9]+$/ && $5 + 0 > 0' "$TMP/cbm-blocks.csv" | grep -c .)"
-# One calendar-invalid timestamp in the middle of an otherwise healthy sequence. The
-# count must reach the integrity predicate, and validity must flip.
-check "one bad timestamp is counted"              "1 0 NO" "$(run_collection 12)"
-check "  and the run loses candidate authority"   "null null false MEASUREMENT_INVALID" \
-  "$(run_collection 12 >/dev/null; V=YES; timing_integrity_ok "$TIMING_UNREADABLE" || V=NO
-     candidate_authority "$V" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
-check "  while a clean run keeps it"              "8512000 10640000 true CANDIDATE_READY_FOR_REVIEW" \
-  "$(run_collection "" >/dev/null; V=YES; timing_integrity_ok "$TIMING_UNREADABLE" || V=NO
-     candidate_authority "$V" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
+  "$(awk -F, 'NR > 1 && $5 ~ /^[0-9]+$/ && $5 + 0 > 0' "$TMP/cbm-blocks.csv" | grep -c .)"
+check "  and keeps candidate authority"           "8512000 10640000 true CANDIDATE_READY_FOR_REVIEW" \
+  "$(authority_now)"
+
+# Every class in the derived domain, each with a refused timestamp at height 12.
+DRIVEN_CLASSES=""
+for CBM_CLS in $(cal_class_domain); do
+  run_collection 12 "$CBM_CLS"
+  check "$CBM_CLS: a refused timestamp is counted" "1 0 NO" "$COLLECT_SUMMARY"
+  # The fabrication check. A skipped call leaves ms/iv holding the PREVIOUS block's
+  # values, and the row is written with them — timing that was never measured.
+  check "  $CBM_CLS: no stale timing on the row"   "-|-" \
+    "$(awk -F, '$1 == 12 { print $4 "|" $5 }' "$TMP/cbm-blocks.csv")"
+  check "  $CBM_CLS: authority nulls"              "null null false MEASUREMENT_INVALID" \
+    "$(authority_now)"
+  DRIVEN_CLASSES="$DRIVEN_CLASSES $CBM_CLS"
+done
+# The guard that makes the derivation worth doing: a class production can emit and this
+# driver never exercised fails here rather than passing unnoticed.
+check "the driver covered the whole domain"      "$CLASS_DOMAIN" \
+  "$(printf '%s\n' $DRIVEN_CLASSES | LC_ALL=C sort -u | paste -sd, -)"
+
 # block_gas and block_meta are the LIBRARY's own functions; `unset -f` would delete
 # them outright and every later group would silently lose its reader. Re-source to
 # restore the genuine definitions, then reinstate this suite's transport stub.
@@ -1042,7 +1095,7 @@ GROUP_NAMES=(gasreaders ceiling meta params delivery saturation stall drain conc
              attribution na namespace endpoints waits workload steps knee growthpolicy
              dbpolicy timing ingestion percentile deferral cardinality time address genesis
              contract verdict)
-PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 27 23 12 16 41 33 8 6 5 11 7 5 9 7)
+PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 27 23 12 16 41 44 8 6 5 11 7 5 9 7)
 
 EXPECTED_CHECKS=0
 for e in "${PER_GROUP_EXPECTED[@]}"; do EXPECTED_CHECKS=$(( EXPECTED_CHECKS + e )); done
