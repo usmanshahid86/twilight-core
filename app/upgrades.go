@@ -125,21 +125,28 @@ var Upgrades = []Upgrade{
 		//
 		// That is the point rather than an omission. Both controls live in
 		// application wiring — a bank SendRestriction and an ante decorator — and
-		// take effect the instant the new binary runs. There is no state to move;
-		// what is needed is agreement on WHEN every validator starts enforcing
-		// them. This entry is that agreement: a node reaching the height without
-		// this name compiled in halts instead of accepting a transaction its peers
-		// reject.
+		// take effect the instant the new binary runs, so this entry does not gate
+		// them on the height; a node swapped early enforces early. What the
+		// boundary provides is a FLOOR the network agrees on, and the ability to
+		// execute the plan at all: a node reaching the height without this name
+		// compiled in halts and cannot resume until it is supplied.
+		//
+		// Note it is EXECUTION this enables, not scheduling. A plan naming an
+		// upgrade no binary carries can still be scheduled, queried and canceled
+		// — deliberately, per the reasoning in x/coreslot's ScheduleUpgrade and
+		// ADR-0003 §1b, because a scheduling-time handler check would halt the
+		// network one block later.
 		//
 		// No StoreUpgrades: no store is added, renamed or deleted.
 		//
 		// No Migrate: there is no chain-specific state to transform. A body here
 		// would be fabricating state the released chain never had.
 		//
-		// TestThisReleaseMovesNoModuleConsensusVersion pins the assumption. If a
-		// later change bumps a module version before v0.3.0 ships, that test fails
-		// and this entry must be revisited rather than silently skipping a
-		// migration.
+		// TestThisReleaseMovesNoModuleVersionAndMountsNoNewModule pins the
+		// assumption across the WHOLE module map, not only the custom modules: a
+		// new module needs StoreUpgrades and an SDK-side version bump needs a
+		// migration, and either would make this empty entry wrong. If it fails,
+		// reconcile before the tag — after release the entry may never be edited.
 		Name: "v0.3.0",
 	},
 }

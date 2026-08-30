@@ -5,55 +5,79 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/cosmos/cosmos-sdk/types/module"
+
 	"github.com/twilight-project/twilight-core/app"
-	coreslot "github.com/twilight-project/twilight-core/x/coreslot"
-	mining "github.com/twilight-project/twilight-core/x/mining"
-	rewards "github.com/twilight-project/twilight-core/x/rewards"
 )
 
-// The v0.3.0 entry carries no StoreUpgrades and no Migrate, and that is only
-// correct while this release moves no module consensus version.
+// The v0.3.0 entry carries no StoreUpgrades and no Migrate, which is only
+// correct while this release moves no module version and mounts no new module.
 //
-// Pinned against the modules' own declared constants rather than a copy of the
-// registry, so this is a statement about the CHAIN rather than about the entry
-// agreeing with itself. A change that bumps a module version before v0.3.0 ships
-// fails here, which is the moment to decide whether the entry needs a migration
-// — not after the tag, when the entry may no longer be edited.
+// The WHOLE map is pinned, not just the three custom modules. A narrower check
+// would miss the case the empty entry most depends on: a module added before the
+// tag needs StoreUpgrades, and an SDK-side consensus-version bump needs a
+// migration. dependabot ignores cosmos-sdk and cometbft outright but permits
+// cosmossdk.io/* patch bumps, so the SDK half is not hypothetical.
 //
-// The numbers are deliberately literal. Deriving them from the same constants
-// they are meant to guard would make the assertion vacuous.
-func TestThisReleaseMovesNoModuleConsensusVersion(t *testing.T) {
-	for _, tc := range []struct {
-		module  string
-		version uint64
-		actual  uint64
-	}{
-		{"coreslot", 2, coreslot.ConsensusVersion},
-		{"rewards", 1, rewards.ConsensusVersion},
-		{"mining", 1, mining.ConsensusVersion},
-	} {
-		require.Equal(t, tc.version, tc.actual,
-			"%s consensus version moved; the v0.3.0 entry carries no Migrate and no "+
-				"StoreUpgrades, so a version bump means that entry must be revisited "+
-				"before the tag is cut", tc.module)
-	}
+// Pinned rather than derived, following the same reasoning as
+// scripts/localnet/release-upgrade-rehearsal.sh: a module silently dropped, an
+// unexpected one appearing, or a migration that failed to bump a version all
+// have to fail here. Deriving these numbers from the constants they guard would
+// make the assertion vacuous.
+//
+// If this fails, decide whether v0.3.0 needs a Migrate or StoreUpgrades BEFORE
+// the tag is cut — after release the entry may never be edited.
+func TestThisReleaseMovesNoModuleVersionAndMountsNoNewModule(t *testing.T) {
+	a := newAppOnDB(t, memDB())
+	require.Equal(t, module.VersionMap{
+		"auth":      5,
+		"bank":      4,
+		"consensus": 1,
+		"coreslot":  2,
+		"mining":    1,
+		"rewards":   1,
+		"runtime":   0,
+		"upgrade":   2,
+	}, a.ModuleManager.GetVersionMap(),
+		"the module set or a consensus version changed; the v0.3.0 entry carries no "+
+			"Migrate and no StoreUpgrades, so this must be reconciled before the tag")
 }
 
-// The boundary must exist and must be the empty, coordination-only shape the
-// merged controls need — they change application wiring, not module state.
-func TestTheV030BoundaryIsRegisteredAndCarriesNothing(t *testing.T) {
+// The entry must be REGISTERED ON THE BUILT APPLICATION, not merely present in a
+// Go slice.
+//
+// Asking the keeper is the whole point. Registration walks the registry in
+// registerUpgradeHandlers, and a plausible refactor there — say skipping entries
+// whose Migrate is nil, since both shipped entries have none — silently strips
+// every handler from the binary while leaving the slice untouched. Every node
+// would then halt at the upgrade height and no build could resume it, which is
+// the exact failure this registry exists to prevent. A slice-only assertion
+// cannot see that.
+//
+// v0.2.0 is asserted alongside v0.3.0 deliberately: the mutation above removes
+// both, and a check that only knew about the new entry would let a released
+// boundary disappear.
+func TestBothUpgradeBoundariesAreRegisteredOnTheBuiltApp(t *testing.T) {
+	a := newAppOnDB(t, memDB())
+	require.True(t, a.UpgradeKeeper.HasHandler("v0.2.0"),
+		"the released v0.2.0 boundary must remain executable by this binary")
+	require.True(t, a.UpgradeKeeper.HasHandler("v0.3.0"),
+		"a node reaching the v0.3.0 height without a registered handler halts and "+
+			"cannot resume; being listed in the registry slice is not enough")
+}
+
+// And the entry's shape: coordination only, no state movement.
+func TestTheV030EntryCarriesNothing(t *testing.T) {
 	var found *app.Upgrade
 	for i := range app.Upgrades {
 		if app.Upgrades[i].Name == "v0.3.0" {
 			found = &app.Upgrades[i]
 		}
 	}
-	require.NotNil(t, found,
-		"the merged TW-006 controls change transaction validity and cannot be "+
-			"scheduled without a named boundary")
+	require.NotNil(t, found, "the boundary must exist in the registry")
 	require.Nil(t, found.StoreUpgrades, "no store is added, renamed or deleted")
 	require.Nil(t, found.Migrate, "there is no chain-specific state to transform")
 
-	// And the registry as a whole must still be executable unambiguously.
-	require.NoError(t, app.ValidateUpgrades(app.Upgrades))
+	require.NoError(t, app.ValidateUpgrades(app.Upgrades),
+		"the registry as a whole must remain unambiguously executable")
 }
