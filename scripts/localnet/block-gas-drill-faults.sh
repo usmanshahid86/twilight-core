@@ -811,7 +811,16 @@ block_meta()  {
   esac
 }
 class_of_height() { echo "$CBM_CLASS"; }
-step_of_height()  { echo 1; }
+# Step attribution is CORRELATED with class, because production correlates them:
+# class_of_height reports ACTIVE precisely when the height appears in the ACTIVE
+# attribution file, and step_of_height reads that same file. So a QUIET or
+# UNATTRIBUTED block has no step and the pass writes "-".
+#
+# A stub returning 1 for every class produced QUIET|1 and UNATTRIBUTED|1 — states
+# production cannot generate — and a guard keyed on the step rather than the class
+# then slipped through: `if [[ "$st" != "-" ]]` suppressed timing on exactly the rows
+# the driver had made indistinguishable from ACTIVE.
+step_of_height()  { [[ "$CBM_CLASS" == "ACTIVE" ]] && echo 1; }
 accounts_at()     { return 1; }
 appdb_at()        { return 1; }
 
@@ -835,9 +844,13 @@ CLASS_DOMAIN="$(cal_class_domain | paste -sd, -)"
 check "  and the derived domain is"              "ACTIVE,QUIET,UNATTRIBUTED" "$CLASS_DOMAIN"
 
 # Assigns rather than prints, and is therefore called WITHOUT command substitution.
-# `$(run_collection ...)` would run the whole pass in a subshell and discard every
-# counter it set, leaving the authority checks below reading the parent's stale state —
-# which is exactly the kind of accidental green this group exists to prevent.
+#
+# To be accurate about why: the earlier form ran the collection, the integrity
+# evaluation and the authority evaluation inside the SAME command substitution, so the
+# counters were visible to each other and the assertion value was produced correctly;
+# the state was discarded only when that subshell exited. That form was sound. The
+# parent-shell form here is simply clearer to inspect and lets several assertions read
+# the same run, rather than each re-running the pass inside its own subshell.
 COLLECT_SUMMARY=""
 run_collection() { # <bad-height|""> <class> — sets COLLECT_SUMMARY and the counters
   CBM_BAD_AT="$1"; CBM_CLASS="$2"
@@ -856,6 +869,23 @@ authority_now() { # authority derived from the counter the run just left behind
   candidate_authority "$v" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY
 }
 
+# The VALID production state space, pinned. Not a Cartesian product: ACTIVE|-,
+# QUIET|1 and UNATTRIBUTED|1 are states the attribution model cannot produce, and
+# asserting them would be inventing coverage rather than exercising production.
+#
+# A class with no pinned pair fails below, so a fourth class cannot slip in here
+# either — the domain derivation and this contract both have to be updated together.
+expected_step_for() { # <class> -> the step attribution production pairs with it
+  case "$1" in
+    ACTIVE)             echo "1" ;;
+    QUIET|UNATTRIBUTED) echo "-" ;;
+    *) return 1 ;;
+  esac
+}
+row_pair() { # <height> -> "<class>|<step>" as the pass actually wrote it
+  awk -F, -v h="$1" '$1 == h { print $3 "|" $2 }' "$TMP/cbm-blocks.csv"
+}
+
 run_collection "" ACTIVE
 check "a clean sequence records no timing faults" "0 0 YES" "$COLLECT_SUMMARY"
 check "  and writes every block"                  "5" \
@@ -868,8 +898,17 @@ check "  and keeps candidate authority"           "8512000 10640000 true CANDIDA
 # Every class in the derived domain, each with a refused timestamp at height 12.
 DRIVEN_CLASSES=""
 for CBM_CLS in $(cal_class_domain); do
+  EXP_STEP="$(expected_step_for "$CBM_CLS")" || EXP_STEP=""
+  check "$CBM_CLS: has a pinned (class, step) pair" "yes" \
+    "$([[ -n "$EXP_STEP" ]] && echo yes || echo no)"
+  # The correlation itself is the property under review, so the row's class AND its
+  # step are asserted together rather than the class alone.
+  run_collection "" "$CBM_CLS"
+  check "  $CBM_CLS: clean row pair"               "$CBM_CLS|$EXP_STEP" "$(row_pair 12)"
+  # The same pair, now with a refused timestamp at height 12.
   run_collection 12 "$CBM_CLS"
-  check "$CBM_CLS: a refused timestamp is counted" "1 0 NO" "$COLLECT_SUMMARY"
+  check "  $CBM_CLS: refused row keeps its pair"   "$CBM_CLS|$EXP_STEP" "$(row_pair 12)"
+  check "  $CBM_CLS: a refused timestamp counted"  "1 0 NO" "$COLLECT_SUMMARY"
   # The fabrication check. A skipped call leaves ms/iv holding the PREVIOUS block's
   # values, and the row is written with them — timing that was never measured.
   check "  $CBM_CLS: no stale timing on the row"   "-|-" \
@@ -1095,7 +1134,7 @@ GROUP_NAMES=(gasreaders ceiling meta params delivery saturation stall drain conc
              attribution na namespace endpoints waits workload steps knee growthpolicy
              dbpolicy timing ingestion percentile deferral cardinality time address genesis
              contract verdict)
-PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 27 23 12 16 41 44 8 6 5 11 7 5 9 7)
+PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 27 23 12 16 41 53 8 6 5 11 7 5 9 7)
 
 EXPECTED_CHECKS=0
 for e in "${PER_GROUP_EXPECTED[@]}"; do EXPECTED_CHECKS=$(( EXPECTED_CHECKS + e )); done
