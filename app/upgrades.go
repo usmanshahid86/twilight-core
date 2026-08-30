@@ -106,6 +106,49 @@ var Upgrades = []Upgrade{
 		// fabricating state the released chain never had.
 		Name: "v0.2.0",
 	},
+	{
+		// The TW-006 controls merged after v0.2.0: the first-funding minimum in
+		// app/sendrestriction.go (#159) and the per-transaction bank-output cap in
+		// app/antehandler.go (#163). Both change transaction validity — a send the
+		// v0.2.0 binary accepts, a binary built from this source rejects — so they
+		// need a coordinated halt rather than a rolling restart.
+		//
+		// Named for the version it upgrades TO, per CONTRIBUTING.md. Released
+		// entries are append-only and may never be edited.
+		//
+		// This entry carries NOTHING, and unlike v0.2.0 that is not because its
+		// migration happens to be a no-op. v0.2.0 existed because CoreSlot moved
+		// from consensus version 1 to 2, and the boundary was what advanced the
+		// module version map. Nothing here moves a module version at all: coreslot
+		// stays 2, rewards 1, mining 1. RunMigrations will find no deltas and do
+		// nothing.
+		//
+		// That is the point rather than an omission. Both controls live in
+		// application wiring — a bank SendRestriction and an ante decorator — and
+		// take effect the instant the new binary runs, so this entry does not gate
+		// them on the height; a node swapped early enforces early. What the
+		// boundary provides is a FLOOR the network agrees on, and the ability to
+		// execute the plan at all: a node reaching the height without this name
+		// compiled in halts and cannot resume until it is supplied.
+		//
+		// Note it is EXECUTION this enables, not scheduling. A plan naming an
+		// upgrade no binary carries can still be scheduled, queried and canceled
+		// — deliberately, per the reasoning in x/coreslot's ScheduleUpgrade and
+		// ADR-0003 §1b, because a scheduling-time handler check would halt the
+		// network one block later.
+		//
+		// No StoreUpgrades: no store is added, renamed or deleted.
+		//
+		// No Migrate: there is no chain-specific state to transform. A body here
+		// would be fabricating state the released chain never had.
+		//
+		// TestThisReleaseMovesNoModuleVersionAndMountsNoNewModule pins the
+		// assumption across the WHOLE module map, not only the custom modules: a
+		// new module needs StoreUpgrades and an SDK-side version bump needs a
+		// migration, and either would make this empty entry wrong. If it fails,
+		// reconcile before the tag — after release the entry may never be edited.
+		Name: "v0.3.0",
+	},
 }
 
 // ValidateUpgrades rejects a registry that cannot be executed unambiguously.
