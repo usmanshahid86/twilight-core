@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	gogoproto "github.com/cosmos/gogoproto/proto"
 	"github.com/spf13/cobra"
@@ -21,6 +22,19 @@ import (
 // responses would be a second, divergent account of the same state. It follows the
 // repository's existing convention of a top-level `mining-query` command.
 func GetQueryCmd() *cobra.Command {
+	cmd, _ := buildQueryCmd()
+	return cmd
+}
+
+// querySpec pairs a registered command with the request it builds; see the
+// equivalent in x/rewards for why the pairs are exposed.
+type querySpec struct {
+	name  string
+	build func(*cobra.Command, []string) (interface{}, error)
+}
+
+func buildQueryCmd() (*cobra.Command, []querySpec) {
+	var specs []querySpec
 	cmd := &cobra.Command{
 		Use:                        "mining-query",
 		Short:                      "Query mining settlement state",
@@ -28,6 +42,7 @@ func GetQueryCmd() *cobra.Command {
 		SuggestionsMinimumDistance: 2,
 	}
 	add := func(use string, args cobra.PositionalArgs, paginated bool, request func(*cobra.Command, []string) (interface{}, error)) *cobra.Command {
+		specs = append(specs, querySpec{name: strings.Fields(use)[0], build: request})
 		q := &cobra.Command{Use: use, Args: args, RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientQueryContext(cmd)
 			if err != nil {
@@ -134,14 +149,20 @@ func GetQueryCmd() *cobra.Command {
 			return &types.QueryValidateEconomicAddressRequest{Address: a[0]}, nil
 		}),
 	)
-	return cmd
+	return cmd, specs
 }
 
 // dispatchQuery routes a typed request to the generated query client.
 //
-// A type switch rather than reflection, so a query added to the service without a
-// command here fails to compile rather than failing at run time in an operator's
-// hands.
+// A type switch rather than reflection, so the mapping is explicit and greppable.
+//
+// It does NOT give a compile-time guarantee, and the comment here used to claim it
+// did. Go type switches are not exhaustive: a query added to the service, or a
+// command registered without a case below, compiles perfectly and falls through to
+// the error at the bottom — which is exactly how three rewards commands shipped
+// having never returned data (#136). What actually holds the mapping together is
+// the pinned command/request/RPC contract asserted in the tests, and the default
+// branch here, which turns a gap into a named error rather than a nil response.
 func dispatchQuery(ctx context.Context, qc types.QueryClient, req interface{}) (gogoproto.Message, error) {
 	switch r := req.(type) {
 	case *types.QuerySettlementRequest:
