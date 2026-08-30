@@ -212,7 +212,13 @@ block-gas-faults:
 # max_gas is still -1. Requires the launch decisions as input; it refuses to
 # infer them, because a file checked against itself proves nothing.
 #
-#   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 make check-genesis GENESIS=path/to/genesis.json
+#   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 \
+#   GC_MAX_GAS=<ratified value> GC_MIN_ACTIVE_SLOTS=2 \
+#     make check-genesis GENESIS=path/to/genesis.json
+#
+# GC_MAX_GAS has no default on purpose: `twilightd init` writes -1, and no finite
+# value is ratified in this repository (#160, #107, #167). The verifier must never
+# be the thing that supplies one.
 check-genesis: build
 	@test -n "$(GENESIS)" || { echo "set GENESIS=<path to genesis.json>" >&2; exit 2; }
 	./scripts/check-genesis.sh "$(GENESIS)" --bin build/twilightd

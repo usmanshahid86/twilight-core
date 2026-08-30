@@ -21,6 +21,7 @@
 #
 # Usage:
 #   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 \
+#   GC_MAX_GAS=<ratified> GC_MIN_ACTIVE_SLOTS=2 \
 #     scripts/check-genesis.sh path/to/genesis.json [--bin build/twilightd]
 #
 set -euo pipefail
@@ -43,22 +44,42 @@ command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
 
 # ---- decisions the caller must state ------------------------------------------------------
 #
-# Required, with no default. A launch value this script invented would be a value
-# nobody chose.
+# THE RULE FOR WHAT MAY BE DEFAULTED, stated so it can be argued with:
+#
+#   Default only to a value the CODEBASE ITSELF establishes. Require everything
+#   else.
+#
+# Defaulting to "you did not change what the binary ships" is verifiable from
+# source, and a reader can check it. Defaulting to a number chosen in a discussion
+# is this script inventing a launch decision — which is exactly what it exists to
+# stop, and the failure would be silent: a run that passes because the caller
+# omitted a variable reads identically to one that passes because the value was
+# ratified.
+#
+# Required, no default, because the codebase establishes no value for them:
+#
+#   GC_CHAIN_ID        no default exists anywhere.
+#   GC_ACTIVE_SLOTS    a genesis cannot state how many slots were INTENDED.
+#   GC_MAX_GAS         `twilightd init` writes -1 (cometbft types/params.go).
+#                      Any finite value is a ratification decision, and as of
+#                      #160, #107 and #167 no value is ratified. This script must
+#                      never be the thing that supplies one.
+#   GC_MIN_ACTIVE_SLOTS  the shipped default is 1 (coreslot validation.go);
+#                      anything else is a deployment choice about liveness.
 : "${GC_CHAIN_ID:?set GC_CHAIN_ID to the chain-id this launch decided on}"
 : "${GC_ACTIVE_SLOTS:?set GC_ACTIVE_SLOTS to the number of slots that must be ACTIVE at genesis}"
+: "${GC_MAX_GAS:?set GC_MAX_GAS to the ratified block max_gas for this launch — twilightd init writes -1 and no value is ratified in-repo}"
+: "${GC_MIN_ACTIVE_SLOTS:?set GC_MIN_ACTIVE_SLOTS to the active-slot floor this launch decided on — the shipped default is 1}"
 
-# Defaulted decisions. These carry the values worked out for this launch; override
-# any that changed.
-GC_MAX_GAS="${GC_MAX_GAS:-50000000}"
-GC_MIN_ACTIVE_SLOTS="${GC_MIN_ACTIVE_SLOTS:-2}"
-GC_EPOCH_LENGTH_BLOCKS="${GC_EPOCH_LENGTH_BLOCKS:-360}"
-GC_MAX_SUPPLY="${GC_MAX_SUPPLY:-21000000000000}"
-GC_INITIAL_BLOCK_SUBSIDY="${GC_INITIAL_BLOCK_SUBSIDY:-416190}"
-GC_DISTRIBUTION_METHOD="${GC_DISTRIBUTION_METHOD:-DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS}"
-GC_TREASURY_ADDRESS="${GC_TREASURY_ADDRESS:-}"
-GC_EMISSION_TREASURY_SHARE_BPS="${GC_EMISSION_TREASURY_SHARE_BPS:-0}"
-GC_NATIVE_DENOM="${GC_NATIVE_DENOM:-utwlt}"
+# Defaulted, and every default below is the SHIPPED value, cited so the claim is
+# checkable rather than asserted. Override any this deployment changed.
+GC_EPOCH_LENGTH_BLOCKS="${GC_EPOCH_LENGTH_BLOCKS:-360}"                                  # rewards DefaultEpochLengthBlocks
+GC_MAX_SUPPLY="${GC_MAX_SUPPLY:-21000000000000}"                                         # rewards DefaultMaxSupply
+GC_INITIAL_BLOCK_SUBSIDY="${GC_INITIAL_BLOCK_SUBSIDY:-416190}"                           # rewards DefaultInitialBlockSubsidy
+GC_DISTRIBUTION_METHOD="${GC_DISTRIBUTION_METHOD:-DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS}"  # rewards DefaultParams
+GC_TREASURY_ADDRESS="${GC_TREASURY_ADDRESS:-}"                                           # rewards DefaultParams (empty)
+GC_EMISSION_TREASURY_SHARE_BPS="${GC_EMISSION_TREASURY_SHARE_BPS:-0}"                    # rewards DefaultParams
+GC_NATIVE_DENOM="${GC_NATIVE_DENOM:-utwlt}"                                              # appparams.NativeBaseDenom
 # Not a genesis value. Used only to project the emission schedule, because the
 # schedule depends on real block time and genesis cannot record it.
 GC_BLOCK_TIME_SECONDS="${GC_BLOCK_TIME_SECONDS:-5}"

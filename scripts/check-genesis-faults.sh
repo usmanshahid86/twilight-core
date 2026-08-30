@@ -117,7 +117,7 @@ record_labels() {
 run_checker() { # run_checker <genesis> [extra env assignments...] -> writes $WORK/out, returns exit code
   local g="$1"; shift
   local rc=0
-  env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 "$@" \
+  env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 GC_MAX_GAS=50000000 GC_MIN_ACTIVE_SLOTS=2 "$@" \
     "$CHECKER" "$g" --bin "$BIN" >"$WORK/out" 2>&1 || rc=$?
   record_labels
   return $rc
@@ -359,20 +359,31 @@ mutate "something only the chain itself rejects" \
 # to abort rather than default.
 echo
 echo "==> required decisions must abort, not default"
-for var in GC_CHAIN_ID GC_ACTIVE_SLOTS; do
+# All four required inputs, each omitted in turn while the other three are supplied,
+# so the abort is attributable to THAT variable rather than to a generally broken
+# invocation.
+#
+# GC_MAX_GAS matters most here. It has no shipped default — `twilightd init` writes
+# -1 — so a default would be this script inventing a ratification decision that
+# #160, #107 and #167 all say has not been made. A run passing because the caller
+# forgot the variable is indistinguishable from one passing because the value was
+# ratified, which is the exact confusion this tool exists to prevent.
+for var in GC_CHAIN_ID GC_ACTIVE_SLOTS GC_MAX_GAS GC_MIN_ACTIVE_SLOTS; do
   rc=0
-  if [[ "$var" == "GC_CHAIN_ID" ]]; then
-    env -u GC_CHAIN_ID GC_ACTIVE_SLOTS=2 "$CHECKER" "$GOOD" --bin "$BIN" >"$WORK/out" 2>&1 || rc=$?
-  else
-    env -u GC_ACTIVE_SLOTS GC_CHAIN_ID="$CHAIN_ID" "$CHECKER" "$GOOD" --bin "$BIN" >"$WORK/out" 2>&1 || rc=$?
-  fi
+  env -u "$var" \
+    $([[ "$var" != GC_CHAIN_ID ]]         && echo "GC_CHAIN_ID=$CHAIN_ID") \
+    $([[ "$var" != GC_ACTIVE_SLOTS ]]     && echo "GC_ACTIVE_SLOTS=2") \
+    $([[ "$var" != GC_MAX_GAS ]]          && echo "GC_MAX_GAS=50000000") \
+    $([[ "$var" != GC_MIN_ACTIVE_SLOTS ]] && echo "GC_MIN_ACTIVE_SLOTS=2") \
+    "$CHECKER" "$GOOD" --bin "$BIN" >"$WORK/out" 2>&1 || rc=$?
   if (( rc != 0 )); then pass "unset $var aborts"
   else fail "unset $var aborts" "checker ran anyway and exited 0"; fi
 done
 
 # Running without the chain's own validator must not be reported as a clean pass.
 rc=0
-env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 "$CHECKER" "$GOOD" >"$WORK/out" 2>&1 || rc=$?
+env GC_CHAIN_ID="$CHAIN_ID" GC_ACTIVE_SLOTS=2 GC_MAX_GAS=50000000 GC_MIN_ACTIVE_SLOTS=2 \
+  "$CHECKER" "$GOOD" >"$WORK/out" 2>&1 || rc=$?
 if (( rc != 0 )); then pass "omitting --bin is not a clean pass"
 else fail "omitting --bin is not a clean pass" "checker exited 0 without running twilightd validate"; fi
 
