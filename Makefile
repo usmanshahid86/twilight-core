@@ -1,4 +1,4 @@
-.PHONY: build build-release check-release-stamping check-cli-surface check-vulncheck-pin release-upgrade-faults release-upgrade-rehearsal test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-block-gas-drill block-gas-faults localnet-load-calibration localnet-rewards-soak localnet-agree \
+.PHONY: build build-release check-release-stamping check-cli-surface check-vulncheck-pin release-upgrade-faults release-upgrade-rehearsal test fmt lint vet vuln tidy consensus-vectors proto proto-descriptor localnet-init localnet-smoke localnet-rewards-smoke localnet-rewards-epoch-smoke localnet-settlement-smoke localnet-quorum-table localnet-validator-growth localnet-validator-departures validator-set-study localnet-join-and-settle localnet-settlement-matrix localnet-upgrade-drill localnet-authority-rotation-drill localnet-export-restore-drill localnet-export-restore-faults localnet-block-gas-drill block-gas-faults check-genesis check-genesis-faults localnet-load-calibration localnet-rewards-soak localnet-agree \
 	api-smoke drill-lifecycle drill-restart-rotation drill-quorum drills
 
 # Version and commit are stamped at link time; the chain and binary names are
@@ -205,6 +205,23 @@ localnet-block-gas-drill:
 # the half that runs in CI; the drill above needs a localnet and does not.
 block-gas-faults:
 	./scripts/localnet/block-gas-drill-faults.sh
+
+# #171: verify a genesis file before it is distributed to operators. Most of what
+# matters in genesis is a hand edit — every rewards, mining and coreslot
+# parameter, and block.max_gas — and `twilightd validate` passes a genesis whose
+# max_gas is still -1. Requires the launch decisions as input; it refuses to
+# infer them, because a file checked against itself proves nothing.
+#
+#   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 make check-genesis GENESIS=path/to/genesis.json
+check-genesis:
+	@test -n "$(GENESIS)" || { echo "set GENESIS=<path to genesis.json>" >&2; exit 2; }
+	./scripts/check-genesis.sh "$(GENESIS)" --bin build/twilightd
+
+# Proves every check in check-genesis.sh fires on its own fault. Builds its
+# baseline genesis with the real binary rather than a committed fixture, starts
+# no chain, and runs in CI — a verifier that stops verifying reports GREEN.
+check-genesis-faults:
+	./scripts/check-genesis-faults.sh
 
 # #160/TW-004: the measurement instrument a block.max_gas value has to be chosen
 # from. It keeps three things apart — whether the workload completed, whether the

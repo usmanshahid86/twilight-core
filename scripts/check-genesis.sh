@@ -1,0 +1,313 @@
+#!/usr/bin/env bash
+#
+# check-genesis.sh — verify a genesis file against the launch decisions before it
+# is distributed to operators.
+#
+# This exists because most of what matters in genesis has NO tooling behind it.
+# `twilightd init` writes defaults, `coreslot-genesis` writes authorities and
+# slots, and everything else — every rewards parameter, every mining settlement
+# parameter, every coreslot parameter, and block.max_gas — is a hand edit of the
+# JSON. A hand edit is exactly the thing that needs checking back.
+#
+# THREE LAYERS, and they are deliberately separate:
+#
+#   1. NATIVE      the chain's own validators, which are authoritative
+#   2. INVARIANT   rules that are true of any correct fresh genesis
+#   3. DECISION    the values THIS launch chose, supplied by the caller
+#
+# A decision cannot be inferred from the file — checking a file against itself
+# proves nothing. Required decisions must be supplied or this aborts. It never
+# guesses, and it never treats "the default was left in place" as a decision.
+#
+# Usage:
+#   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 \
+#     scripts/check-genesis.sh path/to/genesis.json [--bin build/twilightd]
+#
+set -euo pipefail
+
+GENESIS="${1:-}"
+BIN=""
+shift || true
+while (( $# )); do
+  case "$1" in
+    --bin) BIN="${2:-}"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+[[ -n "$GENESIS" ]] || { echo "usage: $0 <genesis.json> [--bin <twilightd>]" >&2; exit 2; }
+[[ -f "$GENESIS" ]] || { echo "no such genesis file: $GENESIS" >&2; exit 2; }
+command -v jq >/dev/null || { echo "jq is required" >&2; exit 2; }
+
+# ---- decisions the caller must state ------------------------------------------------------
+#
+# Required, with no default. A launch value this script invented would be a value
+# nobody chose.
+: "${GC_CHAIN_ID:?set GC_CHAIN_ID to the chain-id this launch decided on}"
+: "${GC_ACTIVE_SLOTS:?set GC_ACTIVE_SLOTS to the number of slots that must be ACTIVE at genesis}"
+
+# Defaulted decisions. These carry the values worked out for this launch; override
+# any that changed.
+GC_MAX_GAS="${GC_MAX_GAS:-50000000}"
+GC_MIN_ACTIVE_SLOTS="${GC_MIN_ACTIVE_SLOTS:-2}"
+GC_EPOCH_LENGTH_BLOCKS="${GC_EPOCH_LENGTH_BLOCKS:-360}"
+GC_MAX_SUPPLY="${GC_MAX_SUPPLY:-21000000000000}"
+GC_INITIAL_BLOCK_SUBSIDY="${GC_INITIAL_BLOCK_SUBSIDY:-416190}"
+GC_DISTRIBUTION_METHOD="${GC_DISTRIBUTION_METHOD:-DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS}"
+GC_TREASURY_ADDRESS="${GC_TREASURY_ADDRESS:-}"
+GC_EMISSION_TREASURY_SHARE_BPS="${GC_EMISSION_TREASURY_SHARE_BPS:-0}"
+GC_NATIVE_DENOM="${GC_NATIVE_DENOM:-utwlt}"
+# Not a genesis value. Used only to project the emission schedule, because the
+# schedule depends on real block time and genesis cannot record it.
+GC_BLOCK_TIME_SECONDS="${GC_BLOCK_TIME_SECONDS:-5}"
+
+PASS=0; FAIL=0; SECTION=""
+
+section() { SECTION="$1"; printf '\n\033[1m%s\033[0m\n' "$1"; }
+ok()   { PASS=$((PASS+1)); printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
+bad()  { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m  %s\n' "$1"; [[ -n "${2:-}" ]] && printf '        %s\n' "$2"; }
+note() { printf '  \033[36mnote\033[0m  %s\n' "$1"; }
+
+# jq read that fails closed: a missing path becomes __MISSING__ rather than an
+# empty string that would silently compare equal to an empty expectation.
+#
+# Deliberately NOT `jq -e`. That flag sets exit status 1 when the OUTPUT VALUE is
+# false or null, so a legitimate `false` — allow_self_registration, every pause
+# flag — reads as missing. `//` is wrong for the same reason: it fires on false
+# as well as null. So the status is used only for evaluation errors, and a JSON
+# null is mapped explicitly.
+j() {
+  local out rc
+  out="$(jq -r "$1" "$GENESIS" 2>/dev/null)"; rc=$?
+  if (( rc != 0 )) || [[ "$out" == "null" ]]; then
+    echo "__MISSING__"
+    return 0
+  fi
+  printf '%s' "$out"
+}
+
+eq() { # eq <label> <expected> <actual>
+  if [[ "$2" == "$3" ]]; then ok "$1 = $3"
+  else bad "$1" "expected: $2
+        actual:   $3"; fi
+}
+
+truthy() { # truthy <label> <jq-boolean-expression> <detail-on-fail>
+  if jq -e "$2" "$GENESIS" >/dev/null 2>&1; then ok "$1"
+  else bad "$1" "${3:-}"; fi
+}
+
+printf '\033[1mcheck-genesis\033[0m  %s\n' "$GENESIS"
+
+# ---- 1. native validation ------------------------------------------------------------------
+#
+# The chain's own answer. Everything below is a cross-check that produces a better
+# message; nothing below overrides this.
+section "1. native validation (authoritative)"
+if [[ -n "$BIN" ]]; then
+  [[ -x "$BIN" ]] || { echo "binary not executable: $BIN" >&2; exit 2; }
+  if "$BIN" validate "$GENESIS" >/tmp/gc-validate.$$ 2>&1; then
+    ok "twilightd validate"
+  else
+    bad "twilightd validate" "$(tail -3 /tmp/gc-validate.$$)"
+  fi
+  rm -f /tmp/gc-validate.$$
+else
+  note "no --bin given; the chain's own validator was NOT run. Supply --bin build/twilightd."
+fi
+
+# ---- 2. fresh-genesis invariants ------------------------------------------------------------
+#
+# A fresh genesis is not merely a valid one: it must carry no history. These are the
+# rules x/rewards and x/mining enforce at InitGenesis, checked here so a violation
+# is named rather than surfacing as a start-up failure.
+section "2. fresh-genesis invariants"
+eq "rewards.state.current_epoch"              "1" "$(j '.app_state.rewards.state.current_epoch')"
+eq "rewards.state.cumulative_emitted"         "0" "$(j '.app_state.rewards.state.cumulative_emitted')"
+eq "rewards.state.carry_forward_remainder"    "0" "$(j '.app_state.rewards.state.carry_forward_remainder')"
+eq "rewards.open_reward_enabled_blocks"       "0" "$(j '.app_state.rewards.open_reward_enabled_blocks')"
+eq "rewards.outstanding_entitlement_liability" "0" "$(j '.app_state.rewards.outstanding_entitlement_liability')"
+eq "rewards.has_pending_params"           "false" "$(j '.app_state.rewards.has_pending_params')"
+eq "rewards.pause_state.current_paused"   "false" "$(j '.app_state.rewards.pause_state.current_paused')"
+eq "rewards.pause_state.has_pending"      "false" "$(j '.app_state.rewards.pause_state.has_pending')"
+
+eq "rewards.epoch_config_versions count"      "1" "$(j '.app_state.rewards.epoch_config_versions | length')"
+eq "rewards.reward_config_versions count"     "1" "$(j '.app_state.rewards.reward_config_versions | length')"
+eq "mining.settlement_params_versions count"  "1" "$(j '.app_state.mining.settlement_params_versions | length')"
+
+for s in rewards.scheduled_epoch_configs rewards.scheduled_reward_configs \
+         mining.scheduled_settlement_params mining.scheduled_distribution_modes \
+         mining.scheduled_selection_params; do
+  eq "$s is empty" "0" "$(j ".app_state.${s} | length")"
+done
+eq "rewards.finalized_epochs is empty" "0" "$(j '.app_state.rewards.finalized_epochs | length')"
+eq "rewards.slot_entitlements is empty" "0" "$(j '.app_state.rewards.slot_entitlements | length')"
+eq "mining.settlements is empty"        "0" "$(j '.app_state.mining.settlements | length')"
+
+# ---- 3. mirror consistency -------------------------------------------------------------------
+#
+# THE hand-edit trap. Three economic values and the epoch length each live in TWO
+# places: the params document, and the canonical version-1 history entry that
+# actually governs. Editing one and not the other is the single most likely
+# mistake in a hand-cut genesis, and the version entry is the one that wins.
+section "3. mirror consistency (params vs canonical version 1)"
+eq "epoch_length_blocks mirrors" \
+   "$(j '.app_state.rewards.params.epoch_length_blocks')" \
+   "$(j '.app_state.rewards.epoch_config_versions[0].epoch_length_blocks')"
+eq "initial_block_subsidy mirrors" \
+   "$(j '.app_state.rewards.params.initial_block_subsidy')" \
+   "$(j '.app_state.rewards.reward_config_versions[0].initial_block_subsidy')"
+eq "emission_treasury_share_bps mirrors" \
+   "$(j '.app_state.rewards.params.emission_treasury_share_bps')" \
+   "$(j '.app_state.rewards.reward_config_versions[0].emission_treasury_share_bps')"
+eq "treasury_address mirrors" \
+   "$(j '.app_state.rewards.params.treasury_address')" \
+   "$(j '.app_state.rewards.reward_config_versions[0].treasury_address')"
+eq "epoch anchor starts at initial_height" \
+   "$(j '.initial_height')" \
+   "$(j '.app_state.rewards.epoch_config_versions[0].effective_start_height')"
+
+# ---- 4. immutable bounds ---------------------------------------------------------------------
+#
+# Ratified in app/params/bounds.go. Genesis is the last point these can be chosen;
+# afterwards they need an upgrade, so a value outside the interval must be caught
+# here rather than at first block.
+section "4. immutable bounds (app/params/bounds.go)"
+truthy "epoch_length_blocks within [360,720]" \
+  '(.app_state.rewards.params.epoch_length_blocks|tonumber) as $v | $v >= 360 and $v <= 720' \
+  "found $(j '.app_state.rewards.params.epoch_length_blocks')"
+truthy "emission_treasury_share_bps <= 5000" \
+  '(.app_state.rewards.params.emission_treasury_share_bps|tonumber) <= 5000' \
+  "found $(j '.app_state.rewards.params.emission_treasury_share_bps')"
+truthy "max_recipients_per_chunk within [1,32]" \
+  '(.app_state.mining.settlement_params_versions[0].max_recipients_per_chunk|tonumber) as $v | $v >= 1 and $v <= 32' \
+  "found $(j '.app_state.mining.settlement_params_versions[0].max_recipients_per_chunk')"
+truthy "max_chunks_per_settlement within [1,4]" \
+  '(.app_state.mining.settlement_params_versions[0].max_chunks_per_settlement|tonumber) as $v | $v >= 1 and $v <= 4' \
+  "found $(j '.app_state.mining.settlement_params_versions[0].max_chunks_per_settlement')"
+truthy "min_recipient_payout_amount >= 10000" \
+  '(.app_state.mining.settlement_params_versions[0].min_recipient_payout_amount|tonumber) >= 10000' \
+  "found $(j '.app_state.mining.settlement_params_versions[0].min_recipient_payout_amount')"
+truthy "settlement_window_epochs >= 1" \
+  '(.app_state.mining.settlement_params_versions[0].settlement_window_epochs|tonumber) >= 1' \
+  "found $(j '.app_state.mining.settlement_params_versions[0].settlement_window_epochs')"
+truthy "max_active_slots <= 100" \
+  '(.app_state.coreslot.params.max_active_slots|tonumber) <= 100' \
+  "found $(j '.app_state.coreslot.params.max_active_slots')"
+truthy "selection_policy_update_cooldown_blocks >= 360" \
+  '(.app_state.coreslot.params.selection_policy_update_cooldown_blocks|tonumber) >= 360' \
+  "found $(j '.app_state.coreslot.params.selection_policy_update_cooldown_blocks')"
+
+# ---- 5. the traps ------------------------------------------------------------------------------
+section "5. traps"
+
+# The treasury trap. An empty address is only legal while both shares are zero, and
+# BOTH the share and the address are frozen after genesis. Launching at zero with no
+# address means no treasury share can ever be introduced without an upgrade.
+TREAS_ADDR="$(j '.app_state.rewards.params.treasury_address')"
+EMIS_BPS="$(j '.app_state.rewards.params.emission_treasury_share_bps')"
+FEE_BPS="$(j '.app_state.rewards.params.fee_treasury_share_bps')"
+if [[ "$EMIS_BPS" != "0" || "$FEE_BPS" != "0" ]]; then
+  if [[ "$TREAS_ADDR" =~ ^twilight1[0-9a-z]{38,58}$ ]]; then
+    ok "treasury address present for a non-zero share"
+  else
+    bad "treasury address present for a non-zero share" "shares are non-zero but treasury_address is '$TREAS_ADDR'"
+  fi
+elif [[ -z "$TREAS_ADDR" ]]; then
+  note "treasury_address is EMPTY with zero shares. Legal — but the address and the share are"
+  note "both frozen at genesis, so no treasury share can be introduced later without an upgrade."
+else
+  ok "treasury address set ahead of a zero share (keeps the option open)"
+fi
+
+# The restart trap. Genesis requires active >= min_active_slots. UpdateParams does
+# NOT check this, so a running chain can be pushed into a state its own export
+# cannot restart from. Checked here because this file may itself be an export.
+# Status is matched against the real enum (proto SlotStatus). An UNRECOGNISED
+# status is a hard failure rather than a slot that quietly counts as inactive:
+# guessing the spelling here once produced a zero active count on a genesis that
+# was in fact correct, which is the most dangerous possible direction for this
+# check to be wrong in.
+UNKNOWN_STATUS="$(jq -r '[.app_state.coreslot.slots[]?.status
+  | select(. != "SLOT_STATUS_UNSPECIFIED" and . != "SLOT_STATUS_PENDING"
+       and . != "SLOT_STATUS_ACTIVE"      and . != "SLOT_STATUS_INACTIVE"
+       and . != "SLOT_STATUS_SUSPENDED"   and . != "SLOT_STATUS_REMOVED")]
+  | unique | join(",")' "$GENESIS" 2>/dev/null || echo "__ERR__")"
+if [[ -n "$UNKNOWN_STATUS" ]]; then
+  bad "every slot status is a known SlotStatus value" "unrecognised: $UNKNOWN_STATUS"
+else
+  ok "every slot status is a known SlotStatus value"
+fi
+ACTIVE="$(jq -r '[.app_state.coreslot.slots[]? | select(.status=="SLOT_STATUS_ACTIVE")] | length' "$GENESIS" 2>/dev/null || echo 0)"
+MINA="$(j '.app_state.coreslot.params.min_active_slots')"
+MAXA="$(j '.app_state.coreslot.params.max_active_slots')"
+if [[ "$ACTIVE" -ge "$MINA" && "$ACTIVE" -le "$MAXA" ]]; then
+  ok "active slot count $ACTIVE within [$MINA,$MAXA]"
+else
+  bad "active slot count within [min,max]" "active=$ACTIVE min=$MINA max=$MAXA — this genesis will be REFUSED at start-up"
+fi
+
+# Invariant 5: utwlt is the only accounting denom; no display denom may leak into
+# an amount.
+eq "rewards native_denom" "$GC_NATIVE_DENOM" "$(j '.app_state.rewards.params.native_denom')"
+eq "rewards fee_denom"    "$GC_NATIVE_DENOM" "$(j '.app_state.rewards.params.fee_denom')"
+LEAKED="$(jq -r '[.app_state.bank.supply[]?.denom, .app_state.bank.balances[]?.coins[]?.denom] | map(select(. == "twlt" or . == "TWLT")) | length' "$GENESIS" 2>/dev/null || echo 0)"
+eq "no display denom in any bank amount" "0" "$LEAKED"
+
+# Block gas must be finite. This is TW-004 and nothing else writes it.
+MAXGAS="$(j '.consensus.params.block.max_gas')"
+if [[ "$MAXGAS" == "-1" ]]; then
+  bad "block.max_gas is finite" "max_gas is -1 (unlimited) — TW-004 is NOT addressed in this genesis"
+else
+  ok "block.max_gas is finite ($MAXGAS)"
+fi
+
+# ---- 6. launch decisions -----------------------------------------------------------------------
+section "6. launch decisions (supplied, not inferred)"
+eq "chain_id"                    "$GC_CHAIN_ID"                    "$(j '.chain_id')"
+eq "block.max_gas"               "$GC_MAX_GAS"                     "$MAXGAS"
+eq "active slots"                "$GC_ACTIVE_SLOTS"                "$ACTIVE"
+eq "min_active_slots"            "$GC_MIN_ACTIVE_SLOTS"            "$MINA"
+eq "epoch_length_blocks"         "$GC_EPOCH_LENGTH_BLOCKS"         "$(j '.app_state.rewards.params.epoch_length_blocks')"
+eq "max_supply"                  "$GC_MAX_SUPPLY"                  "$(j '.app_state.rewards.params.max_supply')"
+eq "initial_block_subsidy"       "$GC_INITIAL_BLOCK_SUBSIDY"       "$(j '.app_state.rewards.params.initial_block_subsidy')"
+eq "distribution_method"         "$GC_DISTRIBUTION_METHOD"         "$(j '.app_state.rewards.params.distribution_method')"
+eq "emission_treasury_share_bps" "$GC_EMISSION_TREASURY_SHARE_BPS" "$EMIS_BPS"
+eq "treasury_address"            "$GC_TREASURY_ADDRESS"            "$TREAS_ADDR"
+eq "allow_self_registration"     "false"                           "$(j '.app_state.coreslot.params.allow_self_registration')"
+
+AUTH="$(j '.app_state.coreslot.params.authority')"
+EAUTH="$(j '.app_state.coreslot.params.emergency_authority')"
+if [[ "$AUTH" =~ ^twilight1[0-9a-z]{38,58}$ ]]; then ok "authority has a well-formed address"
+else bad "authority has a well-formed address" "found '$AUTH'"; fi
+if [[ "$EAUTH" =~ ^twilight1[0-9a-z]{38,58}$ ]]; then ok "emergency_authority has a well-formed address"
+else bad "emergency_authority has a well-formed address" "found '$EAUTH'"; fi
+if [[ "$AUTH" != "$EAUTH" ]]; then ok "authority and emergency_authority are distinct"
+else bad "authority and emergency_authority are distinct" "both are $AUTH — one compromised key reaches both roles"; fi
+note "address checks are SHAPE only; this script does not verify a bech32 checksum."
+note "Run with --bin so the chain's own validator does."
+
+# ---- 7. what genesis cannot record --------------------------------------------------------------
+section "7. emission projection — NOT a genesis value"
+SUBSIDY="$(j '.app_state.rewards.params.initial_block_subsidy')"
+SUPPLY="$(j '.app_state.rewards.params.max_supply')"
+awk -v s="$SUBSIDY" -v m="$SUPPLY" -v bt="$GC_BLOCK_TIME_SECONDS" 'BEGIN {
+  spy = 31557600; bpy = spy / bt; y1 = s * bpy;
+  printf "  at %s-second blocks:\n", bt;
+  printf "    year-one emission   %.0f utwlt  (%.2f%% of max supply)\n", y1, 100*y1/m;
+  printf "    first halving       %.2f years  (at 50%% of max supply)\n", ((m/2)/s)*bt/spy;
+}'
+awk -v e="$(j '.app_state.rewards.params.epoch_length_blocks')" -v bt="$GC_BLOCK_TIME_SECONDS" \
+  'BEGIN { printf "    epoch length        %.1f minutes\n", e*bt/60 }'
+note "Block time is timeout_commit in each node's config.toml. It is NOT in genesis, and"
+note "CometBFT's default is 1s. If the nodes run 1s blocks, every number above is 5x off."
+
+# ---- summary ---------------------------------------------------------------------------------
+printf '\n\033[1msummary\033[0m  %d passed, %d failed\n' "$PASS" "$FAIL"
+if (( FAIL > 0 )); then
+  printf '\033[31mGENESIS NOT READY\033[0m — %d check(s) failed.\n' "$FAIL"
+  exit 1
+fi
+printf '\033[32mall checks passed\033[0m\n'
+[[ -n "$BIN" ]] || { printf '\033[33mbut the chain'"'"'s own validator was not run — re-run with --bin\033[0m\n'; exit 1; }
+exit 0
