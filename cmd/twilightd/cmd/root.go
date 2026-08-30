@@ -182,13 +182,24 @@ func nodeConfig() *cmtcfg.Config {
 // (server/util.go). A fresh `twilightd init` therefore already wrote 5s before
 // this existed, and removing this line today changes nothing an operator sees.
 //
-// What it changes is WHERE the value comes from. Without it, the block pacing
-// that sets this chain's monetary schedule is an SDK implementation detail that
-// happens to coincide with DefaultTargetBlockTimeSeconds, and a future SDK
-// revising its opinion would move the emission rate with no local signal. Setting
-// it here takes ownership: the schedule's block time and the node's pacing are
-// derived from ONE constant, and the SDK's override no longer applies because the
-// value it guards on is no longer the CometBFT default.
+// What it changes is WHERE the value comes from. Without it, the block pacing that
+// sets this chain's monetary schedule is an SDK implementation detail that happens
+// to coincide with DefaultTargetBlockTimeSeconds, and a future SDK revising its
+// opinion would move the emission rate with no local signal. Setting it here takes
+// ownership, and the SDK's override no longer applies because the value it guards
+// on is no longer the CometBFT default.
+//
+// # The limit of that coupling, stated precisely
+//
+// This binds the node's pacing to the Go DEFAULT constant, NOT to the chain's
+// configured target_block_time_seconds. It cannot bind to the configured value:
+// this runs in PersistentPreRunE, before any genesis file exists to read. So a
+// network launched with target_block_time_seconds = 10 still paces at 5s, and no
+// consensus rule notices — that field drives no computation anywhere.
+//
+// The genesis side of that gap is covered by scripts/check-genesis.sh, which
+// compares the declared target_block_time_seconds against the pacing operators
+// are actually told to run. It is the only place the two values meet.
 //
 // The test asserts the OUTCOME rather than this line, and so still fails if either
 // the SDK's opinion or the reward default moves.

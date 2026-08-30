@@ -135,16 +135,14 @@ func TestInitWritesCustomizedNodeConfig(t *testing.T) {
 			"the upstream default this exists to replace has moved; re-derive before touching this")
 
 		want := time.Duration(rewardstypes.DefaultTargetBlockTimeSeconds) * time.Second
+		// Deliberately NOT phrased as "the customization never reached the SDK".
+		// That cause cannot be established here — the SDK supplies the same value
+		// when nodeConfig sets nothing — and claiming it would send a reader
+		// chasing the wrong thing the day CometBFT moves its own default.
 		require.NotEqual(t, defaults.Consensus.TimeoutCommit, written.Consensus.TimeoutCommit,
-			"config.toml carries the upstream commit timeout — the customized node configuration never reached the SDK")
+			"the written pacing equals CometBFT's default, so nothing is pacing this chain deliberately")
 		require.Equal(t, want, written.Consensus.TimeoutCommit,
 			"the pacing a node writes must match the block time the reward schedule is written against")
-
-		// Held against the reward default rather than a literal 5s, so the two
-		// cannot drift: moving one without the other fails here.
-		require.Equal(t, uint64(written.Consensus.TimeoutCommit/time.Second),
-			rewardstypes.DefaultTargetBlockTimeSeconds,
-			"commit timeout and the reward schedule's assumed block time have diverged")
 	})
 
 	t.Run("bounding the queue did not introduce a fee", func(t *testing.T) {
