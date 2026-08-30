@@ -457,12 +457,32 @@ EPOCHLEN="$(j '.app_state.rewards.params.epoch_length_blocks')"
 # "division by zero" AFTER its own FAIL was recorded, so the summary and the
 # verdict were never printed and a real verification failure exited 2, the code
 # this script otherwise reserves for usage errors.
+# The rate below is PRE-HALVING and is NOT the year's emission unless the first
+# halving falls outside the year. Emission halves at 50% of max supply, so at fast
+# pacing the threshold is crossed mid-year and the year's total is lower than
+# rate x 1 year: at one-second blocks the shipped parameters halve near 9.6 months,
+# making year one ~56% where the bare rate reads 62.5%. Printing that rate as
+# "year-one emission" was simply wrong, so the two are now separate lines and the
+# year's total walks whatever tiers the year actually crosses.
 if is_num "$SUBSIDY" && is_num "$SUPPLY" && (( SUPPLY > 0 )) && is_num "$GC_BLOCK_TIME_SECONDS" && (( GC_BLOCK_TIME_SECONDS > 0 )); then
   awk -v s="$SUBSIDY" -v m="$SUPPLY" -v bt="$GC_BLOCK_TIME_SECONDS" 'BEGIN {
-    spy = 31557600; bpy = spy / bt; y1 = s * bpy;
+    spy = 31557600; bpy = spy / bt; rate = s * bpy;
+    halve_yr = ((m/2)/s)*bt/spy;
     printf "  at %s-second blocks:\n", bt;
-    printf "    year-one emission   %.0f utwlt  (%.2f%% of max supply)\n", y1, 100*y1/m;
-    printf "    first halving       %.2f years  (at 50%% of max supply)\n", ((m/2)/s)*bt/spy;
+    printf "    pre-halving rate    %.0f utwlt/year  (%.2f%% of max supply)\n", rate, 100*rate/m;
+    printf "    first halving       %.2f years  (at 50%% of max supply)\n", halve_yr;
+    if (halve_yr >= 1) {
+      printf "    year-one emission   %.2f%% of max supply  (no halving inside year one)\n", 100*rate/m;
+    } else {
+      # `sub` is an awk builtin, so the per-block subsidy is `cur`.
+      emitted = 0; cur = s; left = bpy; target = m/2; step = m/4;
+      while (left > 0 && emitted < m) {
+        need = (target - emitted) / cur;
+        if (need > left) { emitted += left * cur; left = 0; }
+        else { emitted = target; left -= need; cur = cur/2; target += step; step = step/2; }
+      }
+      printf "    year-one emission   %.2f%% of max supply  (BELOW the rate: a halving lands inside year one)\n", 100*emitted/m;
+    }
   }'
   if is_num "$EPOCHLEN"; then
     awk -v e="$EPOCHLEN" -v bt="$GC_BLOCK_TIME_SECONDS" \
