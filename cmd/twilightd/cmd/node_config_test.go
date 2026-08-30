@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	cmtcfg "github.com/cometbft/cometbft/config"
 	cmttypes "github.com/cometbft/cometbft/types"
@@ -15,6 +16,7 @@ import (
 	svrcmd "github.com/cosmos/cosmos-sdk/server/cmd"
 
 	"github.com/twilight-project/twilight-core/cmd/twilightd/cmd"
+	rewardstypes "github.com/twilight-project/twilight-core/x/rewards/types"
 )
 
 // The mempool bound is asserted against the config.toml the COMMAND WRITES, not
@@ -31,7 +33,7 @@ import (
 // the real pre-run handler and the real `init` write the real files, and reads
 // the values back off disk. What it proves is the whole chain of custody:
 // constant -> node configuration -> SDK -> config.toml on an operator's disk.
-func TestInitWritesBoundedMempoolConfig(t *testing.T) {
+func TestInitWritesCustomizedNodeConfig(t *testing.T) {
 	home := t.TempDir()
 
 	root := cmd.NewRootCmd()
@@ -109,6 +111,40 @@ func TestInitWritesBoundedMempoolConfig(t *testing.T) {
 		require.Equal(t, defaults.Mempool.Size, written.Mempool.Size)
 		require.Equal(t, 1048576, defaults.Mempool.MaxTxBytes)
 		require.Equal(t, defaults.Mempool.MaxTxBytes, written.Mempool.MaxTxBytes)
+	})
+
+	t.Run("blocks are paced at the interval the reward schedule assumes", func(t *testing.T) {
+		// An ECONOMIC assertion wearing operational clothes. Emission is a
+		// per-block subsidy and nothing in the state machine reads a clock, so the
+		// wall-clock emission rate is decided by block pacing alone: 5-second
+		// blocks give ~12.5% of supply in year one and a first halving near four
+		// years, 1-second blocks ~62% and under ten months.
+		//
+		// THIS ASSERTS THE OUTCOME, NOT THE CALL SITE, and the distinction is worth
+		// stating because it is easy to misread as a stronger proof than it is.
+		// Deleting nodeConfig's assignment does NOT turn this red today: the SDK
+		// overrides TimeoutCommit to 5s whenever the config it receives still holds
+		// CometBFT's 1s default (server/util.go), so both paths produce the same
+		// file. Verified by doing exactly that and diffing the written config.toml.
+		//
+		// It is worth having anyway, because what must not silently change is the
+		// VALUE an operator's node ends up pacing at. This fails if the SDK revises
+		// its opinion, if CometBFT moves its default, or if the reward schedule's
+		// assumed block time moves away from the node's — whichever supplies it.
+		require.Equal(t, 1000*time.Millisecond, defaults.Consensus.TimeoutCommit,
+			"the upstream default this exists to replace has moved; re-derive before touching this")
+
+		want := time.Duration(rewardstypes.DefaultTargetBlockTimeSeconds) * time.Second
+		require.NotEqual(t, defaults.Consensus.TimeoutCommit, written.Consensus.TimeoutCommit,
+			"config.toml carries the upstream commit timeout — the customized node configuration never reached the SDK")
+		require.Equal(t, want, written.Consensus.TimeoutCommit,
+			"the pacing a node writes must match the block time the reward schedule is written against")
+
+		// Held against the reward default rather than a literal 5s, so the two
+		// cannot drift: moving one without the other fails here.
+		require.Equal(t, uint64(written.Consensus.TimeoutCommit/time.Second),
+			rewardstypes.DefaultTargetBlockTimeSeconds,
+			"commit timeout and the reward schedule's assumed block time have diverged")
 	})
 
 	t.Run("bounding the queue did not introduce a fee", func(t *testing.T) {
