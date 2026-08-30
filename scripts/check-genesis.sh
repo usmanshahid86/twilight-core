@@ -22,6 +22,7 @@
 # Usage:
 #   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 \
 #   GC_MAX_GAS=<ratified> GC_MIN_ACTIVE_SLOTS=2 \
+#   GC_DISTRIBUTION_METHOD=DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS \
 #     scripts/check-genesis.sh path/to/genesis.json [--bin build/twilightd]
 #
 set -euo pipefail

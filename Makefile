@@ -214,6 +214,7 @@ block-gas-faults:
 #
 #   GC_CHAIN_ID=twilight-testnet-1 GC_ACTIVE_SLOTS=2 \
 #   GC_MAX_GAS=<ratified value> GC_MIN_ACTIVE_SLOTS=2 \
+#   GC_DISTRIBUTION_METHOD=DISTRIBUTION_METHOD_UNIFORM_ACTIVE_BLOCKS \
 #     make check-genesis GENESIS=path/to/genesis.json
 #
 # GC_MAX_GAS has no default on purpose: `twilightd init` writes -1, and no finite
