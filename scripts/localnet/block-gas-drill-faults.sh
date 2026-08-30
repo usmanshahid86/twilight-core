@@ -475,10 +475,10 @@ check "  and never passes ACTIVE_BLOCKS"         "0" \
 # shrink the timing distribution while the experiment keeps claiming authority.
 # Timing integrity has its own behavioural group below; these two only pin that the
 # rig still routes through the shared helper and still invalidates on a failure.
-check "the rig observes through the shared helper" "1" \
-  "$(grep -c 'if observe_block_time OBS_MS OBS_IV "\$PREV_MS" "\$tm"; then' "$CAL")"
+check "the rig ingests through the tested unit"   "1" \
+  "$(grep -c 'apply_timing_observation PREV_MS TIMING_UNREADABLE ms iv "\$tm"' "$CAL")"
 check "  and invalidates on any timing failure"    "1" \
-  "$(grep -c 'if (( TIMING_UNREADABLE > 0 )); then' "$CAL")"
+  "$(grep -c 'if ! timing_integrity_ok "\$TIMING_UNREADABLE"; then' "$CAL")"
 step_eligibility x 3 20 20 >/dev/null 2>&1
 check "unreadable counters refuse"               "nonzero" "$(rc_of $?)"
 # The review's scenario: step 1 complete and SAFE, step 2 one wave of three and
@@ -644,17 +644,17 @@ check "outputs stay unset on refusal"            "unset" "$(cat "$TMP/unset.txt"
 # A sequence containing a bad reading must be classified as a timing-integrity
 # FAILURE, not merely yield fewer samples. This drives the same helper the production
 # collection path calls.
+# Drives the PRODUCTION ingestion function, not a restatement of what it should do.
+# A faithful reimplementation of the consumer is not the consumer — that is the same
+# shape as the tests in #159 which drove a keeper path no transaction takes.
 observe_series() { # <ts>... -> "<usable-intervals> <failures>"
-  local prev="" ms iv usable=0 failed=0 t
+  local prev="" ctr=0 ms iv usable=0 t
   for t in "$@"; do
-    if observe_block_time ms iv "$prev" "$t"; then
-      [[ -n "$iv" ]] && usable=$(( usable + 1 ))
-      prev="$ms"
-    else
-      failed=$(( failed + 1 ))
+    if apply_timing_observation prev ctr ms iv "$t"; then
+      [[ "$iv" != "-" ]] && usable=$(( usable + 1 ))
     fi
   done
-  echo "$usable $failed"
+  echo "$usable $ctr"
 }
 check "a clean series yields intervals, no faults" "3 0" \
   "$(observe_series 2026-02-28T00:00:00Z 2026-02-28T00:00:01Z 2026-02-28T00:00:02Z 2026-02-28T00:00:03Z)"
@@ -690,12 +690,105 @@ check "  and no longer nulls inline"             "0" \
 # and the invalidation guard both intact while no refusal is ever counted, so the run
 # stays valid over a series that lost readings. Scoped to the lines that follow the
 # call rather than a free-floating grep.
-check "a refusal is counted where it happens"    "yes" \
-  "$(awk '/if observe_block_time OBS_MS OBS_IV/ { w = 8 } w-- > 0 && /TIMING_UNREADABLE=\$\(\( TIMING_UNREADABLE \+ 1 \)\)/ { f = 1 } END { print (f ? "yes" : "no") }' "$CAL")"
 check "the drill observes through the same helper" "1" \
   "$(grep -c 'observe_block_time OBS_MS OBS_GAP' "$DRILL_FILE")"
 check "  and no longer parses timestamps itself"   "0" \
   "$(grep -c 'rfc3339_to_ms' "$DRILL_FILE")"
+
+# ---------------------------------------------------------------------------------
+group ingestion "the calibration ingestion unit, executed rather than inspected"
+
+# The final false-green this closes: the refusal arm was an inline `else` in the
+# collection loop, and rewriting it to `elif (( 0 ))` left the observation call and the
+# counter line both present in the file while the branch never ran. Every lower-level
+# test stayed green, the live smoke had no refusals to expose it, and a rejected
+# reading silently stopped invalidating the run.
+#
+# These call the exact function production calls and inspect the state it left.
+
+ato() { # <prev> <failures> <ts> -> "<rc>|<prev>|<failures>|<row_ms>|<row_iv>"
+  local P="$1" F="$2" M="STALE" I="STALE" rc
+  apply_timing_observation P F M I "$3" && rc=0 || rc=$?
+  echo "$rc|$P|$F|$M|$I"
+}
+
+# A. first valid sample — a missing interval is absence, not failure
+check "A first sample: instant, no interval"     "0|1788004800000|0|1788004800000|-" \
+  "$(ato "" 0 2026-08-29T12:00:00Z)"
+# B. later valid sample — prev advances, interval is the delta, count untouched
+check "B later sample: advances, 1000ms"         "0|1788004801000|0|1788004801000|1000" \
+  "$(ato 1788004800000 0 2026-08-29T12:00:01Z)"
+# C. calendar-invalid — the exact case that used to slip through
+check "C calendar-invalid: counted, prev held"   "1|1788004800000|1||-" \
+  "$(ato 1788004800000 0 2026-02-31T00:00:00Z)"
+# D. equal timestamp
+check "D equal timestamp: counted, prev held"    "1|1788004800000|1||-" \
+  "$(ato 1788004800000 0 2026-08-29T12:00:00Z)"
+# E. backwards timestamp
+check "E backwards timestamp: counted"           "1|1788004801000|1||-" \
+  "$(ato 1788004801000 0 2026-08-29T12:00:00Z)"
+# F. malformed string
+check "F malformed string: counted"              "1|1788004800000|1||-" \
+  "$(ato 1788004800000 0 "29/08/2026 12:00:00")"
+# unreadable predecessor is a refusal too
+check "  unreadable predecessor: counted"        "1|not-a-number|1||-" \
+  "$(ato "not-a-number" 0 2026-08-29T12:00:01Z)"
+
+# G. failures ACCUMULATE rather than reset
+ATO_P=1788004800000; ATO_F=0; ATO_M=""; ATO_I=""
+apply_timing_observation ATO_P ATO_F ATO_M ATO_I 2026-02-31T00:00:00Z || true
+check "G first refusal counts"                   "1" "$ATO_F"
+apply_timing_observation ATO_P ATO_F ATO_M ATO_I 2026-02-30T00:00:00Z || true
+check "  a second accumulates, not resets"       "2" "$ATO_F"
+check "  and prev is still the trustworthy one"  "1788004800000" "$ATO_P"
+
+# H. refusal then a valid reading — measured against the LAST TRUSTWORTHY sample, so
+# the interval spans the gap rather than restarting from a rejected instant.
+ATO_P=""; ATO_F=0
+apply_timing_observation ATO_P ATO_F ATO_M ATO_I 2026-08-29T12:00:00Z || true
+apply_timing_observation ATO_P ATO_F ATO_M ATO_I 2026-02-31T00:00:00Z || true
+apply_timing_observation ATO_P ATO_F ATO_M ATO_I 2026-08-29T12:00:03Z || true
+check "H valid-invalid-valid: interval spans 3s" "3000" "$ATO_I"
+check "  with exactly one failure recorded"      "1" "$ATO_F"
+
+# Stale row values cannot survive a refusal: the helper clears them first.
+ATO_P=1788004800000; ATO_F=0; ATO_M="LEFTOVER"; ATO_I="9999"
+apply_timing_observation ATO_P ATO_F ATO_M ATO_I 2026-02-31T00:00:00Z || true
+check "stale row instant is cleared"             "" "$ATO_M"
+check "  and the stale interval too"             "-" "$ATO_I"
+
+# --- the authority chain, end to end, through production predicates ---
+check "0 failures is trustworthy timing"         "0" "$(timing_integrity_ok 0; echo $?)"
+check "1 failure is not"                         "1" "$(timing_integrity_ok 1; echo $?)"
+check "a corrupt count is not"                   "1" "$(timing_integrity_ok "x"; echo $?)"
+check "a negative count is not"                  "1" "$(timing_integrity_ok "-1"; echo $?)"
+# Refused observation -> failure count -> integrity verdict -> validity -> authority,
+# every link through the function production uses.
+ATO_P=1788004800000; ATO_F=0
+apply_timing_observation ATO_P ATO_F ATO_M ATO_I 2026-02-31T00:00:00Z || true
+ATO_VALID=YES; timing_integrity_ok "$ATO_F" || ATO_VALID=NO
+check "a refusal drives validity to NO"          "NO" "$ATO_VALID"
+check "  and nulls candidate, knee and bracket"  "null null false MEASUREMENT_INVALID" \
+  "$(candidate_authority "$ATO_VALID" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
+# Discriminating, not vacuous: the same inputs with clean timing keep the number.
+ATO_P=1788004800000; ATO_F=0
+apply_timing_observation ATO_P ATO_F ATO_M ATO_I 2026-08-29T12:00:01Z || true
+ATO_VALID=YES; timing_integrity_ok "$ATO_F" || ATO_VALID=NO
+check "clean timing keeps validity"              "YES" "$ATO_VALID"
+check "  and keeps the candidate"                "8512000 10640000 true CANDIDATE_READY_FOR_REVIEW" \
+  "$(candidate_authority "$ATO_VALID" BRACKETED 8512000 10640000 true COMPATIBLE WITHIN_POLICY)"
+
+# --- supplemental WIRING coverage ---
+#
+# Deliberately source-level and deliberately narrow. It is not the semantic proof —
+# the checks above are — but it is the only thing that catches production abandoning
+# the tested unit and going back to its own branch.
+check "production calls the tested unit"         "1" \
+  "$(grep -c 'apply_timing_observation PREV_MS TIMING_UNREADABLE ms iv "\$tm"' "$CAL")"
+check "  and keeps no inline counter branch"     "0" \
+  "$(grep -c 'TIMING_UNREADABLE=\$(( TIMING_UNREADABLE + 1 ))' "$CAL")"
+check "  and gates validity on the predicate"    "1" \
+  "$(grep -c 'if ! timing_integrity_ok "\$TIMING_UNREADABLE"; then' "$CAL")"
 
 # ---------------------------------------------------------------------------------
 group percentile "the tail statistic itself"
@@ -881,8 +974,9 @@ check "  and records PASS"                       "overall=PASS" "$(grep '^overal
 # them decoration.
 GROUP_NAMES=(gasreaders ceiling meta params delivery saturation stall drain concurrency
              attribution na namespace endpoints waits workload steps knee growthpolicy
-             dbpolicy timing percentile deferral cardinality time address genesis contract verdict)
-PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 27 23 12 16 42 8 6 5 11 7 5 9 7)
+             dbpolicy timing ingestion percentile deferral cardinality time address genesis
+             contract verdict)
+PER_GROUP_EXPECTED=(16 9 7 5 11 17 9 9 7 7 11 8 7 7 12 27 23 12 16 41 25 8 6 5 11 7 5 9 7)
 
 EXPECTED_CHECKS=0
 for e in "${PER_GROUP_EXPECTED[@]}"; do EXPECTED_CHECKS=$(( EXPECTED_CHECKS + e )); done

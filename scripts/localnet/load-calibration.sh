@@ -768,13 +768,15 @@ for (( h = COLLECT_FROM; h <= RAMP_MAX_HEIGHT; h++ )); do
   #
   # PREV_MS deliberately does NOT advance on failure, so the next block is measured
   # against the last trustworthy reading rather than against one that was rejected.
-  ms=""; iv="-"
-  if observe_block_time OBS_MS OBS_IV "$PREV_MS" "$tm"; then
-    ms="$OBS_MS"; PREV_MS="$OBS_MS"
-    [[ -n "$OBS_IV" ]] && iv="$OBS_IV"
-  else
-    TIMING_UNREADABLE=$(( TIMING_UNREADABLE + 1 ))
-  fi
+  #
+  # This is ONE CALL rather than an inline if/else on purpose. As an inline branch the
+  # refusal arm was unreachable-able: rewriting `else` to `elif (( 0 ))` left the real
+  # observation call and the counter line both present in the file while no rejected
+  # reading was ever counted, and every test still passed because none of them
+  # executed that arm. The fault suite now runs this exact function.
+  # `|| true` so a refused reading — a DATA-QUALITY failure — is recorded and the run
+  # still finishes writing its evidence and result before exiting invalid.
+  apply_timing_observation PREV_MS TIMING_UNREADABLE ms iv "$tm" || true
   acc="-"; dacc="-"
   # Coverage is counted over ACTIVE blocks on both sides. Sampling every block but
   # measuring the ratio against active ones only would report coverage above 100%,
@@ -806,7 +808,7 @@ done
 if (( UNREADABLE_BLOCKS > 0 )); then
   invalidate "$UNREADABLE_BLOCKS blocks in the measured range could not be read"
 fi
-if (( TIMING_UNREADABLE > 0 )); then
+if ! timing_integrity_ok "$TIMING_UNREADABLE"; then
   invalidate "$TIMING_UNREADABLE blocks failed timing observation (unparseable, calendar-invalid, or a zero/backwards interval); the timing distribution is not trustworthy"
 fi
 

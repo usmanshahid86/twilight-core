@@ -394,6 +394,72 @@ mempool_depth() {
   ' <<<"$resp" 2>/dev/null || return 1
 }
 
+# apply_timing_observation <prev-var> <failure-var> <row-ms-var> <row-interval-var> \
+#                          <timestamp>
+#
+# ONE ingestion step of the calibration collection loop, owning the WHOLE state
+# transition, as a function the rig itself calls.
+#
+# This exists because the transition used to be an inline if/else in the loop, and an
+# inline branch can be made unreachable without disturbing anything a test looks at:
+# rewriting `else` to `elif (( 0 ))` kept the real observation call and the counter
+# line both sitting in the file, kept every lower-level test green, and stopped a
+# rejected reading from ever invalidating the run. No source-pattern assertion closes
+# that — the text is all still present. Only executing this function and inspecting
+# the state it left behind does.
+#
+# observe_block_time stays the parser/interval primitive; this is the calibration
+# CONSUMER of it, and the helper owns clearing its own row outputs so a caller cannot
+# leave stale values from a previous block in them.
+#
+# First valid sample:  prev := parsed, failures unchanged, row_ms := parsed,
+#                      row_interval := "-" (absence, not a failure). Returns 0.
+# Later valid sample:  prev := parsed, failures unchanged, row_ms := parsed,
+#                      row_interval := strictly positive delta. Returns 0.
+# Refused:             prev UNCHANGED, failures += 1, row_ms := "", row_interval :=
+#                      "-". Returns non-zero.
+#
+# Refused covers malformed, calendar-invalid, equal, backwards, and an unreadable
+# predecessor. Not advancing prev on refusal is deliberate: the next block is then
+# measured against the last trustworthy reading rather than against one that was
+# rejected.
+#
+# Output variable names must not collide with this function's locals; callers pass
+# ordinary names (PREV_MS, TIMING_UNREADABLE, ms, iv) and the locals are prefixed.
+apply_timing_observation() {
+  local __prev="$1" __fail="$2" __ms="$3" __iv="$4" __ato_ts="$5"
+  local __ato_prev __ato_now __ato_iv __ato_cur
+  # Row outputs are cleared FIRST, so neither arm can leak a previous block's values.
+  printf -v "$__ms" '%s' ""
+  printf -v "$__iv" '%s' "-"
+  __ato_prev="${!__prev:-}"
+  if observe_block_time __ato_now __ato_iv "$__ato_prev" "$__ato_ts"; then
+    printf -v "$__ms" '%s' "$__ato_now"
+    [[ -n "$__ato_iv" ]] && printf -v "$__iv" '%s' "$__ato_iv"
+    printf -v "$__prev" '%s' "$__ato_now"
+    return 0
+  fi
+  __ato_cur="${!__fail:-0}"
+  [[ "$__ato_cur" =~ ^[0-9]+$ ]] || __ato_cur=0
+  printf -v "$__fail" '%s' "$(( __ato_cur + 1 ))"
+  return 1
+}
+
+# timing_integrity_ok <failure-count> — may the timing evidence be trusted at all?
+#
+# The predicate production uses to decide whether to invalidate, extracted so the
+# fault suite can chain the whole authority path — refused observation, failure count,
+# integrity verdict, measurement validity, candidate nullification — instead of
+# testing disconnected pieces of it.
+#
+# Anything that is not exactly "no failures" is a refusal, including a count that is
+# unreadable or negative: a corrupt counter is not evidence of clean timing.
+timing_integrity_ok() {
+  local n="${1:-}"
+  [[ "$n" =~ ^[0-9]+$ ]] || return 1
+  (( n == 0 ))
+}
+
 # ---- statistics -------------------------------------------------------------------
 #
 # A knee taken from a median hides exactly the behaviour that matters: a step where
