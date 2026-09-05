@@ -596,6 +596,49 @@ func listVersions[V any](
 	return records, pageRes, nil
 }
 
+// SettlementParamsForEpoch returns the settlement-parameter record the chain binds to
+// a reward epoch.
+//
+// The handler performs NO resolution of its own. It calls SettlementParamsForTarget —
+// the same method the EndBlock materialization path calls when it stamps a version
+// onto a settlement — so the answer cannot differ from what consensus will do. A
+// second implementation here, however carefully written, would be the duplication
+// this query exists to remove, one layer further in.
+//
+// Failures are corruption, not NotFound, for the same reason the neighboring handler
+// gives: a consumer told NotFound would reasonably read it as "no parameters
+// configured yet" and carry on, which is the wrong response from a chain that cannot
+// say which parameters govern an epoch.
+func (q queryServer) SettlementParamsForEpoch(
+	ctx context.Context, req *types.QuerySettlementParamsForEpochRequest,
+) (*types.QuerySettlementParamsForEpochResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "a request is required")
+	}
+	if req.Epoch == 0 {
+		return nil, status.Error(codes.InvalidArgument, "epoch numbers start at 1")
+	}
+
+	// Reported, not recomputed downstream: binding_epoch is diagnostic, and the
+	// bootstrap flag is the same fact the resolution below acts on.
+	bindingEpoch, bootstrap, err := bindingEpochForTarget(req.Epoch)
+	if err != nil {
+		return nil, corrupt(err)
+	}
+
+	params, err := q.SettlementParamsForTarget(ctx, req.Epoch)
+	if err != nil {
+		return nil, corrupt(err)
+	}
+
+	return &types.QuerySettlementParamsForEpochResponse{
+		Epoch:                   req.Epoch,
+		BindingEpoch:            bindingEpoch,
+		SettlementParamsVersion: &params,
+		Bootstrap:               bootstrap,
+	}, nil
+}
+
 // TargetEpochInterpretation returns the chain's own reading of a target epoch.
 //
 // # Why this is a query at all

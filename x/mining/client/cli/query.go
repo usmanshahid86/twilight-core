@@ -128,6 +128,13 @@ func buildQueryCmd() (*cobra.Command, []querySpec) {
 			}
 			return &types.QuerySettlementParamsVersionsRequest{Pagination: page}, nil
 		}),
+		add("settlement-params-for-epoch [epoch]", cobra.ExactArgs(1), false, func(_ *cobra.Command, a []string) (interface{}, error) {
+			epoch, err := strconv.ParseUint(a[0], 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			return &types.QuerySettlementParamsForEpochRequest{Epoch: epoch}, nil
+		}),
 		add("target-epoch-interpretation [target-epoch]", cobra.ExactArgs(1), false, func(_ *cobra.Command, a []string) (interface{}, error) {
 			// Zero is refused here by the same convention every other protocol
 			// identifier follows, so a typo costs no round trip. The server refuses
@@ -183,6 +190,8 @@ func dispatchQuery(ctx context.Context, qc types.QueryClient, req interface{}) (
 		return qc.SettlementParamsVersion(ctx, r)
 	case *types.QuerySettlementParamsVersionsRequest:
 		return qc.SettlementParamsVersions(ctx, r)
+	case *types.QuerySettlementParamsForEpochRequest:
+		return qc.SettlementParamsForEpoch(ctx, r)
 	case *types.QueryTargetEpochInterpretationRequest:
 		return qc.TargetEpochInterpretation(ctx, r)
 	case *types.QueryValidateEconomicAddressRequest:

@@ -68,6 +68,11 @@ func (c *recordingQueryClient) SettlementParamsVersions(_ context.Context, _ *ty
 	return &types.QuerySettlementParamsVersionsResponse{}, nil
 }
 
+func (c *recordingQueryClient) SettlementParamsForEpoch(_ context.Context, _ *types.QuerySettlementParamsForEpochRequest, _ ...grpc.CallOption) (*types.QuerySettlementParamsForEpochResponse, error) {
+	c.called = "SettlementParamsForEpoch"
+	return &types.QuerySettlementParamsForEpochResponse{}, nil
+}
+
 func (c *recordingQueryClient) TargetEpochInterpretation(_ context.Context, _ *types.QueryTargetEpochInterpretationRequest, _ ...grpc.CallOption) (*types.QueryTargetEpochInterpretationResponse, error) {
 	c.called = "TargetEpochInterpretation"
 	return &types.QueryTargetEpochInterpretationResponse{}, nil
