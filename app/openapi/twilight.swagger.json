@@ -2481,6 +2481,39 @@
         ]
       }
     },
+    "/twilight/mining/v1/settlement-params-for-epoch/{epoch}": {
+      "get": {
+        "summary": "SettlementParamsForEpoch returns the settlement-parameter record the chain binds\nto a reward epoch, resolved by the same call the EndBlock materialization path\nmakes when it stamps a version onto a settlement.",
+        "description": "It exists for the same reason TargetEpochInterpretation does. The binding rule and\nits bootstrap exception are consensus rules; a consumer that reimplements them to\nanswer \"which parameters govern epoch N\" agrees with the chain until the rule, the\noffset or the history moves, and then disagrees silently — as a wrong schedule\nrather than an error.\n\nFor an epoch beyond any scheduled change this answers what WOULD bind if nothing\nfurther lands. The effective_epoch inside the returned record is what a caller\nre-queries against to notice that something did.",
+        "operationId": "Query_SettlementParamsForEpoch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QuerySettlementParamsForEpochResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/googleRpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "epoch",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Query"
+        ]
+      }
+    },
     "/twilight/mining/v1/settlement-params-versions": {
       "get": {
         "operationId": "Query_SettlementParamsVersions",
@@ -5278,6 +5311,28 @@
         "settlement_clock": {
           "type": "string",
           "format": "uint64"
+        }
+      }
+    },
+    "v1QuerySettlementParamsForEpochResponse": {
+      "type": "object",
+      "properties": {
+        "epoch": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "binding_epoch": {
+          "type": "string",
+          "format": "uint64",
+          "description": "Which boundary the answer was resolved at: 0 for bootstrap targets, epoch - 2\notherwise.\n\nDIAGNOSTIC, exactly as in TargetEpochInterpretation. It lets an operator audit\nwhere the answer came from; it is not a second authority, and a consumer that\nrecomputes anything from it has reintroduced the copy this query removes."
+        },
+        "settlement_params_version": {
+          "$ref": "#/definitions/miningV1SettlementParamsVersion",
+          "description": "The full bound record, so a consumer maps it into its own snapshot rather than\nreading fields this response chose to duplicate. A later consumer needing a field\nthis one does not use must not require a proto change to get it.\n\nNote what is absent: epoch_length_blocks. Epoch geometry is x/rewards state with\nits own version history and its own binding rule, and duplicating it here would be\na copy that can drift — the failure this query exists to remove. Read it from the\nrewards epoch-configuration history instead."
+        },
+        "bootstrap": {
+          "type": "boolean",
+          "description": "True for targets with no N-2 boundary inside chain history, which resolve from the\ngenesis anchor."
         }
       }
     },

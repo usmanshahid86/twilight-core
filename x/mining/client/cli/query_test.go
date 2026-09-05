@@ -97,10 +97,11 @@ func TestGetQueryCmdRegistersEveryQuery(t *testing.T) {
 		"selection-params-version", "selection-params-versions",
 		"settlement-params-version", "settlement-params-versions",
 		"target-epoch-interpretation", "validate-economic-address",
+		"settlement-params-for-epoch",
 	} {
 		require.NotNil(t, subcommand(t, cmd, name))
 	}
-	require.Len(t, cmd.Commands(), 11, "one command per query, and no command without one")
+	require.Len(t, cmd.Commands(), 12, "one command per query, and no command without one")
 }
 
 // TestTargetEpochInterpretationSendsTheTargetItWasGiven covers the argument and

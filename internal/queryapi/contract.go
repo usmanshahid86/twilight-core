@@ -84,6 +84,7 @@ var Contract = []Entry{
 	{Module: "mining", Command: "selection-params-versions", Request: "QuerySelectionParamsVersionsRequest", RPC: "SelectionParamsVersions"},
 	{Module: "mining", Command: "settlement-params-version", Request: "QuerySettlementParamsVersionRequest", RPC: "SettlementParamsVersion", Args: []string{"1"}},
 	{Module: "mining", Command: "settlement-params-versions", Request: "QuerySettlementParamsVersionsRequest", RPC: "SettlementParamsVersions"},
+	{Module: "mining", Command: "settlement-params-for-epoch", Request: "QuerySettlementParamsForEpochRequest", RPC: "SettlementParamsForEpoch", Args: []string{"1"}},
 	{Module: "mining", Command: "target-epoch-interpretation", Request: "QueryTargetEpochInterpretationRequest", RPC: "TargetEpochInterpretation", Args: []string{"1"}},
 	{Module: "mining", Command: "validate-economic-address", Request: "QueryValidateEconomicAddressRequest", RPC: "ValidateEconomicAddress", Args: []string{"twilight1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"}},
 

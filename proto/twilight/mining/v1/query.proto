@@ -73,6 +73,23 @@ service Query {
     option (google.api.http).get = "/twilight/mining/v1/settlement-params-versions";
   }
 
+  // SettlementParamsForEpoch returns the settlement-parameter record the chain binds
+  // to a reward epoch, resolved by the same call the EndBlock materialization path
+  // makes when it stamps a version onto a settlement.
+  //
+  // It exists for the same reason TargetEpochInterpretation does. The binding rule and
+  // its bootstrap exception are consensus rules; a consumer that reimplements them to
+  // answer "which parameters govern epoch N" agrees with the chain until the rule, the
+  // offset or the history moves, and then disagrees silently — as a wrong schedule
+  // rather than an error.
+  //
+  // For an epoch beyond any scheduled change this answers what WOULD bind if nothing
+  // further lands. The effective_epoch inside the returned record is what a caller
+  // re-queries against to notice that something did.
+  rpc SettlementParamsForEpoch(QuerySettlementParamsForEpochRequest) returns (QuerySettlementParamsForEpochResponse) {
+    option (google.api.http).get = "/twilight/mining/v1/settlement-params-for-epoch/{epoch}";
+  }
+
   // TargetEpochInterpretation returns the chain's own reading of a target epoch:
   // which boundary binds it, which distribution-mode row governs that boundary, and
   // whether the target is canonically a Selection target.
@@ -191,6 +208,33 @@ message QuerySettlementParamsVersionsRequest {
 message QuerySettlementParamsVersionsResponse {
   repeated SettlementParamsVersion versions = 1;
   cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// The settlement parameters bound to one reward epoch.
+message QuerySettlementParamsForEpochRequest {
+  uint64 epoch = 1;
+}
+message QuerySettlementParamsForEpochResponse {
+  uint64 epoch = 1;
+  // Which boundary the answer was resolved at: 0 for bootstrap targets, epoch - 2
+  // otherwise.
+  //
+  // DIAGNOSTIC, exactly as in TargetEpochInterpretation. It lets an operator audit
+  // where the answer came from; it is not a second authority, and a consumer that
+  // recomputes anything from it has reintroduced the copy this query removes.
+  uint64 binding_epoch = 2;
+  // The full bound record, so a consumer maps it into its own snapshot rather than
+  // reading fields this response chose to duplicate. A later consumer needing a field
+  // this one does not use must not require a proto change to get it.
+  //
+  // Note what is absent: epoch_length_blocks. Epoch geometry is x/rewards state with
+  // its own version history and its own binding rule, and duplicating it here would be
+  // a copy that can drift — the failure this query exists to remove. Read it from the
+  // rewards epoch-configuration history instead.
+  SettlementParamsVersion settlement_params_version = 3;
+  // True for targets with no N-2 boundary inside chain history, which resolve from the
+  // genesis anchor.
+  bool bootstrap = 4;
 }
 
 // The chain's canonical reading of one target epoch.

@@ -93,10 +93,12 @@ func TestConsumerQueriesAppearInTheExportedDescriptor(t *testing.T) {
 	}
 	require.NotEmpty(t, methods, "the mining query service must be in the exported descriptor")
 
-	for _, method := range []string{"TargetEpochInterpretation", "ValidateEconomicAddress"} {
+	for _, method := range []string{
+		"TargetEpochInterpretation", "ValidateEconomicAddress", "SettlementParamsForEpoch",
+	} {
 		require.Truef(t, methods[method], "%s must appear in the exported descriptor", method)
 	}
-	require.Len(t, methods, 11, "one descriptor method per query, and no method without one")
+	require.Len(t, methods, 12, "one descriptor method per query, and no method without one")
 
 	// The offline manifest lists transaction types. This increment adds none, so a
 	// new entry there would mean a message had been introduced by accident.
