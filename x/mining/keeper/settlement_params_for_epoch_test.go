@@ -7,24 +7,33 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	coreslottypes "github.com/twilight-project/twilight-core/x/coreslot/types"
 	"github.com/twilight-project/twilight-core/x/mining/keeper"
 	"github.com/twilight-project/twilight-core/x/mining/types"
 )
 
 // The query exists so a consumer stops re-implementing a consensus rule. That is only
-// true if its answer is the SAME answer consensus reaches — not an answer derived the
-// same way, which is what a second implementation would be.
+// true if its answer is the SAME answer consensus reaches.
 //
-// So the load-bearing assertion is not "the query returns a plausible version". It is
-// that the version the query names for an epoch equals the version consensus STAMPED
-// onto a settlement materialized for that same epoch. Nothing else proves the
-// duplication was actually removed.
+// So this compares the query against the version MATERIALIZATION STAMPED onto a real
+// settlement — not against the resolver the query itself calls, which would only prove
+// the handler dials the function it obviously dials.
+//
+// The parameter change is what gives the comparison teeth. Epochs 1 and 2 are bootstrap
+// and resolve from the genesis anchor; epoch 4 binds at epoch 2, where version 2 is
+// effective. So a materialization stamping version 1 — a perfectly legitimate record —
+// disagrees with the query, and this test is what notices.
 func TestSettlementParamsForEpochAgreesWithTheVersionConsensusStamps(t *testing.T) {
-	k, ctx, rewards := initialized(t)
-	qs := keeper.NewQueryServer(k)
+	core := &coreSlotKeeperMock{
+		active:   []coreslottypes.CoreSlot{settlementSlot(1, account(0x11))},
+		policies: map[uint64]coreslottypes.SelectionPolicyVersion{1: policy(1, 2_500, 10)},
+	}
+	k, ctx, rewards := setupKeeperWithRewards(t, core, newRewardsMock())
+	require.NoError(t, k.InitGenesis(ctx, *types.DefaultGenesis()))
 
-	// A parameter change lands, so the answer is not trivially "version 1 forever" —
-	// a query hard-wired to the genesis anchor would pass this test without it.
+	// A second parameter version, effective at epoch 2. Without this every epoch binds
+	// version 1 and the comparison could not distinguish a correct stamp from a
+	// hard-wired one.
 	require.NoError(t, k.ScheduledSettlementParams.Set(ctx, 2, types.ScheduledSettlementParams{
 		EffectiveEpoch:           2,
 		SettlementWindowEpochs:   3,
@@ -32,25 +41,37 @@ func TestSettlementParamsForEpochAgreesWithTheVersionConsensusStamps(t *testing.
 		MaxChunksPerSettlement:   2,
 		MinRecipientPayoutAmount: "20000",
 	}))
-	rewards.finalize(1)
-	require.NoError(t, k.EndBlock(ctx))
 
-	for epoch := uint64(1); epoch <= 6; epoch++ {
+	// Drive epochs through the ordinary path: each finalized epoch yields an
+	// entitlement, and EndBlock materializes a settlement against it.
+	for epoch := uint64(1); epoch <= 4; epoch++ {
+		rewards.finalize(epoch, entitlement(1, epoch, "1000000"))
+		require.NoError(t, k.EndBlock(ctx), "EndBlock for epoch %d", epoch)
+	}
+
+	qs := keeper.NewQueryServer(k)
+	sawChangedVersion := false
+
+	for epoch := uint64(1); epoch <= 4; epoch++ {
+		settlement, found, err := k.GetSettlement(ctx, 1, epoch)
+		require.NoError(t, err)
+		require.Truef(t, found, "epoch %d produced no settlement, so there is nothing to compare against", epoch)
+
 		resp, err := qs.SettlementParamsForEpoch(ctx, &types.QuerySettlementParamsForEpochRequest{Epoch: epoch})
 		require.NoError(t, err, "epoch %d", epoch)
 		require.NotNil(t, resp.SettlementParamsVersion)
 
-		// The same call the EndBlock materialization path makes when it stamps a
-		// version onto a settlement.
-		bound, err := k.SettlementParamsForTarget(ctx, epoch)
-		require.NoError(t, err)
+		require.Equalf(t, settlement.SettlementParamsVersion, resp.SettlementParamsVersion.Version,
+			"epoch %d: consensus stamped version %d onto the settlement, the query says %d",
+			epoch, settlement.SettlementParamsVersion, resp.SettlementParamsVersion.Version)
 
-		require.Equal(t, bound.Version, resp.SettlementParamsVersion.Version,
-			"epoch %d: the query names a different version than consensus binds", epoch)
-		require.Equal(t, bound, *resp.SettlementParamsVersion,
-			"epoch %d: the query returned a record that differs from the bound one", epoch)
-		require.Equal(t, epoch, resp.Epoch)
+		if settlement.SettlementParamsVersion != 1 {
+			sawChangedVersion = true
+		}
 	}
+
+	require.True(t, sawChangedVersion,
+		"every settlement bound version 1, so the parameter change never took effect and this test proved nothing")
 }
 
 // binding_epoch is diagnostic, and its value is the rule's own boundary rather than
