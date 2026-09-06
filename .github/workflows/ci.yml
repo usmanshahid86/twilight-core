@@ -55,6 +55,16 @@ jobs:
         # transactions, and `max_gas` of 0 is not -1 and is also not a ceiling.
         # Those run here, against stubs, with no chain.
         run: ./scripts/localnet/block-gas-drill-faults.sh
+      - name: Genesis verifier faults
+        # Same script as `make check-genesis-faults`. Cutting genesis is largely a
+        # hand edit of JSON — every rewards, mining and coreslot parameter, and
+        # block.max_gas — and the chain's own `twilightd validate` PASSES a genesis
+        # whose max_gas is still -1. check-genesis.sh is what stands in that gap,
+        # so its own checks need covering: a verifier that stops verifying does not
+        # go quiet, it goes green. Three bugs in its first draft each killed a real
+        # check while it still reported success. Builds a baseline genesis with the
+        # real binary rather than a fixture that could drift, and starts no chain.
+        run: ./scripts/check-genesis-faults.sh
       - name: CLI surface
         # Same script as `make check-cli-surface`. The Go test asserts the
         # assembled cobra tree, which proves a command exists, not that it runs:
